@@ -102,6 +102,11 @@ html {
 /*──────────────────────────────────────────
   뷰어 툴바 스타일
 ──────────────────────────────────────────*/
+#viewer-container {
+  /* 실제 container ID/클래스에 맞게 */
+  position: relative;
+}
+
 #viewer-toolbar {
   position: absolute;
   top: 1.5em;

@@ -51,11 +51,11 @@ export function initToolbar(viewer, toolbarSelector = "#viewer-toolbar") {
         }
 
         case "reset": {
-          const sel = viewer.getSelection();
-          if (!sel.length) {
-            activateClick();
-            return;
-          }
+          //const sel = viewer.getSelection();
+          //if (!sel.length) {
+          //  activateClick();
+          //  return;
+          //}
           viewer.clearSelection();
           viewer.showAll();
           setTimeout(activateClick, 100);

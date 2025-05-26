@@ -19,8 +19,15 @@ export class BoxSelectionTool {
     this.viewer.container.appendChild(this.overlayDiv);
   }
 
+  getName() {
+    return this.name;
+  }
   getNames() {
     return [this.name];
+  }
+
+  getPriority() {
+    return 100;
   }
 
   getCursor() {
@@ -49,6 +56,11 @@ export class BoxSelectionTool {
   }
 
   handleButtonDown(event, button) {
+    console.log("🔹 [BoxTool] handleButtonDown", {
+      button,
+      x: event.clientX,
+      y: event.clientY,
+    });
     if (button !== 0) return false;
     const rect = this.viewer.container.getBoundingClientRect();
     this.dragStart = {
@@ -84,15 +96,15 @@ export class BoxSelectionTool {
     return true;
   }
 
+  // /wwwroot/js/viewer/selection-tool.js
+  // /wwwroot/js/viewer/selection-tool.js
+  // /wwwroot/js/viewer/selection-tool.js
   handleButtonUp(event, button) {
     if (!this.isDragging || button !== 0) return false;
 
     // 1) 드래그 영역 계산
     const rect = this.viewer.container.getBoundingClientRect();
-    const end = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
+    const end = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     const bounds = {
       xmin: Math.min(this.dragStart.x, end.x),
       xmax: Math.max(this.dragStart.x, end.x),
@@ -101,73 +113,77 @@ export class BoxSelectionTool {
     };
     const leftToRight = end.x >= this.dragStart.x;
 
-    // 2) 모든 dbId 순회
-    const itree = this.viewer.model.getInstanceTree();
-    const allDb = [];
-    itree.enumNodeChildren(itree.getRootId(), (id) => allDb.push(id), true);
+    // 2) FragmentList 에서 AABB 가져오기
+    const fragList = this.viewer.model.getFragmentList();
+    const boxes = fragList.fragments.boxes;
+    const frag2db = fragList.fragments.fragId2dbId;
+    const selDb = new Set();
 
-    const sel = [];
-    allDb.forEach((dbId) => {
-      const frags = [];
-      itree.enumNodeFragments(dbId, (fid) => frags.push(fid));
-      for (const fragId of frags) {
-        const fp = this.viewer.impl.getFragmentProxy(this.viewer.model, fragId);
-        fp.updateAnimTransform(); // ★ 반드시 최신 transform 반영
-        const box = new THREE.Box3();
-        fp.getWorldBounds(box);
+    // 3) 각 fragment 별 8개 코너 → 화면 좌표 투영 → screenMin/screenMax 계산
+    for (let i = 0; i < frag2db.length; i++) {
+      const i6 = i * 6;
+      const min = new THREE.Vector3(boxes[i6], boxes[i6 + 1], boxes[i6 + 2]);
+      const max = new THREE.Vector3(
+        boxes[i6 + 3],
+        boxes[i6 + 4],
+        boxes[i6 + 5]
+      );
+      const corners = [
+        new THREE.Vector3(min.x, min.y, min.z),
+        new THREE.Vector3(min.x, min.y, max.z),
+        new THREE.Vector3(min.x, max.y, min.z),
+        new THREE.Vector3(min.x, max.y, max.z),
+        new THREE.Vector3(max.x, min.y, min.z),
+        new THREE.Vector3(max.x, min.y, max.z),
+        new THREE.Vector3(max.x, max.y, min.z),
+        new THREE.Vector3(max.x, max.y, max.z),
+      ];
+      const pts = corners.map((v) => this.viewer.worldToClient(v));
+      const xs = pts.map((p) => p.x),
+        ys = pts.map((p) => p.y);
+      const screenMin = { x: Math.min(...xs), y: Math.min(...ys) };
+      const screenMax = { x: Math.max(...xs), y: Math.max(...ys) };
 
-        // 8개 꼭짓점 → 화면 좌표
-        const pts = [
-          new THREE.Vector3(box.min.x, box.min.y, box.min.z),
-          new THREE.Vector3(box.max.x, box.min.y, box.min.z),
-          new THREE.Vector3(box.min.x, box.max.y, box.min.z),
-          new THREE.Vector3(box.max.x, box.max.y, box.min.z),
-          new THREE.Vector3(box.min.x, box.min.y, box.max.z),
-          new THREE.Vector3(box.max.x, box.min.y, box.max.z),
-          new THREE.Vector3(box.min.x, box.max.y, box.max.z),
-          new THREE.Vector3(box.max.x, box.max.y, box.max.z),
-        ].map((v) => this.viewer.worldToClient(v)); // ★ viewer.worldToClient 사용
-
-        const fullyInside = pts.every(
-          (p) =>
-            p.x >= bounds.xmin &&
-            p.x <= bounds.xmax &&
-            p.y >= bounds.ymin &&
-            p.y <= bounds.ymax
-        );
-        const partlyInside = pts.some(
-          (p) =>
-            p.x >= bounds.xmin &&
-            p.x <= bounds.xmax &&
-            p.y >= bounds.ymin &&
-            p.y <= bounds.ymax
-        );
-
-        if ((leftToRight && fullyInside) || (!leftToRight && partlyInside)) {
-          sel.push(dbId);
-          break;
+      if (leftToRight) {
+        // ───── full inclusion ─────
+        if (
+          screenMin.x >= bounds.xmin &&
+          screenMax.x <= bounds.xmax &&
+          screenMin.y >= bounds.ymin &&
+          screenMax.y <= bounds.ymax
+        ) {
+          selDb.add(frag2db[i]);
+        }
+      } else {
+        // ───── crossing ─────
+        if (
+          screenMax.x >= bounds.xmin &&
+          screenMin.x <= bounds.xmax &&
+          screenMax.y >= bounds.ymin &&
+          screenMin.y <= bounds.ymax
+        ) {
+          selDb.add(frag2db[i]);
         }
       }
-    });
+    }
 
-    // 3) 선택 적용
+    // 4) 선택 및 복귀
+    const sel = Array.from(selDb);
     this.viewer.select(sel);
     console.log(`📦 ${sel.length} selected`);
 
-    // 4) 복귀
     this.overlayDiv.style.display = "none";
     this.isDragging = false;
-    this.viewer.toolController.deactivateTool(this.name); // 반드시 ToolController에서 내리기
+    this.viewer.toolController.deactivateTool(this.name);
     this.viewer.toolController.activateTool("navigation");
     this.viewer.setNavigationLock(false);
     this.viewer.container.style.cursor = "default";
-
-    // 툴바 버튼도 클릭 모드로 돌려놓기
-    const toolbar = document.querySelector("#viewer-toolbar");
-    toolbar
-      .querySelectorAll(".tool-button")
+    document
+      .querySelectorAll("#viewer-toolbar .tool-button")
       .forEach((b) => b.classList.remove("active"));
-    toolbar.querySelector('[data-tool="click"]').classList.add("active");
+    document
+      .querySelector('#viewer-toolbar [data-tool="click"]')
+      .classList.add("active");
 
     return true;
   }

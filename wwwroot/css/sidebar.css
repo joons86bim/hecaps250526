@@ -1,0 +1,56 @@
+/* sidebar.css */
+
+/* 1) 사이드바 전체 */
+#sidebar {
+  position: absolute; /* 위치 고정 */
+  top: 3em; /*헤더(3em) 바로 아래*/
+  bottom: 0; /*화면 하단까지 채움*/
+  left: 0;
+  width: 25%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 2) 탭 헤더 */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #e0e0e0;
+  background-color: #fafafa;
+}
+.tab-button {
+  flex: 1;
+  padding: 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.2s, border-bottom-color 0.2s;
+  font-size: 18px;
+}
+.tab-button.active {
+  color: #0078d4;
+  border-bottom-color: #0078d4;
+}
+
+/* 3) 패널 래퍼 */
+.panels {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+  margin: 0;
+  padding: 0;
+}
+/* 4) 기본 숨김 */
+.panels .panel {
+  display: none;
+  height: 100%;
+}
+/* active 클래스가 붙은 .panel 만 flex 컬럼으로 표시 */
+.panels .panel.active {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}

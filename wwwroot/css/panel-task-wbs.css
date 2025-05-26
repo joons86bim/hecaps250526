@@ -1,0 +1,53 @@
+/* panel-task-wbs.css */
+
+/* 1) 탭2 자체가 flex-column 이므로 자식 .sidebar-panel 두 개가 세로로 쌓임 */
+
+/* 2) 두 .sidebar-panel 높이를 50%로 고정 */
+#panel2 > .sidebar-panel {
+  flex: none; /* flex:1 대신 */
+  height: 50%; /* 정확히 절반 높이 */
+  display: flex; /* header+content flex-column */
+  flex-direction: column;
+  border-top: 1px solid #e0e0e0;
+  min-height: 0; /* 내부 스크롤 버그 방지 */
+}
+
+/* 3) Task/WBS 내부 스크롤 영역 */
+#task-list-content,
+#wbs-group-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  background-color: #fff;
+  min-height: 0;
+}
+
+/* 4) 패널 헤더 스타일 */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: #f4f4f4;
+  border-bottom: 1px solid #d0d0d0;
+}
+.panel-header .title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+.panel-header .button-group button {
+  margin-left: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.panel-header .button-group button:hover {
+  background-color: #e8e8e8;
+}
+
+/* 5) Task/WBS 트리도 panel-tree.css 의 .tree-list 규칙을 재사용 */

@@ -1,0 +1,47 @@
+/* panel-tree.css */
+
+/* 1) 탭1 내부 스크롤 래퍼 */
+#panel1 .panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  min-height: 0;
+}
+
+/* 2) 프로젝트 트리 스타일 */
+.tree-list {
+  list-style: none;
+  margin: 0;
+  padding-left: 0;
+}
+.tree-list .tree-item {
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+}
+
+.tree-list .tree-item .toggle,
+.tree-list .tree-item .spacer {
+  width: 16px;
+  display: inline-block;
+  margin-right: 4px;
+  cursor: pointer;
+}
+.tree-list .tree-item .checkbox {
+  width: 16px;
+  margin-right: 4px;
+}
+.tree-list .tree-item .label {
+  flex: 1;
+}
+.tree-list .tree-item.selected {
+  background-color: #e6f7ff;
+}
+.tree-list .tree-children {
+  list-style: none;
+  padding-left: 20px;
+  margin: 2px 0;
+}

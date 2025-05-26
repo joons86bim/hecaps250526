@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Favicon -->
+    <link
+      rel="icon"
+      type="image/x-icon"
+      href="https://cdn.autodesk.io/favicon.ico"
+    />
+
+    <!-- Autodesk Viewer 스타일 -->
+    <link
+      rel="stylesheet"
+      href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.css"
+    />
+
+    <!-- Inspire Tree 스타일 -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-light.min.css"
+    />
+
+    <!-- 전역 CSS -->
+    <link rel="stylesheet" href="/css/main.css" />
+    <!-- 사이드바 -->
+    <link rel="stylesheet" href="/css/sidebar.css" />
+    <!-- 탭 헤더/패널 스타일 -->
+    <link rel="stylesheet" href="/css/panel-tree.css" />
+    <!-- 2번 패널(Task/WBS) 전용 스타일 -->
+    <link rel="stylesheet" href="/css/panel-task-wbs.css" />
+
+    <!-- Lucide Icons -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/lucide-static/font/css/lucide.css"
+    />
+
+    <title>HEC BIM Platform</title>
+  </head>
+
+  <body>
+    <!-- 헤더 -->
+    <div id="header">
+      <img class="logo" src="/images/hec_logo.png" alt="HYUNDAI ENGINEERING" />
+      <span class="title">HEC BIM Platform</span>
+      <button id="login" style="visibility: hidden">Login</button>
+    </div>
+
+    <!-- 사이드바 -->
+    <div id="sidebar">
+      <div class="tabs">
+        <button class="tab-button active" data-target="panel1">
+          Project Model Tree
+        </button>
+        <button class="tab-button" data-target="panel2">
+          Construction Process Plan
+        </button>
+      </div>
+
+      <div class="panels">
+        <!-- 1번 패널: 트리 -->
+        <div id="panel1" class="panel active">
+          <div class="panel-content">
+            <div id="tree"></div>
+          </div>
+        </div>
+
+        <!-- 2번 패널: Task / WBS -->
+        <div id="panel2" class="panel">
+          <div class="sidebar-panel" id="task-list-panel">
+            <div class="panel-header">
+              <span class="title">Task List</span>
+              <div class="button-group">
+                <button id="btn-add">추가</button>
+                <button id="btn-delete">삭제</button>
+                <button id="btn-select">객체 선택</button>
+                <button id="btn-link">데이터 연결</button>
+                <button id="btn-update">업데이트</button>
+              </div>
+            </div>
+            <div class="panel-content" id="task-list-content"></div>
+          </div>
+          <div class="sidebar-panel" id="wbs-group-list-panel">
+            <div class="panel-header">
+              <span class="title">WBS Group List</span>
+              <div class="button-group"></div>
+            </div>
+            <div class="panel-content" id="wbs-group-content"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 뷰어 영역 -->
+    <div id="preview">
+      <div id="viewer-toolbar">
+        <button class="tool-button active" data-tool="click" title="클릭 선택">
+          <img src="/images/icon-click.svg" alt="click" />
+        </button>
+        <button class="tool-button" data-tool="drag" title="드래그 박스 선택">
+          <img src="/images/icon-drag.svg" alt="drag" />
+        </button>
+        <button
+          class="tool-button"
+          data-tool="hide-selected"
+          title="선택 숨기기"
+        >
+          <img src="/images/icon-hide-selected.svg" alt="hide" />
+        </button>
+        <button
+          class="tool-button"
+          data-tool="isolate-selected"
+          title="선택 제외 숨기기"
+        >
+          <img src="/images/icon-isolate-selected.svg" alt="isolate" />
+        </button>
+        <button class="tool-button" data-tool="reset" title="전체 보기">
+          <img src="/images/icon-reset.svg" alt="reset" />
+        </button>
+      </div>
+    </div>
+
+    <!-- 외부 라이브러리 -->
+    <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+    <script src="https://unpkg.com/inspire-tree@4.3.1/dist/inspire-tree.js"></script>
+    <script src="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-dom.min.js"></script>
+
+    <!-- 메인 부트스트랩 -->
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>

@@ -7,6 +7,7 @@ import { getAccessToken } from "./viewer/token-provider.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
 import { initToolbar } from "./viewer/toolbar.js";
 import { enableBoxSelectionMode } from "./viewer/selection-tool.js";
+import { initTaskListButtons } from "./sidebar/panel2-buttons.js";
 
 const login = document.getElementById("login");
 
@@ -43,8 +44,10 @@ const login = document.getElementById("login");
         const urn = window.btoa(versionId).replace(/=/g, "");
         await loadModel(viewer, urn);
         viewer.clearSelection();
-        // 모델 로드 이후에만 panel2 내용 렌더링
+        // 1) panel2 마크업+리스트 렌더링
         initPanel2Content();
+        // 2) 추가/삭제 버튼 기능 바인딩
+        initTaskListButtons();
       });
     } else {
       // 로그인 안 된 상태

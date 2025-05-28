@@ -1,177 +1,156 @@
-// panel2-ui-helpers.js
-// 위치: wwwroot/js/sidebar/panel2-ui-helpers.js
+// wwwroot/js/sidebar/panel2-ui-helpers.js
 
 /**
- * 트리 렌더링 함수
- * @param {string} containerId - UL 요소의 id (예: "task-list")
- * @param {Array} items - { label: string, children?: Array } 형태의 데이터 배열
- * @param {boolean} withCheckbox - 체크박스 렌더링 여부
+ * 트리 렌더링 함수 (재귀 구현 + depth 활용)
+ * @param {string}  containerId   - UL id (예: "task-list")
+ * @param {Array}   items         - { label, children? } 배열
+ * @param {boolean} withCheckbox  - 최상위에만 체크박스 붙일지 여부
  */
 export function renderTree(containerId, items, withCheckbox) {
   const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = "";
 
-  function buildList(parentUl, nodes) {
+  function buildNodes(ul, nodes, depth = 0) {
     nodes.forEach((node) => {
-      // li 생성
       const li = document.createElement("li");
       li.className = "tree-item";
 
-      // 하위 ul 변수 미리 선언
-      let childUl;
+      const header = document.createElement("div");
+      header.className = "tree-node";
 
-      // 토글 or spacer
+      // 토글 또는 spacer
+      const toggle = document.createElement("span");
       if (node.children && node.children.length) {
-        const toggle = document.createElement("span");
         toggle.className = "toggle";
         toggle.textContent = "+";
-
-        // 자식 ul 생성 후 toggle 핸들러에 바인딩
-        childUl = document.createElement("ul");
-        childUl.className = "tree-children";
-        childUl.style.display = "none";
-
-        toggle.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const isOpen = toggle.textContent === "-";
-          toggle.textContent = isOpen ? "+" : "-";
-          childUl.style.display = isOpen ? "none" : "block";
-        });
-
-        li.appendChild(toggle);
       } else {
-        const spacer = document.createElement("span");
-        spacer.className = "spacer";
-        li.appendChild(spacer);
+        toggle.className = "spacer";
       }
+      header.appendChild(toggle);
 
-      // 체크박스
-      if (withCheckbox) {
+      // 체크박스 (withCheckbox && depth===0)
+      if (withCheckbox && depth === 0) {
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.className = "checkbox";
-        li.appendChild(cb);
+        header.appendChild(cb);
       }
 
       // 라벨
       const label = document.createElement("span");
       label.className = "label";
       label.textContent = node.label;
-      li.appendChild(label);
+      header.appendChild(label);
 
-      // li를 부모 ul에 추가
-      parentUl.appendChild(li);
+      li.appendChild(header);
+      ul.appendChild(li);
 
-      // 자식 리스트가 있으면 li 안에 붙이고 재귀
-      if (childUl) {
+      // 자식이 있으면 하위 UL 생성 + 토글 이벤트 + 재귀
+      if (node.children && node.children.length) {
+        const childUl = document.createElement("ul");
+        childUl.className = "tree-children";
+        childUl.style.display = "none";
         li.appendChild(childUl);
-        buildList(childUl, node.children);
+
+        toggle.addEventListener("click", (e) => {
+          e.stopPropagation(); // 선택 로직이랑 분리
+          const open = childUl.style.display === "block";
+          childUl.style.display = open ? "none" : "block";
+          toggle.textContent = open ? "+" : "-";
+        });
+
+        buildNodes(childUl, node.children, depth + 1);
       }
     });
   }
 
-  // 루트부터 렌더 시작
-  buildList(container, items);
+  buildNodes(container, items, 0);
 }
 
 /**
- * 선택 로직 붙이기
- * @param {string} containerSelector - UL 요소를 가리키는 셀렉터 (예: "#task-list")
+ * 선택 로직 붙이기 (각 LI 클릭)
+ * @param {string} listSelector - UL 셀렉터 (예: "#task-list")
  */
-export function attachSelectionHandlers(containerSelector) {
-  const container = document.querySelector(containerSelector);
+export function attachSelectionHandlers(listSelector) {
+  const container = document.querySelector(listSelector);
   if (!container) return;
 
-  const items = Array.from(container.querySelectorAll(".tree-item"));
-  let lastSelectedIndex = null;
+  const headers = Array.from(container.querySelectorAll(".tree-node"));
+  let lastIndex = null;
 
-  items.forEach((item, index) => {
-    // 초기 선택 상태 해제
-    item.classList.remove("selected");
+  headers.forEach((header, idx) => {
+    const li = header.parentElement;
+    li.classList.remove("selected");
 
-    item.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const isSel = item.classList.contains("selected");
+    header.addEventListener("click", (e) => {
+      e.stopPropagation(); // 자식 클릭이 부모로 번지지 않게
 
-      if (e.shiftKey && lastSelectedIndex !== null) {
-        // Shift: 범위 선택
-        const [start, end] = [lastSelectedIndex, index].sort((a, b) => a - b);
+      const items = headers.map((h) => h.parentElement);
+      const isSel = li.classList.contains("selected");
+
+      if (e.shiftKey && lastIndex !== null) {
+        const [start, end] = [lastIndex, idx].sort((a, b) => a - b);
         items
           .slice(start, end + 1)
           .forEach((it) => it.classList.add("selected"));
       } else if (e.ctrlKey || e.metaKey) {
-        // Ctrl/Cmd: 토글
-        isSel
-          ? item.classList.remove("selected")
-          : item.classList.add("selected");
-        lastSelectedIndex = index;
+        li.classList.toggle("selected");
+        lastIndex = idx;
       } else {
-        // 기본 클릭: 단독 선택/해제
         if (isSel) {
-          item.classList.remove("selected");
-          lastSelectedIndex = null;
+          li.classList.remove("selected");
+          lastIndex = null;
         } else {
           items.forEach((it) => it.classList.remove("selected"));
-          item.classList.add("selected");
-          lastSelectedIndex = index;
+          li.classList.add("selected");
+          lastIndex = idx;
         }
       }
     });
   });
 
-  // ESC 키로 전체 선택 해제
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      items.forEach((it) => it.classList.remove("selected"));
-      lastSelectedIndex = null;
+      headers.forEach((h) => h.parentElement.classList.remove("selected"));
+      lastIndex = null;
     }
   });
 }
 
 /**
- * 동일 레벨 내에서 .tree-item 을 drag & drop 으로 재배치
- * @param {string} listSelector  - UL 셀렉터 (예: "#task-list")
- * @param {function(oldIndex:number,newIndex:number)} onReorder - 순서 변경 시 호출
+ * drag & drop 으로 순서 변경
+ * @param {string} listSelector
+ * @param {function} onReorder(oldIndex, newIndex)
  */
 export function attachDragAndDrop(listSelector, onReorder) {
   const list = document.querySelector(listSelector);
   if (!list) return;
-
-  let dragSrcEl = null;
+  let dragSrc = null;
 
   Array.from(list.children).forEach((item) => {
     item.draggable = true;
-
     item.addEventListener("dragstart", (e) => {
-      dragSrcEl = item;
+      dragSrc = item;
       e.dataTransfer.effectAllowed = "move";
-      // Firefox 필요
       e.dataTransfer.setData("text/plain", "");
     });
-
     item.addEventListener("dragover", (e) => {
       e.preventDefault();
       item.classList.add("drag-over");
     });
-
     item.addEventListener("dragleave", () => {
       item.classList.remove("drag-over");
     });
-
     item.addEventListener("drop", (e) => {
       e.stopPropagation();
       item.classList.remove("drag-over");
-      if (dragSrcEl && dragSrcEl !== item) {
-        const children = Array.from(list.children);
-        const from = children.indexOf(dragSrcEl);
-        const to = children.indexOf(item);
-
-        // DOM 순서 변경
-        if (from < to) list.insertBefore(dragSrcEl, item.nextSibling);
-        else list.insertBefore(dragSrcEl, item);
-
-        // 로직 콜백
+      if (dragSrc && dragSrc !== item) {
+        const siblings = Array.from(list.children);
+        const from = siblings.indexOf(dragSrc);
+        const to = siblings.indexOf(item);
+        if (from < to) list.insertBefore(dragSrc, item.nextSibling);
+        else list.insertBefore(dragSrc, item);
         onReorder(from, to);
       }
       return false;

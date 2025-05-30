@@ -3,10 +3,8 @@
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
 import { initPanel2Content } from "./sidebar/panel2.js";
-import { getAccessToken } from "./viewer/token-provider.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
 import { initToolbar } from "./viewer/toolbar.js";
-import { enableBoxSelectionMode } from "./viewer/selection-tool.js";
 import { initTaskListButtons } from "./sidebar/panel2-buttons.js";
 
 const login = document.getElementById("login");

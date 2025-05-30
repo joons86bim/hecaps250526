@@ -1,29 +1,33 @@
 /* panel-task-wbs.css */
 
-/* 1) 탭2 자체가 flex-column 이므로 자식 .sidebar-panel 두 개가 세로로 쌓임 */
-
-/* 2) 두 .sidebar-panel 높이를 50%로 고정 */
+/* ───────────────────────────────────────────────────────────
+   1) 패널 레이아웃 (변경 없음)
+─────────────────────────────────────────────────────────── */
 #panel2 > .sidebar-panel {
-  flex: none; /* flex:1 대신 */
-  height: 50%; /* 정확히 절반 높이 */
-  display: flex; /* header+content flex-column */
+  flex: none;
+  height: 50%;
+  display: flex;
   flex-direction: column;
   border-top: 1px solid #e0e0e0;
-  min-height: 0; /* 내부 스크롤 버그 방지 */
+  min-height: 0;
 }
 
-/* 3) Task/WBS 내부 스크롤 영역 */
+/* ───────────────────────────────────────────────────────────
+   2) 컨텐트 스크롤
+─────────────────────────────────────────────────────────── */
 #task-list-content,
 #wbs-group-content {
-  display: block !important;
-  flex: none !important;
+  flex: 1 1 auto;
   overflow-y: auto;
+  overflow-x: auto;
   padding: 8px 12px;
   background-color: #fff;
   min-height: 0;
 }
 
-/* 4) 패널 헤더 스타일 */
+/* ───────────────────────────────────────────────────────────
+   3) 패널 헤더 스타일 (변경 없음)
+─────────────────────────────────────────────────────────── */
 .panel-header {
   display: flex;
   align-items: center;
@@ -51,60 +55,36 @@
   background-color: #e8e8e8;
 }
 
-/* 5) Task/WBS 트리도 panel-tree.css 의 .tree-list 규칙을 재사용 */
-
-/* ───────────────────────────────────────────────────────────
-   1) 기본 트리 구조: UL, LI를 block 레벨로 고정
-─────────────────────────────────────────────────────────── */
-.tree-list,
-.tree-children {
-  list-style: none; /* 불릿 제거 */
-  margin: 0;
-  padding: 0;
-  display: block; /* 반드시 block */
-}
-
-.tree-item {
-  display: flex;
-  flex-direction: column; /* 헤더, 자식 리스트를 세로로 배치 */
-}
-
-/* ───────────────────────────────────────────────────────────
-   2) 헤더(.tree-node)는 flex-row, 가로 꽉 채우기
-─────────────────────────────────────────────────────────── */
-.tree-node {
-  display: flex; /* 내부 요소 한 줄에 */
-  align-items: flex-start; /* 최상단 정렬 (수직 가운데가 아니라) */
-  width: 100%; /* LI 너비 전부 채우기 */
-  box-sizing: border-box;
-  padding: 2px 4px;
-}
-
-/* ───────────────────────────────────────────────────────────
-   3) 토글·스페이서·라벨·체크박스 간격
-─────────────────────────────────────────────────────────── */
-.toggle,
-.spacer {
+/* 4) 트리 전용 추가 스타일 */
+#panel2 .tree-list .toggle {
+  border: 1px solid #ccc;
   width: 1em;
-  text-align: center;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
   cursor: pointer;
+  border-radius: 2px;
 }
-.tree-node > .checkbox,
-.tree-node > .label {
-  margin-left: 4px;
+#panel2 .tree-list .toggle::after {
+  content: attr(data-icon);
+  font-size: 12px;
+  line-height: 1;
 }
-
-/* ───────────────────────────────────────────────────────────
-   4) 하위 리스트(.tree-children) 들여쓰기
-─────────────────────────────────────────────────────────── */
-.tree-children {
-  display: block; /* block 레벨 */
-  margin-left: 1.5em; /* 들여쓰기 */
+/* 체크박스, 라벨 간격 */
+#panel2 .tree-list .checkbox {
+  margin-right: 4px;
 }
-
-/* ───────────────────────────────────────────────────────────
-   5) 선택된 항목 전체 강조
-─────────────────────────────────────────────────────────── */
-.tree-item.selected > .tree-node {
-  background-color: #d0e8ff;
+/* 선택 강조 */
+#panel2 .tree-list .tree-item.selected > .tree-node {
+  background-color: #e6f7ff;
+}
+/* hover 강조 */
+#panel2 .tree-list .tree-node:hover {
+  background-color: #f0f8ff;
+}
+/* 드래그 오버 */
+#panel2 .tree-list .tree-item.drag-over > .tree-node {
+  outline: 2px dashed #888;
 }

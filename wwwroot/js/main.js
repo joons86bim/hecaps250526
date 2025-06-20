@@ -6,6 +6,7 @@ import { initPanel2Content } from "./sidebar/panel2.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
 import { initToolbar } from "./viewer/toolbar.js";
 import { initTaskListButtons } from "./sidebar/panel2-buttons.js";
+import { buildWbsTreeData } from "./sidebar/wbsloader.js";
 
 const login = document.getElementById("login");
 
@@ -46,6 +47,8 @@ const login = document.getElementById("login");
         initPanel2Content();
         // 2) 추가/삭제 버튼 기능 바인딩
         initTaskListButtons();
+        // 3) WBS 트리 데이터 로드 및 업데이트
+        setupWbsTreeWithModel(window.viewer, window.wbsTree);
       });
     } else {
       // 로그인 안 된 상태
@@ -61,3 +64,19 @@ const login = document.getElementById("login");
     console.error(err);
   }
 })();
+
+function setupWbsTreeWithModel(viewer, wbsTree) {
+  viewer.addEventListener(
+    Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT,
+    async function () {
+      setTimeout(async () => {
+        const wbsTreeData = await buildWbsTreeData(viewer);
+        if (window.wbsTree && window.wbsTree.load) {
+          window.wbsTree.load(wbsTreeData);
+        } else {
+          console.warn("wbsTree가 아직 생성되지 않았습니다!");
+        }
+      }, 300);
+    }
+  );
+}

@@ -12,6 +12,25 @@
   overflow: hidden;
 }
 
+/* 1-1) 사이드바 리사이저 */
+#sidebar-resizer {
+  position: absolute;
+  top: 3em;
+  left: 260px; /* sidebar 시작폭과 일치 */
+  width: 6px;
+  height: calc(100vh - 3em);
+  background: linear-gradient(to right, #e3eaf3, #d2d9e6);
+  cursor: ew-resize;
+  z-index: 30;
+  transition: background 0.15s;
+  border-right: 1px solid #ccd4e3;
+  border-left: 1px solid #f8fafb;
+  border-radius: 4px;
+}
+#sidebar-resizer:hover {
+  background: #a4cef7;
+}
+
 /* 2) 탭 헤더 */
 .tabs {
   display: flex;

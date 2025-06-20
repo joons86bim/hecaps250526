@@ -1,5 +1,6 @@
 // wwwroot/js/sidebar/panel2-buttons.js
-import { taskTree } from "./panel2.js";
+import { taskTree, taskData } from "./panel2.js";
+import { syncTaskDataWithTree } from "./panel2-ui-helpers.js";
 
 export function initTaskListButtons() {
   const btnAdd = document.getElementById("btn-add");
@@ -25,6 +26,8 @@ export function initTaskListButtons() {
       // 루트 레벨로 추가
       taskTree.addNode({ id: trimmed, text: trimmed });
     }
+
+    syncTaskDataWithTree(taskTree, taskData); // 트리 데이터 갱신
   });
 
   btnDelete.addEventListener("click", () => {
@@ -32,5 +35,6 @@ export function initTaskListButtons() {
     if (!sel.length) return;
     if (!window.confirm("정말 삭제하시겠습니까?")) return;
     sel.forEach((node) => node.remove());
+    syncTaskDataWithTree(taskTree, taskData); // 트리 데이터 갱신
   });
 }

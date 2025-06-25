@@ -23,6 +23,16 @@
       href="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-light.min.css"
     />
 
+    <!-- jQuery (필수) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    
+    <!-- Fancytree core + table ext + edit ext -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/skin-win8/ui.fancytree.min.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js"></script>
+
     <!-- 전역 CSS -->
     <link rel="stylesheet" href="/css/main.css" />
     <!-- 사이드바 -->
@@ -66,27 +76,59 @@
 
         <!-- 2번 패널: Task / WBS -->
         <div id="panel2" class="panel">
-          <div class="sidebar-panel" id="task-list-panel">
-            <div class="panel-header">
-              <span class="title">Task List</span>
-              <div class="button-group">
-                <button id="btn-add">추가</button>
-                <button id="btn-delete">삭제</button>
-                <button id="btn-select">객체 선택</button>
-                <button id="btn-link">데이터 연결</button>
-                <button id="btn-update">업데이트</button>
+          <!-- 수직 분할 패널 전체를 감싸는 컨테이너 -->
+          <div id="vertical-split-container">
+
+            <div id="task-list-panel">
+              <div class="panel-header">
+                <span class="title">Task List</span>
+                <div class="button-group">
+                  <button id="btn-add">추가</button>
+                  <button id="btn-delete">삭제</button>
+                  <button id="btn-select">객체 선택</button>
+                  <button id="btn-link">데이터 연결</button>
+                  <button id="btn-update">업데이트</button>
+                </div>
               </div>
+              <table
+                id="treegrid"
+                style="width: 100%"
+                class="fancytree-ext-table"
+              >
+                <colgroup>
+                  <col width="40px" />
+                  <!-- No-->
+                  <col width="260px" />
+                  <!-- 작업명-->
+                  <col width="100px" />
+                  <!-- 시작일-->
+                  <col width="100px" />
+                  <!-- 완료일-->
+                  <col width="60px" />
+                  <!-- 객체개수-->
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>No.</th>
+                    <th>작업명</th>
+                    <th>시작일</th>
+                    <th>완료일</th>
+                    <th>객체개수</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
             </div>
-            <div class="panel-content" id="task-list-content">
-              <div id="task-tree"></div>
-            </div>
-          </div>
-          <div class="sidebar-panel" id="wbs-group-list-panel">
-            <div class="panel-header">
-              <span class="title">WBS Group List</span>
-            </div>
-            <div class="panel-content" id="wbs-group-content">
-              <div id="wbs-tree"></div>
+            <!-- 패널 사이의 구분선(드래그 바) -->
+            <div id="resizer"></div>
+
+            <div class="sidebar-panel" id="wbs-group-list-panel">
+              <div class="panel-header">
+                <span class="title">WBS Group List</span>
+              </div>
+              <div class="panel-content" id="wbs-group-content">
+                <div id="wbs-tree"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -134,5 +176,6 @@
     <!-- 메인 부트스트랩 -->
     <script type="module" src="/js/main.js"></script>
     <script type="module" src="/js/sidebar/sidebar-resizer.js"></script>
+    <script type="module" src="/js/sidebar/panel2-resizer.js"></script>
   </body>
 </html>

@@ -47,8 +47,9 @@ const login = document.getElementById("login");
         initPanel2Content();
         // 2) 추가/삭제 버튼 기능 바인딩
         initTaskListButtons();
-        // 3) WBS 트리 데이터 로드 및 업데이트
-        setupWbsTreeWithModel(window.viewer, window.wbsTree);
+        // 3) 동적으로 모델에서 WBS 트리 생성 (이 한 줄이 핵심!!)
+        setupWbsTreeWithModel(viewer);
+        
       });
     } else {
       // 로그인 안 된 상태
@@ -65,18 +66,28 @@ const login = document.getElementById("login");
   }
 })();
 
-function setupWbsTreeWithModel(viewer, wbsTree) {
+function setupWbsTreeWithModel(viewer) {
   viewer.addEventListener(
     Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT,
     async function () {
       setTimeout(async () => {
         const wbsTreeData = await buildWbsTreeData(viewer);
-        if (window.wbsTree && window.wbsTree.load) {
-          window.wbsTree.load(wbsTreeData);
-        } else {
-          console.warn("wbsTree가 아직 생성되지 않았습니다!");
+
+        // 폴링 함수: wbsTree가 준비될 때까지 50ms마다 재시도
+        let retry = 0;
+        function tryLoadWbsTree() {
+          if (window.wbsTree && typeof window.wbsTree.load === "function") {
+            window.wbsTree.load(wbsTreeData);
+            // 성공 시: 더 이상 반복하지 않음
+          } else if (retry < 40) { // 20회 = 1초까지 시도
+            retry++;
+            setTimeout(tryLoadWbsTree, 50);
+          } else {
+            console.warn("wbsTree가 아직 생성되지 않았습니다!");
+          }
         }
-      }, 300);
+        tryLoadWbsTree();
+      }, 300); // 기존 panel2가 트리를 준비하는 시간 고려해 약간 딜레이
     }
   );
 }

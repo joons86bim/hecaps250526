@@ -4,7 +4,7 @@ const sidebar = document.getElementById("sidebar");
 const resizer = document.getElementById("sidebar-resizer");
 const preview = document.getElementById("preview");
 const minWidth = 220; // 최소폭
-const maxWidth = 600; // 최대폭
+const maxWidth = 750; // 최대폭
 
 function setSidebarWidth(px) {
   sidebar.style.width = px + "px";

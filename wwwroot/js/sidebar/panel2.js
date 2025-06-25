@@ -1,11 +1,20 @@
 // wwwroot/js/sidebar/panel2.js
-// 전역으로 로드된 InspireTree/InspireTreeDOM 사용
-import { syncTaskDataWithTree } from "./panel2-ui-helpers.js";
+// 전역으로 로드된 InspireTree/InspireTreeDOM 사용 << WBS
+import { setupPanel2Helpers  } from "./panel2-ui-helpers.js";
 
 // ① 원본 샘플 데이터
 export let taskData = [
-  { label: "Task A", children: [{ label: "Subtask A1" }] },
-  { label: "Task B" },
+  {no: "1", 
+   title: "Task A",
+   start: "2024-06-25",
+   end: "2024-07-01",
+   linkedObjects: [/*연결된 객체 정보들*/
+    {modelId: 1, dbId: 123, text: "구조벽 [123]" }
+   ],
+   children: [
+    {no: "1.1", title: "Subtask A1", start: "2024-06-26", end: "2024-06-30"}
+  ]},
+  {no: "2", title: "Task B", start: "", end: ""}
 ];
 
 export let wbsData = [
@@ -17,41 +26,40 @@ export let wbsData = [
 export let taskTree, wbsTree;
 
 export function initPanel2Content() {
-  // TASK 트리 생성
-  const taskContainer = document.getElementById("task-list-content");
-  if (!taskContainer) return;
-
-  // 기존 UL 구조 대신 InspireTreeDOM용 컨테이너
-  taskContainer.innerHTML = `<div id="task-list"></div>`;
-
-  // ③ taskData → InspireTree 포맷으로 변환
-  const data = taskData.map((item) => ({
-    id: item.label, // id 는 unique 해야 합니다
-    text: item.label,
-    children: (item.children || []).map((c) => ({
-      id: `${item.label}::${c.label}`, // 자식도 unique id
-      text: c.label,
-    })),
-  }));
-
-  // ④ 트리 생성
-  taskTree = new window.InspireTree({
-    data: data,
-    selection: {
-      autoDeselect: false, //클릭해도 다른 선택이 해제되지 않음
-      multi: true,
-      mode: "mulit", // Ctrl/Shift 기반 멀티셀렉션
+  // == Task List (Fancytree + Table)
+  $("#treegrid").fancytree({
+    extensions: ["table", "gridnav"],
+    checkbox: false, 
+    table: {
+      indentation: 20,
+      nodeColumnIdx: 1
     },
+    source: taskData,
+    renderColumns: function(event, data) {
+      var node = data.node,
+          $tdList = $(node.tr).find(">td");
+      // 0: No
+      $tdList.eq(0).text(node.data.no || "");
+      // 1: 작업명
+      $tdList.eq(1).find(".fancytree-title").text(node.data.title || node.title || "");
+      // 2: 시작일
+      $tdList.eq(2).text(node.data.start || "");
+      // 3: 완료일
+      $tdList.eq(3).text(node.data.end || "");
+      // 4: 객체개수
+      $tdList.eq(4).text((node.data.linkedObjects || []).length || "");
+    }
   });
-  window.taskTree = taskTree; // 전역으로 export
+  taskTree = $.ui.fancytree.getTree("#treegrid");
+  window.taskTree = taskTree; // 글로벌 접근
 
-  // WBS 트리 기존 인스턴스 제거
-  if (window.wbsTree && typeof window.wbsTree.destroy === "function") {
-    window.wbsTree.destroy();
-  }
-  if (document.getElementById("wbs-group-list")) {
-    document.getElementById("wbs-group-list").innerHTML = "";
-  }
+  //   // WBS 트리 기존 인스턴스 제거
+  // if (window.wbsTree && typeof window.wbsTree.destroy === "function") {
+  //   window.wbsTree.destroy();
+  // }
+  // if (document.getElementById("wbs-group-list")) {
+  //   document.getElementById("wbs-group-list").innerHTML = "";
+  // }
 
   // ─── WBS 트리 생성 ───────────────────────────────────────────────────
   const wbsContainer = document.getElementById("wbs-group-content");
@@ -91,98 +99,91 @@ export function initPanel2Content() {
       showCheckboxes: true,
       dragAndDrop: { enabled: false },
     });
-    // bindEscToTree(wbsTree, "wbs-group-list");
-    // bindEscToTree(taskTree, "task-list");
+    
+  }
+  //날짜 변환기
+  function normalizeDateInput(input) {
+    // 20250625 → 2025-06-25
+    if (/^\d{8}$/.test(input)) {
+      return `${input.substr(0,4)}-${input.substr(4,2)}-${input.substr(6,2)}`;
+    }
+    // 250625 → 2025-06-25 (20xx로 가정)
+    if (/^\d{6}$/.test(input)) {
+      return `20${input.substr(0,2)}-${input.substr(2,2)}-${input.substr(4,2)}`;
+    }
+    // 2025-06-25 or 2025/06/25 → 2025-06-25
+    if (/^\d{4}[-/]\d{2}[-/]\d{2}$/.test(input)) {
+      return input.replace(/\//g, '-');
+    }
+    // 그 외는 null
+    return null;
+  }
+  // 입력날짜 검토
+  function isValidDate(dateStr) {
+    // dateStr: "YYYY-MM-DD"
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return false;
+    const [year, month, day] = parts.map(Number);
+  
+    if (
+      isNaN(year) || isNaN(month) || isNaN(day) ||
+      year < 1900 || month < 1 || month > 12 || day < 1 || day > 31
+    ) return false;
+  
+    // JS 날짜 객체로 판별
+    const date = new Date(year, month - 1, day);
+    return (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    );
   }
 
-  // ⑤ DOM 렌더러 생성 + drag&drop 활성화
-  new window.InspireTreeDOM(taskTree, {
-    target: "#task-list",
-    showCheckboxes: false,
-    dragAndDrop: {
-      enabled: true,
-      // validateOn: "dragover",
-      // // 같은 레벨 내에서만 이동 허용
-      // validate: (dragNode, targetNode) => {
-      //   if (!dragNode.parent && !targetNode.parent) return true;
-      //   if (
-      //     dragNode.parent &&
-      //     targetNode.parent &&
-      //     dragNode.parent.id === targetNode.parent.id
-      //   )
-      //     return true;
-      //   return false;
-      // },
-    },
-  });
-
-  // ESC키로 선택 모두 해제 (중복 없이)
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      if (window.taskTree && typeof window.taskTree.selected === "function") {
-        window.taskTree.selected().forEach((node) => node.deselect());
-      }
-      if (window.wbsTree && typeof window.wbsTree.selected === "function") {
-        window.wbsTree.selected().forEach((node) => node.deselect());
+  // 셀 더블클릭시 편집 진입 트리거
+  $("#treegrid").on("dblclick", "td", function(e) {
+    const colIdx = this.cellIndex;
+    const node = $.ui.fancytree.getNode(this);
+    if (!node) return;
+  
+    let field, label, oldValue;
+    if (colIdx === 0)      { field = "no";    label = "No.";      oldValue = node.data.no || ""; }
+    else if (colIdx === 1) { field = "title"; label = "작업명";   oldValue = node.data.title || ""; }
+    else if (colIdx === 2) { field = "start"; label = "시작일";   oldValue = node.data.start || ""; }
+    else if (colIdx === 3) { field = "end";   label = "완료일";   oldValue = node.data.end || ""; }
+    else if (colIdx === 4) {
+                            // 연결된 객체 정보 팝업
+                           const objs = node.data.linkedObjects || [];
+                           let msg = objs.length === 0
+                             ? "연결된 객체 없음"
+                             : objs.map(o => o.text + " (modelId:" + o.modelId + ", dbId:" + o.dbId + ")").join("\n");
+                           alert(msg); // → 추후 커스텀 팝업으로 교체 가능
+                           }
+    else return;
+  
+    function inputDateLoop() {
+      const newValue = prompt(`${label} 값을 입력하세요:`, oldValue);
+      if (newValue === null) return;
+  
+      if (field === "start" || field === "end") {
+        const norm = normalizeDateInput(newValue);
+        if (!norm || !isValidDate(norm)) {
+          alert("실제 날짜를 입력해주세요. 예) 20250625, 250625, 2025-06-25, 2025/06/25 ... ");
+          inputDateLoop();
+          return;
+        }
+        node.data[field] = norm;
+        node.render();
+        node.tree.render(true, true);
+      } else {
+        node.data[field] = newValue;
+        if (field === "title") node.setTitle(newValue);
+        node.data.title = newValue;
+        node.render();
+        node.tree.render(true, true);
       }
     }
+    inputDateLoop();
   });
-
-  bindEscToTree(taskTree, "task-list");
-  bindEscToTree(wbsTree, "wbs-group-list");
-
-  // 드롭 후 데이터 동기화
-  taskTree.on("node.drop", () => {
-    syncTaskDataWithTree(taskTree, taskData);
-    console.log("▶ after drop taskData:", taskData);
-  });
-
-  // ⑥ drop 시 실제 taskData 배열도 함께 재정렬
-  // taskTree.on("node.drop", (_event, dragNode, _targetNode, index) => {
-  //   const parent = dragNode.parent; // null 이면 루트
-  //   // 현재 레벨의 node 리스트
-  //   const siblings = parent ? parent.children : taskTree.nodes();
-
-  //   // 1) 배열에서 이동 노드 제거
-  //   const [moved] = siblings.splice(siblings.indexOf(dragNode), 1);
-  //   // 2) 원하는 위치에 삽입
-  //   siblings.splice(index, 0, moved);
-
-  //   // 3) 원본 taskData 동기화
-  //   if (!parent) {
-  //     taskData = siblings.map((n) => ({
-  //       //text 호출
-  //       label: n.text,
-  //       children: (n.children || []).map((c) => ({ label: c.text })),
-  //     }));
-  //   } else {
-  //     const pLabel = parent.text;
-  //     const pItem = taskData.find((i) => i.label === pLabel);
-  //     if (pItem) {
-  //       pItem.children = (parent.children || []).map((c) => ({
-  //         label: c.text,
-  //       }));
-  //     }
-  //   }
-
-  //   console.log("▶ after drop taskData:", taskData);
-  // });
-
-  // WBS 체크박스 계층 이벤트 바인딩
-  // 바인딩 시
-
-  // ESC: 선택 해제
-  function bindEscToTree(tree, containerId) {
-    const el = document.getElementById(containerId);
-    if (!el) return;
-    el.tabIndex = 0; // 포커스 가능하게 만듦
-    el.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        tree.selected().forEach((node) => node.deselect());
-      }
-    });
-  }
-  //   // 트리 DOM 생성 후 호출
-  //   bindEscToTree(taskTree, "task-list");
-  //   if (wbsTree) bindEscToTree(wbsTree, "wbs-group-list");
+  // ========== ESC/dnd 헬퍼(드롭, 선택 해제) 바인딩 ==========
+  setupPanel2Helpers(taskTree, wbsTree, taskData);
 }

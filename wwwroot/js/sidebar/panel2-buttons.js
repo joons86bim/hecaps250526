@@ -1,6 +1,8 @@
 // wwwroot/js/sidebar/panel2-buttons.js
 //import { taskData  } from "./sidebar/panel2.js";
 
+window.updateWBSHighlight = updateWBSHighlight;
+
 export function initTaskListButtons() {
   // "추가" 버튼
   $("#btn-add").on("click", function () {
@@ -20,20 +22,30 @@ export function initTaskListButtons() {
       // 선택된 항목 아래에 자식으로 추가
       parentNode.addChildren(nodeData);
       parentNode.setExpanded(true); // 부모 노드 펼치기(자식 보이게)
+      // ===== 부모 노드에 연결된 객체가 있다면 연결 해제 =====
+      if (parentNode.data.linkedObjects && parentNode.data.linkedObjects.length > 0) {
+        parentNode.data.linkedObjects = [];
+        parentNode.render();
+      }
     } else {
       // 아무것도 선택 안했으면 루트(최상위)에 추가
       tree.getRootNode().addChildren(nodeData);
     }
-
+    //updateAllAggregates(tree);
+    tree.render(true, true);
+    updateWBSHighlight();
   });
 
   // "삭제" 버튼
   $("#btn-delete").on("click", function(){
-    let tree = $("#treegrid").fancytree("getTree");
+    let tree = $.ui.fancytree.getTree("#treegrid");
     let sel = tree.getActiveNode();
     if(sel && !sel.isRoot()) {
       sel.remove();
     }
+    //updateAllAggregates(tree);
+    tree.render(true, true);
+    updateWBSHighlight();
   });
 
   //데이터 연결 버튼
@@ -43,9 +55,10 @@ export function initTaskListButtons() {
     if (!selectedTaskNode) return alert("Task를 선택하세요!");
   
     // WBS 체크된 leaf 객체
-    const checkedNodes = window.wbsTree.nodes().filter(node =>
-      node.itree.state.checked && !node.hasChildren());
-      const checkedObjects = checkedNodes.map(node => ({
+    // "객체 연결" 버튼 이벤트 핸들러 내
+      let checkedNodes = window.wbsTree.checked();
+      // leaf만
+      let checkedObjects = checkedNodes.filter(node => !node.hasChildren()).map(node => ({
         modelId: node.modelId,
         dbId: node.dbId,
         text: node.text
@@ -96,8 +109,10 @@ export function initTaskListButtons() {
           tNode.data.linkedObjects = (tNode.data.linkedObjects || []).filter(
             o => !(o.modelId === obj.modelId && o.dbId === obj.dbId)
           );
+          
         });
-        // 모두 연결 진행
+        // "연결" 처리는 아래에서 항상 수행
+        
       }
       if (result === "2") {
         // 2. 이미 연결된 객체는 제외하고 연결
@@ -106,6 +121,9 @@ export function initTaskListButtons() {
         );
         if (checkedObjects.length === 0) {
           taskTree.render(true, true);
+          //updateAllAggregates(tree);
+          //tree.render(true, true);
+          updateWBSHighlight();
           return;
         }
       }
@@ -117,9 +135,11 @@ export function initTaskListButtons() {
       (selectedTaskNode.data.linkedObjects || []).concat(checkedObjects),
       obj => obj.modelId + ":" + obj.dbId
     );
-    taskTree.render(true, true); // 전체 갱신
+    taskTree.render(true, true);
+    //updateAllAggregates(tree); // 전체 갱신
+    //tree.render(true, true);
+    updateWBSHighlight();
   });
-
 
 }
 
@@ -134,4 +154,97 @@ function generateNo(parentNode) {
     const baseNo = parentNode.data.no || parentNode.title;
     return baseNo + "." + (siblings.length + 1);
   }
+}
+
+// 특정 노드 아래 모든 leaf(최하위) 노드 재귀적으로 반환
+function getAllLeavesOfNode(node) {
+  let leaves = [];
+  if (node.hasChildren && node.hasChildren()) {
+    // children이 TreeNodes 타입일 때 forEach
+    node.children.forEach(child => {
+      leaves = leaves.concat(getAllLeavesOfNode(child));
+    });
+  } else {
+    leaves.push(node);
+  }
+  return leaves;
+}
+function getAllLeafNodes(tree) {
+  let leaves = [];
+  function traverse(nodes) {
+    nodes.forEach(node => {
+      if (node.hasChildren && node.hasChildren()) {
+        traverse(node.children);
+      } else {
+        leaves.push(node);
+      }
+    });
+  }
+  traverse(tree.nodes());
+  return leaves;
+}
+
+function isAllLeafChildrenConnected(node, linked) {
+  if (!node.hasChildren()) return false;
+  let leafChildren = node.children.filter(child => !child.hasChildren());
+  let branchChildren = node.children.filter(child => child.hasChildren());
+
+  leafChildren.forEach(leaf => {
+    let key = leaf.modelId + ":" + leaf.dbId;
+    console.log("[leaf 연결 검사]", leaf.text, "key:", key, "linked:", linked[key]);
+  });
+
+  let allLeafConnected = leafChildren.length === 0 || leafChildren.every(leaf => {
+    let key = leaf.modelId + ":" + leaf.dbId;
+    return linked[key];
+  });
+  let allBranchConnected = branchChildren.length === 0 || branchChildren.every(child => isAllLeafChildrenConnected(child, linked));
+  // 디버그 로그
+  console.log("[부모 검사]", node.text, "| leaf:", leafChildren.map(l=>l.text), "| allLeafConnected:", allLeafConnected, "| allBranchConnected:", allBranchConnected);
+  return allLeafConnected && allBranchConnected;
+}
+
+
+
+
+// ========== WBS 트리 이벤트 바인딩 ==========
+function updateWBSHighlight() {
+  console.log("WBS highlight 업데이트 시작");
+  $("#wbs-group-list .inspire-tree-node").removeClass("connected");
+
+  // 연결된 객체 목록 만들기 + 로그
+  let linked = {};
+  window.taskTree.visit(function(node){
+    if (node.data.linkedObjects && node.data.linkedObjects.length) {
+      node.data.linkedObjects.forEach(obj => {
+        linked[obj.modelId + ":" + obj.dbId] = true;
+      });
+    }
+  });
+
+  // 모든 leaf 강조
+  getAllLeafNodes(window.wbsTree).forEach(function(node){
+    let key = node.modelId + ":" + node.dbId;
+    if (linked[key]) {
+      let $li = $(`#wbs-group-list a[data-uid='${node.id}']`).closest("li");
+      $li.addClass("connected");
+    }
+  });
+
+  // 모든 노드(leaf, branch, root 모두 포함) 강조
+  window.wbsTree.nodes().forEach(function traverse(node) {
+    // 모든 node에 대해서
+    if (node.hasChildren && node.hasChildren()) {
+      let leaves = getAllLeavesOfNode(node);
+      let allConnected = leaves.length > 0 && leaves.every(leaf => linked[leaf.modelId + ":" + leaf.dbId]);
+      // 로그 추가
+      console.log("[부모 검사]", node.text, "| leaf:", leaves.map(l => l.text), "| allLeafConnected:", allConnected);
+      if (allConnected) {
+        let $li = $(`#wbs-group-list li[data-uid='${node.id}']`);
+        $li.addClass("connected");
+      }
+      // 하위 폴더들도 재귀 검사
+      node.children.forEach(child => traverse(child));
+    }
+  });
 }

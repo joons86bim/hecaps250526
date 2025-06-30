@@ -121,3 +121,32 @@
 #resizer:hover {
   background: #a4cef7;
 }
+
+/* treegrid의 시작일, 완료일, 객체개수 가운데 정렬 */
+#treegrid th,
+#treegrid td.text-center {
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+/* 객체개수 강조 */
+#treegrid td.objcount.highlight {
+  background: #f55;
+  color: #fff;
+}
+
+/* WBS 연결된 항목 배경색 강조 */
+/* connected+selected (더 밝은 붉은색) */
+#wbs-group-list li.connected.selected > .title-wrap,
+#wbs-group-list li.selected.connected > .title-wrap {
+  background: #ff8585 !important;
+  color: #fff !important;
+  border-radius: 2px;
+}
+/* connected만 (기존 붉은색) */
+#wbs-group-list li.connected > .title-wrap {
+  background: #f66 !important;
+  color: #fff !important;
+  border-radius: 2px;
+}
+

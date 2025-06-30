@@ -16,8 +16,8 @@
 #sidebar-resizer {
   position: absolute;
   top: 3em;
-  left: 260px; /* sidebar 시작폭과 일치 */
-  width: 6px;
+  left: 25%; /* sidebar 시작폭과 일치 */
+  width: 3px;
   height: calc(100vh - 3em);
   background: linear-gradient(to right, #e3eaf3, #d2d9e6);
   cursor: ew-resize;

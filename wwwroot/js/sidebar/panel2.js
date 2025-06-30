@@ -8,8 +8,8 @@ export let taskData = [
    title: "Task A",
    start: "2024-06-25",
    end: "2024-07-01",
-   linkedObjects: [/*연결된 객체 정보들*/
-    {modelId: 1, dbId: 123, text: "구조벽 [123]" }
+   linkedObjects: [/*연결된 객체 정보들
+    {modelId: 1, dbId: 123, text: "구조벽 [123]"}*/ 
    ],
    children: [
     {no: "1.1", title: "Subtask A1", start: "2024-06-26", end: "2024-06-30"}
@@ -18,7 +18,7 @@ export let taskData = [
 ];
 
 export let wbsData = [
-  { label: "Group 1", children: [{ label: "Subgroup 1-1" }] },
+  { label: "Group 1", children: [{ label: "Subgroup 1-1", modelId: 1, dbId: 111, text: "구조벽 [111]" }] },
   { label: "Group 2" },
 ];
 
@@ -36,19 +36,31 @@ export function initPanel2Content() {
     },
     source: taskData,
     renderColumns: function(event, data) {
-      var node = data.node,
-          $tdList = $(node.tr).find(">td");
+      var node = data.node, $tdList = $(node.tr).find(">td");
+      // 집계 데이터 (부모면 roll-up)
+      let agg = node.hasChildren()
+        ? aggregateTaskFields(node)
+        : {
+          start: node.data.start || "",
+          end: node.data.end || "",
+          objects: (node.data.linkedObjects || []).slice()
+          };
+
       // 0: No
       $tdList.eq(0).text(node.data.no || "");
       // 1: 작업명
       $tdList.eq(1).find(".fancytree-title").text(node.data.title || node.title || "");
       // 2: 시작일
-      $tdList.eq(2).text(node.data.start || "");
+      $tdList.eq(2).text(agg.start || "").addClass("text-center");;
       // 3: 완료일
-      $tdList.eq(3).text(node.data.end || "");
+      $tdList.eq(3).text(agg.end || "").addClass("text-center");;
       // 4: 객체개수
-      $tdList.eq(4).text((node.data.linkedObjects || []).length || "");
-    }
+      let objCount = (node.hasChildren() ? aggregateTaskFields(node).objects.length : (node.data.linkedObjects || []).length) || 0;
+      $tdList.eq(4)
+        .text(objCount || "")
+        .addClass("text-center objcount")
+        .toggleClass("highlight", objCount > 0);
+      }
   });
   taskTree = $.ui.fancytree.getTree("#treegrid");
   window.taskTree = taskTree; // 글로벌 접근
@@ -72,8 +84,11 @@ export function initPanel2Content() {
       id: item.label,
       text: item.label,
       children: (item.children || []).map((c) => ({
-        id: `${item.label}::${c.label}`,
-        text: c.label,
+        id: `${item.label}::${c.label}`, // 반드시 고유 id
+        text: c.label, // 실제 출력명
+        modelId: c.modelId,
+        dbId: c.dbId,
+        children: [], // 하위 노드가 없으면 빈 배열
       })),
     }));
 
@@ -99,8 +114,37 @@ export function initPanel2Content() {
       showCheckboxes: true,
       dragAndDrop: { enabled: false },
     });
-    
+
+    // 트리 생성 이후(패널 초기화 마지막에) 아래 바인딩 추가
+    // if (window.wbsTree && typeof window.wbsTree.on === "function") {
+    //   const events = [
+    //     "node.selected", "node.deselected",
+    //     "node.expanded", "node.collapsed",
+    //     "node.checked", "node.unchecked"
+    //   ];
+    //   events.forEach(evt => window.wbsTree.on(evt, updateWBSHighlight));
+    // }
+
+    // ["selected", "deselected", "checked", "unchecked", "expanded", "collapsed"].forEach(evt => {
+    //   window.wbsTree.on(`node.${evt}`, updateWBSHighlight);
+    // });
+    attachWbsTreeHighlightEvents()
+
   }
+
+  function attachWbsTreeHighlightEvents() {
+    [
+      'node.selected', 'node.deselected',
+      'node.checked', 'node.unchecked',
+      'node.expanded', 'node.collapsed'
+    ].forEach(evt => {
+      window.wbsTree.on(evt, () => {
+        setTimeout(updateWBSHighlight, 0);
+      });
+    });
+  }
+
+
   //날짜 변환기
   function normalizeDateInput(input) {
     // 20250625 → 2025-06-25
@@ -139,32 +183,72 @@ export function initPanel2Content() {
     );
   }
 
+  // 차일드들의 시작/끝/객체개수 집계
+  function aggregateTaskFields(node) {
+    if (!node.hasChildren()) {
+      // leaf
+      return {
+        start: node.data.start || "",
+        end: node.data.end || "",
+        objects: (node.data.linkedObjects || []).slice()
+      };
+    }
+    let starts = [], ends = [], objs = [];
+    node.children.forEach(child => {
+      const agg = aggregateTaskFields(child);
+      if (agg.start) starts.push(agg.start);
+      if (agg.end) ends.push(agg.end);
+      objs = objs.concat(agg.objects);
+    });
+    // 날짜 → Date 변환해서 min/max 계산
+    function getMin(arr) {
+      const dates = arr.filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d));
+      if (!dates.length) return "";
+      return dates.sort((a, b) => a - b)[0].toISOString().slice(0,10);
+    }
+    function getMax(arr) {
+      const dates = arr.filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d));
+      if (!dates.length) return "";
+      return dates.sort((a, b) => b - a)[0].toISOString().slice(0,10);
+    }
+    
+    return {
+      start: getMin(starts),
+      end: getMax(ends),
+      objects: objs
+    };
+  }
+  
+  
   // 셀 더블클릭시 편집 진입 트리거
   $("#treegrid").on("dblclick", "td", function(e) {
     const colIdx = this.cellIndex;
     const node = $.ui.fancytree.getNode(this);
     if (!node) return;
   
-    let field, label, oldValue;
-    if (colIdx === 0)      { field = "no";    label = "No.";      oldValue = node.data.no || ""; }
-    else if (colIdx === 1) { field = "title"; label = "작업명";   oldValue = node.data.title || ""; }
-    else if (colIdx === 2) { field = "start"; label = "시작일";   oldValue = node.data.start || ""; }
-    else if (colIdx === 3) { field = "end";   label = "완료일";   oldValue = node.data.end || ""; }
-    else if (colIdx === 4) {
-                            // 연결된 객체 정보 팝업
-                           const objs = node.data.linkedObjects || [];
-                           let msg = objs.length === 0
-                             ? "연결된 객체 없음"
-                             : objs.map(o => o.text + " (modelId:" + o.modelId + ", dbId:" + o.dbId + ")").join("\n");
-                           alert(msg); // → 추후 커스텀 팝업으로 교체 가능
-                           }
-    else return;
-  
-    function inputDateLoop() {
+    // No, 작업명: 항상 입력 가능
+    if (colIdx === 0 || colIdx === 1) {
+      let field = (colIdx === 0 ? "no" : "title");
+      let label = (colIdx === 0 ? "No." : "작업명");
+      let oldValue = (colIdx === 0 ? node.data.no : node.data.title) || "";
       const newValue = prompt(`${label} 값을 입력하세요:`, oldValue);
-      if (newValue === null) return;
+      if (newValue !== null && newValue !== oldValue) {
+        node.data[field] = newValue;
+        if (field === "title") node.setTitle(newValue);
+        node.render();
+        node.tree.render(true, true);
+      }
+      return;
+    }
   
-      if (field === "start" || field === "end") {
+    // 시작일/종료일: 차일드 없는 항목만 직접입력
+    if ((colIdx === 2 || colIdx === 3) && !node.hasChildren()) {
+      let field = (colIdx === 2 ? "start" : "end");
+      let label = (colIdx === 2 ? "시작일" : "완료일");
+      let oldValue = node.data[field] || "";
+      function inputDateLoop() {
+        const newValue = prompt(`${label} 값을 입력하세요:`, oldValue);
+        if (newValue === null) return;
         const norm = normalizeDateInput(newValue);
         if (!norm || !isValidDate(norm)) {
           alert("실제 날짜를 입력해주세요. 예) 20250625, 250625, 2025-06-25, 2025/06/25 ... ");
@@ -174,16 +258,24 @@ export function initPanel2Content() {
         node.data[field] = norm;
         node.render();
         node.tree.render(true, true);
-      } else {
-        node.data[field] = newValue;
-        if (field === "title") node.setTitle(newValue);
-        node.data.title = newValue;
-        node.render();
-        node.tree.render(true, true);
       }
+      inputDateLoop();
+      return;
     }
-    inputDateLoop();
+  
+    // 객체개수: 모든 노드(상위/하위)에서 차일드까지 flatten 후 팝업
+    if (colIdx === 4) {
+      // 계층 전체 flatten
+      const agg = aggregateTaskFields(node);
+      const objs = agg.objects;
+      let msg = objs.length === 0
+        ? "연결된 객체 없음"
+        : objs.map(o => o.text + " (modelId:" + o.modelId + ", dbId:" + o.dbId + ")").join("\n");
+      alert(msg);
+      return;
+    }
   });
+    
   // ========== ESC/dnd 헬퍼(드롭, 선택 해제) 바인딩 ==========
   setupPanel2Helpers(taskTree, wbsTree, taskData);
 }

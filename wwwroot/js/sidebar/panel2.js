@@ -139,7 +139,7 @@ export function initPanel2Content() {
       'node.expanded', 'node.collapsed'
     ].forEach(evt => {
       window.wbsTree.on(evt, () => {
-        setTimeout(updateWBSHighlight, 0);
+        setTimeout(window.updateWBSHighlight, 0);
       });
     });
   }
@@ -278,4 +278,6 @@ export function initPanel2Content() {
     
   // ========== ESC/dnd 헬퍼(드롭, 선택 해제) 바인딩 ==========
   setupPanel2Helpers(taskTree, wbsTree, taskData);
+
+  window.aggregateTaskFields = aggregateTaskFields;
 }

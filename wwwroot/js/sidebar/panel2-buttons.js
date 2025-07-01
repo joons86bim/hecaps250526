@@ -1,7 +1,6 @@
 // wwwroot/js/sidebar/panel2-buttons.js
 //import { taskData  } from "./sidebar/panel2.js";
-
-window.updateWBSHighlight = updateWBSHighlight;
+//import { aggregateTaskFields } from "./panel2-helpers.js";
 
 export function initTaskListButtons() {
   // "추가" 버튼
@@ -47,6 +46,46 @@ export function initTaskListButtons() {
     tree.render(true, true);
     updateWBSHighlight();
   });
+
+  // "객체 선택" 버튼
+  $("#btn-select").on("click", function() {
+    let taskTree = $.ui.fancytree.getTree("#treegrid");
+    let selected = taskTree.getActiveNode();
+    
+    //window.viewer.clearSelection(); // 버튼 실행 전 선택중인 객체 해제
+    
+    if (!selected) return alert("Task를 선택하세요!");
+    
+    // 1. 해당 Task 및 모든 자식 Task들의 연결 객체 집계
+    let objects = window.aggregateTaskFields(selected).objects;
+    if (!objects || objects.length === 0) return alert("이 Task(및 하위 Task)에 연결된 객체가 없습니다.");
+  
+    // 2. modelId별로 dbId 집계
+    let byModel = {};
+    objects.forEach(obj => {
+      if (!byModel[obj.modelId]) byModel[obj.modelId] = [];
+      byModel[obj.modelId].push(obj.dbId);
+    });
+  
+    // 3. 선택 (멀티모델 지원)
+    Object.entries(byModel).forEach(([modelId, dbIds]) => {
+      let model = getViewerModelById(modelId);
+      if (model) {
+        window.viewer.select(dbIds, model);
+        // window.viewer.fitToView(dbIds, model); // 필요시 화면 줌
+      }
+    });
+  });
+  
+  // 모델ID로 모델 인스턴스 찾는 함수 예시
+  function getViewerModelById(modelId) {
+    if (window.NOP_VIEWER_LIST) {
+      // 멀티모델 환경이라면
+      return window.NOP_VIEWER_LIST.find(m => m.id == modelId)?.model;
+    }
+    // 싱글모델 환경
+    return window.viewer.model;
+  }
 
   //데이터 연결 버튼
   $("#btn-link").on("click", function() {
@@ -141,6 +180,9 @@ export function initTaskListButtons() {
     updateWBSHighlight();
   });
 
+  window.updateWBSHighlight = updateWBSHighlight;
+
+
 }
 
 function generateNo(parentNode) {
@@ -184,25 +226,25 @@ function getAllLeafNodes(tree) {
   return leaves;
 }
 
-function isAllLeafChildrenConnected(node, linked) {
-  if (!node.hasChildren()) return false;
-  let leafChildren = node.children.filter(child => !child.hasChildren());
-  let branchChildren = node.children.filter(child => child.hasChildren());
+// function isAllLeafChildrenConnected(node, linked) {
+//   if (!node.hasChildren()) return false;
+//   let leafChildren = node.children.filter(child => !child.hasChildren());
+//   let branchChildren = node.children.filter(child => child.hasChildren());
 
-  leafChildren.forEach(leaf => {
-    let key = leaf.modelId + ":" + leaf.dbId;
-    console.log("[leaf 연결 검사]", leaf.text, "key:", key, "linked:", linked[key]);
-  });
+//   leafChildren.forEach(leaf => {
+//     let key = leaf.modelId + ":" + leaf.dbId;
+//     console.log("[leaf 연결 검사]", leaf.text, "key:", key, "linked:", linked[key]);
+//   });
 
-  let allLeafConnected = leafChildren.length === 0 || leafChildren.every(leaf => {
-    let key = leaf.modelId + ":" + leaf.dbId;
-    return linked[key];
-  });
-  let allBranchConnected = branchChildren.length === 0 || branchChildren.every(child => isAllLeafChildrenConnected(child, linked));
-  // 디버그 로그
-  console.log("[부모 검사]", node.text, "| leaf:", leafChildren.map(l=>l.text), "| allLeafConnected:", allLeafConnected, "| allBranchConnected:", allBranchConnected);
-  return allLeafConnected && allBranchConnected;
-}
+//   let allLeafConnected = leafChildren.length === 0 || leafChildren.every(leaf => {
+//     let key = leaf.modelId + ":" + leaf.dbId;
+//     return linked[key];
+//   });
+//   let allBranchConnected = branchChildren.length === 0 || branchChildren.every(child => isAllLeafChildrenConnected(child, linked));
+//   // 디버그 로그
+//   console.log("[부모 검사]", node.text, "| leaf:", leafChildren.map(l=>l.text), "| allLeafConnected:", allLeafConnected, "| allBranchConnected:", allBranchConnected);
+//   return allLeafConnected && allBranchConnected;
+// }
 
 
 
@@ -238,7 +280,7 @@ function updateWBSHighlight() {
       let leaves = getAllLeavesOfNode(node);
       let allConnected = leaves.length > 0 && leaves.every(leaf => linked[leaf.modelId + ":" + leaf.dbId]);
       // 로그 추가
-      console.log("[부모 검사]", node.text, "| leaf:", leaves.map(l => l.text), "| allLeafConnected:", allConnected);
+      //console.log("[부모 검사]", node.text, "| leaf:", leaves.map(l => l.text), "| allLeafConnected:", allConnected);
       if (allConnected) {
         let $li = $(`#wbs-group-list li[data-uid='${node.id}']`);
         $li.addClass("connected");

@@ -139,7 +139,7 @@
 /* connected+selected (더 밝은 붉은색) */
 #wbs-group-list li.connected.selected > .title-wrap,
 #wbs-group-list li.selected.connected > .title-wrap {
-  background: #ff8585 !important;
+  background: #ffd0d0 !important;
   color: #fff !important;
   border-radius: 2px;
 }

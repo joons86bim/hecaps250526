@@ -5,19 +5,70 @@ import { initTree } from "./sidebar/init-tree.js";
 import { initPanel2Content } from "./sidebar/panel2.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
 import { initToolbar } from "./viewer/toolbar.js";
-import { initTaskListButtons } from "./sidebar/panel2-buttons.js";
+import {
+  initTaskListButtons,
+  setSavedTaskData,
+} from "./sidebar/panel2-buttons.js";
 import { buildWbsTreeData } from "./sidebar/wbsloader.js";
+import { bindPanel2Resizer } from "./sidebar/panel2-resizer.js";
 
 const login = document.getElementById("login");
+let taskData = []; // 현재 모델의 Task 데이터 (트리용, 갱신됨)
 
+// 샘플 데이터 (서버에 데이터 없을 때 사용)
+// 샘플 데이터 (urn 예시 포함)
+const SAMPLE_TASK_DATA = [
+  {
+    no: "1",
+    title: "Task A",
+    start: "2024-06-25",
+    end: "2024-07-01",
+    linkedObjects: [
+      { urn: "SAMPLE_URN", dbId: 1001, text: "벽체1" }
+    ],
+    children: [
+      {
+        no: "1.1",
+        title: "Subtask A1",
+        start: "2024-06-26",
+        end: "2024-06-30",
+        linkedObjects: [
+          { urn: "SAMPLE_URN", dbId: 1002, text: "벽체2" }
+        ]
+      }
+    ],
+  },
+  { no: "2", title: "Task B", start: "", end: "", linkedObjects: [] },
+];
+
+// URN을 특수문자 없는 safe key로 변환
+function safeUrn(urn) {
+  return urn.replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+// taskData의 모든 linkedObjects에 urn이 없으면 자동입력
+function fillUrnRecursive(task) {
+  if (Array.isArray(task.linkedObjects)) {
+    task.linkedObjects.forEach(obj => {
+      if (!obj.urn) obj.urn = window.CURRENT_MODEL_URN;
+    });
+  }
+  if (Array.isArray(task.children)) {
+    task.children.forEach(fillUrnRecursive);
+  }
+}
+
+
+// -------- 앱 전체 초기화 IIFE ---------
 (async function () {
   try {
-    // 1) 사용자 인증 확인
+    // 1. 로그인 여부 확인 및 UI 갱신
     const resp = await fetch("/api/auth/profile", { credentials: "include" });
     if (resp.ok) {
       const user = await resp.json();
       login.innerText = `Logout (${user.name})`;
       login.onclick = () => {
+        // Autodesk 로그아웃 (iframe 통한 세션 삭제)
         const iframe = document.createElement("iframe");
         iframe.style.visibility = "hidden";
         iframe.src = "https://accounts.autodesk.com/Authentication/LogOut";
@@ -28,31 +79,65 @@ const login = document.getElementById("login");
         };
       };
 
-      // 2) 사이드바 탭 초기화
-      initTabs("#sidebar");
-
-      // 3) Viewer 초기화
-      const viewer = await initViewer(document.getElementById("preview"));
-
-      // 4) 툴바 버튼 설정
+      // 2. 각 영역별 초기화
+      initTabs("#sidebar"); // 좌측 탭 (프로젝트/Task 등)
+      const viewer = await initViewer(document.getElementById("preview")); // 3D 뷰어
       initToolbar(viewer);
 
-      // 5) 트리 초기화 및 모델 로드 후 panel2 렌더링
+      // 3. 트리 영역(프로젝트) 초기화: 모델 선택 시 콜백 등록
       initTree("#tree", async (versionId) => {
-        // versionId를 Base64 URN으로 인코딩
+        destroyTaskPanel(); // 이전 패널 완전 초기화
+
+        // 선택 모델의 URN 저장 (global)
         const urn = window.btoa(versionId).replace(/=/g, "");
+        window.CURRENT_MODEL_URN = urn;
+        const safeUrnVal = safeUrn(urn);
+        window.CURRENT_MODEL_SAFE_URN = safeUrnVal;
+
+        // taskData 갱신 (초기화 후, 서버 또는 샘플 데이터 불러오기)
+        taskData.length = 0;
+        setSavedTaskData([]);
+        await loadTaskDataIfExists();
+
+        // [**변경**] 모든 taskData에 urn이 누락된 linkedObject 자동 보정!
+        taskData.forEach(task => fillUrnRecursive(task, urn));
+         
+        // 뷰어에 모델 로드 (OBJECT_TREE_CREATED_EVENT까지 기다림)
+        console.log("[main.js] 모델 선택! versionId:", versionId, "urn:", urn);
         await loadModel(viewer, urn);
-        viewer.clearSelection();
-        // 1) panel2 마크업+리스트 렌더링
-        initPanel2Content();
-        // 2) 추가/삭제 버튼 기능 바인딩
-        initTaskListButtons();
-        // 3) 동적으로 모델에서 WBS 트리 생성 (이 한 줄이 핵심!!)
-        setupWbsTreeWithModel(viewer);
         
+        // 3D모델 구조(오브젝트 트리) 완성 시점에 Task/WBS UI 구성
+        viewer.addEventListener(
+          Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT,
+          async function handler() {
+            viewer.removeEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, handler);
+      
+            // WBS(공정 분류) 데이터 빌드
+            let wbsData = [];
+            try {
+              wbsData = await buildWbsTreeData(viewer);
+            } catch (e) {
+              wbsData = [];
+              console.warn("[main.js] WBS 데이터 생성 실패!", e);
+            }
+
+            // panel2 (Task + WBS) 및 버튼, 리사이저, 이벤트 등 UI 재구성
+            initPanel2Content(taskData, wbsData);
+            initTaskListButtons();
+            bindPanel2Resizer();
+
+            // 강조(연결 표시)는 완전히 트리/DOM이 다 생성된 후 실행 (최종 1회)
+            setTimeout(() => {
+              if (window.taskTree && window.wbsTree && typeof window.updateWBSHighlight === 'function') {
+                window.taskTree.render(true, true); // option, 이미 렌더되어있다면 생략 가능
+                window.updateWBSHighlight();
+              }
+            }, 0);
+          }
+        );
       });
     } else {
-      // 로그인 안 된 상태
+      // 미로그인 상태면 Login 버튼만
       login.innerText = "Login";
       login.onclick = () => window.location.replace("/api/auth/login");
     }
@@ -66,28 +151,83 @@ const login = document.getElementById("login");
   }
 })();
 
-function setupWbsTreeWithModel(viewer) {
-  viewer.addEventListener(
-    Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT,
-    async function () {
-      setTimeout(async () => {
-        const wbsTreeData = await buildWbsTreeData(viewer);
-
-        // 폴링 함수: wbsTree가 준비될 때까지 50ms마다 재시도
-        let retry = 0;
-        function tryLoadWbsTree() {
-          if (window.wbsTree && typeof window.wbsTree.load === "function") {
-            window.wbsTree.load(wbsTreeData);
-            // 성공 시: 더 이상 반복하지 않음
-          } else if (retry < 40) { // 20회 = 1초까지 시도
-            retry++;
-            setTimeout(tryLoadWbsTree, 50);
-          } else {
-            console.warn("wbsTree가 아직 생성되지 않았습니다!");
-          }
-        }
-        tryLoadWbsTree();
-      }, 300); // 기존 panel2가 트리를 준비하는 시간 고려해 약간 딜레이
+// ----- Task 데이터 (서버 or 샘플) 불러오는 함수 -----
+async function loadTaskDataIfExists() {
+  try {
+    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
+    const url = `/api/tasks?urn=${safeUrnVal}`;
+    const resp = await fetch(url, { credentials: "include" });
+    if (resp.ok) {
+      const data = await resp.json();
+      taskData.length = 0;
+      if (Array.isArray(data) && data.length > 0) {
+        data.forEach((item) => taskData.push(item)); // 서버 데이터 복사
+        setSavedTaskData(taskData);
+      } else {
+        SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+        setSavedTaskData(taskData);
+      }
     }
-  );
+  } catch (err) {
+    taskData.length = 0;
+    SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+    setSavedTaskData(taskData);
+    console.warn("task 데이터를 불러오지 못했습니다. 샘플로 초기화:", err);
+  }
 }
+
+// ----- Task/WBS 패널 전체 제거 및 DOM 재생성 -----
+function destroyTaskPanel() {
+  console.log("[destroy] panel2 destroy & 재생성");
+  try { $.ui.fancytree.getTree("#treegrid")?.destroy(); } catch (e) {}
+  window.taskTree = null;
+  window.wbsTree = null;
+  $("#wbs-group-content").empty(); // ← 기존 DOM, 이벤트도 전부 날려줌
+  $("#panel2").html(`
+    <div id="vertical-split-container">
+
+      <div id="task-list-panel">
+        <div class="panel-header">
+          <span class="title">Task List</span>
+          <div class="button-group">
+            <button id="btn-add">추가</button>
+            <button id="btn-delete">삭제</button>
+            <button id="btn-select">객체 선택</button>
+            <button id="btn-link">데이터 연결</button>
+            <button id="btn-unlink">연결 해제</button>
+            <button id="btn-update">업데이트</button>
+          </div>
+        </div>
+        <table id="treegrid" style="width: 100%" class="fancytree-ext-table">
+          <colgroup>
+            <col width="40px" />
+            <col width="260px" />
+            <col width="100px" />
+            <col width="100px" />
+            <col width="60px" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>No.</th>
+              <th>작업명</th>
+              <th>시작일</th>
+              <th>완료일</th>
+              <th>객체개수</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="resizer"></div>
+      <div class="sidebar-panel" id="wbs-group-list-panel">
+        <div class="panel-header">
+          <span class="title">WBS Group List</span>
+        </div>
+        <div class="panel-content" id="wbs-group-content">
+          <div id="wbs-tree"></div>
+        </div>
+      </div>
+    </div>
+  `);
+}
+

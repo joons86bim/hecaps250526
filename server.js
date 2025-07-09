@@ -12,15 +12,13 @@ app.use(
   session({ secret: SERVER_SESSION_SECRET, maxAge: 24 * 60 * 60 * 1000 })
 );
 
+//Post 요청에서 JSON 파싱 지원
+app.use(express.json( {limit: "10mb"}));
+
 //각각의 라우터 연결
 app.use(require("./routes/auth.js"));
 app.use(require("./routes/hubs.js"));
-
-//Post 요청에서 JSON 파싱 지원
-app.use(express.json());
-
-//AI 챗봇 라우터 연결
-// app.use(require("./routes/chat.js"));
+app.use(require("./routes/tasks.js"));
 
 //서버 실행
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}...`));

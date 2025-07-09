@@ -1,4 +1,10 @@
 export async function buildWbsTreeData(viewer) {
+
+  const urn = window.CURRENT_MODEL_URN || "unknown_urn";
+  console.log("[buildWbsTreeData] 실행!");
+  console.log("viewer.getVisibleModels:", viewer.getVisibleModels ? viewer.getVisibleModels() : viewer.model);
+  console.log("getVisibleDbIds:", typeof viewer.getVisibleDbIds);
+
   let models = viewer.getVisibleModels
     ? viewer.getVisibleModels()
     : [viewer.model];
@@ -52,6 +58,7 @@ export async function buildWbsTreeData(viewer) {
           //     }
           //   }
           // ★★★ 콘솔 구조 확인 추가 (여기까지)
+          console.log("getBulkProperties results", results);
           resolve(results);
         },
         (err) => reject(err)
@@ -98,8 +105,9 @@ export async function buildWbsTreeData(viewer) {
       return a.localeCompare(b, "ko");
     })
     .map(([wbs, levels]) => ({
-      id: wbs,
+      id: `${urn}::${wbs}`,
       text: wbs,
+      urn,
       children: Object.entries(levels)
         .sort(([a], [b]) => {
           if (a === "Level 미지정") return 1;
@@ -107,13 +115,14 @@ export async function buildWbsTreeData(viewer) {
           return a.localeCompare(b, "ko");
         })
         .map(([level, objs]) => ({
-          id: `${wbs}::${level}`,
+          id: `${urn}::${wbs}::${level}`,
           text: level,
+          urn,
           children: objs.map((obj) => ({
-            id: `${obj.modelId || "model"}::${obj.dbId}`,
+            id: `${urn}::${obj.dbId}`,
             text: `${obj.name || ""} [${obj.dbId}]`, // ★ 실제 dbId만 출력
             dbId: obj.dbId,
-            modelId: obj.modelId,
+            urn,
           })),
         })),
     }));

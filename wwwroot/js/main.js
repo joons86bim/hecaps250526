@@ -11,6 +11,7 @@ import {
 } from "./sidebar/panel2-buttons.js";
 import { buildWbsTreeData } from "./sidebar/wbsloader.js";
 import { bindPanel2Resizer } from "./sidebar/panel2-resizer.js";
+import { updateWBSHighlight } from "./sidebar/panel2-ui-helpers.js";
 
 const login = document.getElementById("login");
 let taskData = []; // 현재 모델의 Task 데이터 (트리용, 갱신됨)
@@ -122,15 +123,15 @@ function fillUrnRecursive(task) {
             }
 
             // panel2 (Task + WBS) 및 버튼, 리사이저, 이벤트 등 UI 재구성
-            initPanel2Content(taskData, wbsData);
             initTaskListButtons();
+            initPanel2Content(taskData, wbsData);
             bindPanel2Resizer();
 
             // 강조(연결 표시)는 완전히 트리/DOM이 다 생성된 후 실행 (최종 1회)
             setTimeout(() => {
-              if (window.taskTree && window.wbsTree && typeof window.updateWBSHighlight === 'function') {
-                window.taskTree.render(true, true); // option, 이미 렌더되어있다면 생략 가능
-                window.updateWBSHighlight();
+              if (window.taskTree && window.wbsTree) {
+                window.taskTree.render(true, true); // 이미 렌더돼 있다면 생략 가능
+                setTimeout(updateWBSHighlight, 0);  // <- import로 온 함수
               }
             }, 0);
           }

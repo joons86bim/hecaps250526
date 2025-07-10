@@ -1,3 +1,5 @@
+import { updateWBSHighlight } from './panel2-ui-helpers.js';
+
 // 불러온 데이터를 저장해둘 변수 (전역)
 window.savedTaskData = null;
 
@@ -27,18 +29,12 @@ export function initTaskListButtons() {
       parentNode.data.end = "";
       parentNode.data.linkedObjects = [];
       parentNode.render();
-      // ===> 집계 방식 통일! ====
-      tree.getRootNode().children.forEach(propagateDatesAndObjects);
-      tree.render(true, true);
-      setTimeout(window.updateWBSHighlight, 0);
     } else {
       tree.getRootNode().addChildren(nodeData);
-      tree.getRootNode().children.forEach(propagateDatesAndObjects);
-      tree.render(true, true);
-      setTimeout(window.updateWBSHighlight, 0);
     }
-    updateWBSHighlight();
-    
+    tree.getRootNode().children.forEach(propagateDatesAndObjects);
+    tree.render(true, true);
+    setTimeout(updateWBSHighlight, 0);
   });
 
   // [삭제] 버튼: 현재 선택 노드 삭제
@@ -52,7 +48,7 @@ export function initTaskListButtons() {
       tree.getRootNode().children.forEach(propagateDatesAndObjects);
     }
     tree.render(true, true);
-    updateWBSHighlight();
+    setTimeout(updateWBSHighlight, 0);
     
   });
 
@@ -177,7 +173,7 @@ export function initTaskListButtons() {
         );
         if (checkedObjects.length === 0) {
           taskTree.render(true, true);
-          window.updateWBSHighlight();
+          setTimeout(updateWBSHighlight, 0);
           return;
         }
       }
@@ -189,7 +185,7 @@ export function initTaskListButtons() {
       obj => obj.urn + ":" + obj.dbId
     );
     taskTree.render(true, true);
-    window.updateWBSHighlight();
+    setTimeout(updateWBSHighlight, 0);
   });
 
   // [연결 해제] 버튼
@@ -217,9 +213,7 @@ $("#btn-unlink").off("click").on("click", function () {
   });
 
   taskTree.render(true, true);
-
-  // WBS 색칠 등도 갱신
-  if (window.updateWBSHighlight) window.updateWBSHighlight();
+  setTimeout(updateWBSHighlight, 0);
 });
 
 

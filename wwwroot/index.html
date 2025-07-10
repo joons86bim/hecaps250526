@@ -23,6 +23,10 @@
       href="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-light.min.css"
     />
 
+    <!-- flatpickr CSS/JS CDN 추가 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
     <!-- jQuery (필수) -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     
@@ -32,6 +36,9 @@
       href="https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/skin-win8/ui.fancytree.min.css"
     />
     <script src="https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js"></script>
+
+    <!-- CDN 추가(달력입력마스킹) -->
+    <script src="https://unpkg.com/imask"></script>
 
     <!-- 전역 CSS -->
     <link rel="stylesheet" href="/css/main.css" />
@@ -80,7 +87,7 @@
           <div id="vertical-split-container">
 
             <div id="task-list-panel">
-              <div class="panel-header">
+              <div class="panel-header sticky-task-header">
                 <span class="title">Task List</span>
                 <div class="button-group">
                   <button id="btn-add">추가</button>
@@ -88,37 +95,39 @@
                   <button id="btn-select">객체 선택</button>
                   <button id="btn-link">데이터 연결</button>
                   <button id="btn-unlink">연결 해제</button>
-                  <button id="btn-update">업데이트</button>
+                  <button id="btn-update">저장</button>
                 </div>
               </div>
-              <table
-                id="treegrid"
-                style="width: 100%"
-                class="fancytree-ext-table"
-              >
-                <colgroup>
-                  <col width="40px" />
-                  <!-- No-->
-                  <col width="260px" />
-                  <!-- 작업명-->
-                  <col width="100px" />
-                  <!-- 시작일-->
-                  <col width="100px" />
-                  <!-- 완료일-->
-                  <col width="60px" />
-                  <!-- 객체개수-->
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>No.</th>
-                    <th>작업명</th>
-                    <th>시작일</th>
-                    <th>완료일</th>
-                    <th>객체개수</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
+              <div id="task-list-content">>
+                <table
+                  id="treegrid"
+                  style="width: 100%"
+                  class="fancytree-ext-table"
+                >
+                  <colgroup>
+                    <col width="40px" />
+                    <!-- No-->
+                    <col width="260px" />
+                    <!-- 작업명-->
+                    <col width="100px" />
+                    <!-- 시작일-->
+                    <col width="100px" />
+                    <!-- 완료일-->
+                    <col width="60px" />
+                    <!-- 객체개수-->
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>No.</th>
+                      <th>작업명</th>
+                      <th>시작일</th>
+                      <th>완료일</th>
+                      <th>객체개수</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
             </div>
             <!-- 패널 사이의 구분선(드래그 바) -->
             <div id="resizer"></div>

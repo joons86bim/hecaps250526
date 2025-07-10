@@ -107,6 +107,15 @@
   transition: height 0.2s; /* 높이 변경 시 부드러운 전환 효과 */
 }
 
+/* 패널 헤더(버튼+타이틀) sticky */
+#task-list-panel .panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 10; /* 위로 띄움 */
+  background: #f9f9f9;
+  box-shadow: 0 2px 2px -1px #ddd;
+}
+
 /* 구분선(드래그 바) 스타일 */
 #resizer {
   height: 2px;
@@ -150,3 +159,70 @@
   border-radius: 2px;
 }
 
+/* WBS Group List 헤더 고정 */
+#wbs-group-list-panel .panel-header {
+  position: sticky;
+  top: 0;
+  background: #f9f9f9;
+  z-index: 5;
+  box-shadow: 0 2px 2px -1px #ddd;
+}
+
+/* panel-task-wbs.css 또는 panel2-ui-helpers.js와 같은 경로에서 관리 */
+
+/* 달력 아이콘 스타일 */
+.calendar-svg-icon {
+  vertical-align: middle;
+  margin-left: 2px;
+  margin-bottom: 2px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  transition: fill 0.2s;
+}
+
+.datepicker-btn:hover .calendar-svg-icon {
+  stroke: #1976d2; /* MUI 블루 계열 */
+}
+
+/* 인풋 스타일 (작업 테이블 셀에 어울리도록) */
+.datepicker-input {
+  font-size: 1em;
+  padding: 2px 6px;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  outline: none;
+  width: 95px;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.datepicker-input:focus {
+  border-color: #1976d2;
+}
+
+/* flatpickr 달력 팝업 위치 약간 조정 (필요 시) */
+.flatpickr-calendar {
+  z-index: 9999 !important;
+}
+
+/* 달력 버튼과 인풋 사이 여백 */
+.datepicker-btn {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  line-height: 1;
+}
+
+/* 달력 아이콘 클릭시 highlight 효과 */
+.datepicker-btn:active .calendar-svg-icon {
+  stroke: #145ea8;
+}
+
+.datepicker-input {
+  text-align: center;
+}

@@ -13,6 +13,10 @@
   "dependencies": {
     "@aps_sdk/authentication": "^1.0.0",
     "@aps_sdk/data-management": "^1.0.1",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/material": "^7.2.0",
+    "@mui/x-date-pickers": "^8.7.0",
     "body-parser": "^2.2.0",
     "cookie-session": "^2.1.0",
     "cors": "^2.8.5",

@@ -1,4 +1,5 @@
-import { updateWBSHighlight } from './panel2-ui-helpers.js';
+import { updateWBSHighlight, calendarSvg, aggregateTaskFields  } from './panel2-ui-helpers.js';
+import { checkTaskStatusByDate } from './task-check-basedondate.js';
 
 // 불러온 데이터를 저장해둘 변수 (전역)
 window.savedTaskData = null;
@@ -17,6 +18,8 @@ export function initTaskListButtons() {
     let no = generateNo(parentNode);
     let nodeData = {
       no: no,
+      selectOptions: ["시공", "철거", "가설"],
+      selectedOption: "시공", // 기본 선택 옵션
       title: "새 작업",
       start: "",
       end: ""
@@ -57,7 +60,7 @@ export function initTaskListButtons() {
     let taskTree = $.ui.fancytree.getTree("#treegrid");
     let selected = taskTree.getActiveNode();
     if (!selected) return alert("Task를 선택하세요!");
-    let objects = window.aggregateTaskFields(selected).objects;
+    let objects = aggregateTaskFields(selected).objects;
     if (!objects || objects.length === 0) return alert("이 Task(및 하위 Task)에 연결된 객체가 없습니다.");
     
     // urn별로 dbId 묶음 (Viewer 구조에 따라 아래 로직 커스텀)
@@ -216,9 +219,125 @@ $("#btn-unlink").off("click").on("click", function () {
   setTimeout(updateWBSHighlight, 0);
 });
 
+//공정현황 버튼
+$("#btn-date").off("click").on("click", showCurrentTaskModal);
 
+//TEST 버튼
+$("#btn-test").off("click").on("click", async function() {
+  const selection = viewer.getSelection();
+    if (selection.length !== 1) {
+        alert('객체를 하나만 선택해야 합니다.');
+        return;
+    }
+    const dbId = selection[0];
+    const fragIds = [];
+    const instanceTree = viewer.model.getData().instanceTree;
+    instanceTree.enumNodeFragments(dbId, function (fragId) {
+        fragIds.push(fragId);
+    });
+
+    const newTextureUrl = 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=256&h=256';
+    const loader = new THREE.TextureLoader();
+    loader.load(
+        newTextureUrl,
+        function (texture) {
+            console.log("Texture 로드됨:", texture);
+            console.log("이미지 로드 성공:", texture.image && (texture.image.src || texture.image.currentSrc));
+            fragIds.forEach(fragId => {
+                // 1. getRenderProxy 방식
+                const renderProxy = viewer.impl.getRenderProxy(viewer.model, fragId);
+                if (renderProxy && renderProxy.material) {
+                    let mats = renderProxy.material.materials || [renderProxy.material];
+                    mats.forEach(mat => {
+                        mat.map = texture;
+                        mat.needsUpdate = true;
+                        texture.needsUpdate = true;
+                        console.log("map 교체", mat, mat.map);
+                    });
+                }
+                // 2. getFragmentProxy + setMaterial도 병행
+                const proxy = viewer.impl.getFragmentProxy(viewer.model, fragId);
+                if (proxy) {
+                    proxy.getMaterial(function (oldMat) {
+                        const params = {};
+                        ['color', 'opacity', 'transparent', 'side', 'shininess'].forEach(k => {
+                            if (oldMat[k] !== undefined) params[k] = oldMat[k];
+                        });
+                        params.map = texture;
+                        const newMat = new THREE.MeshPhongMaterial(params);
+                        newMat.needsUpdate = true;
+                        proxy.setMaterial(newMat);
+                        console.log("setMaterial 호출", proxy, newMat);
+                    });
+                }
+            });
+            viewer.impl.invalidate(true, true, true);
+            setTimeout(() => viewer.impl.sceneUpdated && viewer.impl.sceneUpdated(true), 100);
+            alert('material.map 교체, setMaterial 병행 완료! 화면 변화를 꼭 확인해주세요!');
+        },
+        undefined,
+        function (err) {
+            alert('이미지 로드 실패: ' + err.message);
+        }
+    );
+});
+//   const selection = viewer.getSelection();
+
+//     if (selection.length !== 1) {
+//         alert('객체를 하나만 선택해야 합니다.');
+//         return;
+//     }
+
+//     const dbId = selection[0];
+//     const fragIds = [];
+
+//     const instanceTree = viewer.model.getData().instanceTree;
+//     if (!instanceTree) {
+//         alert('instanceTree를 가져올 수 없습니다. 뷰어 초기화 상태를 확인하세요.');
+//         return;
+//     }
+
+//     // ✅ 교정된 fragmentId 추출 방식
+//     instanceTree.enumNodeFragments(dbId, function (fragId) {
+//         fragIds.push(fragId);
+//     });
+
+//     const frags = viewer.model.getFragmentList();
+//     if (!frags) {
+//         alert('fragmentList를 가져올 수 없습니다. 뷰어 초기화 상태를 확인하세요.');
+//         return;
+//     }
+
+//     let textureFound = false;
+
+//     fragIds.forEach(fragId => {
+//         const renderProxy = viewer.impl.getRenderProxy(viewer.model, fragId);
+//         if (renderProxy && renderProxy.material) {
+//             const material = renderProxy.material;
+
+//             // multiMaterial 처리
+//             const materials = material.materials ? material.materials : [material];
+
+//             materials.forEach(mat => {
+//                 if (mat.map) {
+//                     textureFound = true;
+//                     console.log(`✅ dbId: ${dbId}, fragId: ${fragId}, texture map found:`, mat.map);
+//                     console.log(`📌 Map name: ${mat.map.name}`);
+//                     console.log(`📌 Map image:`, mat.map.image);
+//                 } else {
+//                     console.log(`dbId: ${dbId}, fragId: ${fragId}, No texture map found.`);
+//                 }
+//             });
+//         }
+//     });
+
+//     if (textureFound) {
+//         alert('콘솔(F12)에서 텍스쳐 정보가 출력되었습니다.');
+//     } else {
+//         alert('선택한 객체에 텍스쳐 맵핑 정보가 없습니다.');
+//     }
+// });
 }
-
 // 자동 No 생성
 function generateNo(parentNode) {
   if (!parentNode || parentNode.isRoot()) {
@@ -243,6 +362,8 @@ function getCurrentTaskDataFromTree() {
   function nodeToData(node) {
     const obj = {
       no: node.data.no,
+      selectOptions: node.data.selectOptions ?? ["시공", "철거", "가설"], // 기본 옵션
+      selectedOption: node.data.selectedOption ?? "시공", // 기본 선택 옵션
       title: node.data.title ?? node.title,
       start: node.data.start,
       end: node.data.end,
@@ -318,4 +439,230 @@ function propagateDatesAndObjects(node) {
       linkedObjects: (node.data.linkedObjects || [])
     };
   }
+}
+
+// === 공정현황 모달 ===
+export function showCurrentTaskModal() {
+  if (document.querySelector('.current-task-modal')) return;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // --- DOM 생성 및 배치 ---
+  const modal = document.createElement('div');
+  modal.className = 'current-task-modal';
+  modal.tabIndex = 0;
+  modal.innerHTML = `
+    <div class="current-task-modal-header">
+      <span class="modal-title">공정현황 : 날짜 선택</span>
+      <button class="modal-close" title="닫기">&times;</button>
+    </div>
+    <div class="current-task-modal-body">
+      <div class="current-task-date-row">
+        <input type="text" class="current-task-date-input" maxlength="10" placeholder="____-__-__" value="${today}" autocomplete="off" />
+        <button type="button" class="datepicker-btn" tabindex="-1">${calendarSvg}</button>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="modal-confirm">확인</button>
+      </div>
+      <div class="current-task-date-result"></div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  // 중앙 위치 (화면 크기 기반)
+  modal.style.position = 'fixed';
+  modal.style.visibility = 'hidden';
+  setTimeout(() => {
+    const {innerWidth: winW, innerHeight: winH} = window;
+    const rect = modal.getBoundingClientRect();
+    modal.style.left = (winW/2 - rect.width/2) + 'px';
+    modal.style.top = (winH/3 - rect.height/2) + 'px';
+    modal.style.visibility = 'visible';
+  }, 1);
+
+  // --- 변수 ---
+  const $input = modal.querySelector('.current-task-date-input');
+  const $btn = modal.querySelector('.datepicker-btn');
+  const $close = modal.querySelector('.modal-close');
+  const $confirm = modal.querySelector('.modal-confirm');
+  const $header = modal.querySelector('.current-task-modal-header');
+  const $result = modal.querySelector('.current-task-date-result');
+
+  // --- IMask + SmartSelection ---
+  const mask = IMask($input, {mask: '0000-00-00', lazy: false, autofix: true});
+  enforceSmartSelection($input);
+
+  // --- flatpickr ---
+  const fp = flatpickr($input, {
+    dateFormat: 'Y-m-d',
+    defaultDate: today,
+    allowInput: true,
+    clickOpens: false,
+    onChange: (selectedDates, dateStr) => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        $input.value = dateStr;
+        mask.updateValue();
+      }
+    }
+  });
+
+  $btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fp.open();
+  });
+
+  // --- 확인/닫기/ESC ---
+  $confirm.onclick = function () {
+    // 1. 날짜 입력값 확인
+    const val = $input.value.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      $result.textContent = '날짜 형식을 yyyy-mm-dd로 입력해주세요.';
+      $result.style.color = '#e55';
+      return;
+    }
+    $result.textContent = `선택한 날짜: ${val}`;
+    $result.style.color = '#1976d2';
+  
+    // 2. 🚩 입력일 기준 Task 상태 반영 함수 호출!
+    checkTaskStatusByDate(val, window.taskTree, window.viewer);
+  };
+
+  // 모달 닫기 버튼
+  $close.onclick = () => {
+    resetViewerObjects(); // 뷰어 상태 초기화
+    modal.remove();
+  };
+  modal.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') {
+      resetViewerObjects(); // 뷰어 상태 초기화
+      modal.remove();
+    };
+  });
+
+  function resetViewerObjects() {
+    if (window.viewer) {
+      window.viewer.clearThemingColors();
+      if (window.viewer.impl.visibilityManager.setAllOn) {
+        window.viewer.impl.visibilityManager.setAllOn();
+      }
+      window.viewer.impl.invalidate(true);
+    }
+  }
+
+  // --- blur, Enter: 유효성 검사 ---
+  $input.addEventListener('blur', checkAndDisplayDate);
+  $input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      checkAndDisplayDate();
+      $input.blur();
+    }
+    if (ev.key === 'Escape') modal.remove();
+  });
+
+  // --- 드래그 이동 ---
+  enableModalDrag(modal, $header);
+
+  $input.focus();
+
+  // --- 날짜 유효성 ---
+  function checkAndDisplayDate() {
+    const val = $input.value.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      $result.textContent = '날짜 형식을 yyyy-mm-dd로 입력해주세요.';
+      $result.style.color = '#e55';
+      return false;
+    }
+    $result.textContent = `선택한 날짜: ${val}`;
+    $result.style.color = '#1976d2';
+    return true;
+  }
+
+  // --- 드래그 (최적화) ---
+  function enableModalDrag(modal, header) {
+    let isDragging = false, startLeft = 0, startTop = 0, mouseStartX = 0, mouseStartY = 0;
+    header.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.modal-close')) return;
+      isDragging = true;
+      startLeft = parseInt(modal.style.left, 10) || 0;
+      startTop = parseInt(modal.style.top, 10) || 0;
+      mouseStartX = e.clientX;
+      mouseStartY = e.clientY;
+      function onMouseMove(ev) {
+        if (!isDragging) return;
+        modal.style.left = (startLeft + ev.clientX - mouseStartX) + 'px';
+        modal.style.top = (startTop + ev.clientY - mouseStartY) + 'px';
+      }
+      function onMouseUp() {
+        isDragging = false;
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      }
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+  }
+}
+
+//날짜 입력 프롬프트 기능 구현
+export function enforceSmartSelection(input) {
+  // 입력 가능한 인덱스 (숫자자리)
+  const digitIdx = [0,1,2,3,5,6,8,9];
+  const firstIdx = 0, lastIdx = 9;
+
+  // 입력 중인 자리 idx 추출
+  function getDigitPos(pos) {
+    // pos가 숫자자리면 그대로, 아니면 가장 가까운 숫자리로 이동
+    if (digitIdx.includes(pos)) return pos;
+    return digitIdx.find(d => d > pos) ?? lastIdx;
+  }
+  function nextDigitIdx(pos) {
+    const i = digitIdx.indexOf(pos);
+    return (i !== -1 && i < digitIdx.length - 1) ? digitIdx[i+1] : pos;
+  }
+  function prevDigitIdx(pos) {
+    const i = digitIdx.indexOf(pos);
+    return (i > 0) ? digitIdx[i-1] : pos;
+  }
+
+  // 한자리만 selection(항상 숫자자리)
+  function setSingleDigitSelection(pos) {
+    if (digitIdx.includes(pos)) {
+      input.setSelectionRange(pos, pos+1);
+    }
+  }
+
+  // focus/click시 한자리 선택
+  ['focus', 'click'].forEach(evt =>
+    input.addEventListener(evt, () => {
+      setTimeout(() => {
+        setSingleDigitSelection(getDigitPos(input.selectionStart));
+      }, 0);
+    })
+  );
+
+  // ←, → 이동만 preventDefault
+  input.addEventListener('keydown', function(e) {
+    let pos = input.selectionStart;
+    // ← 이전 숫자리 이동
+    if (e.key === 'ArrowLeft' && pos !== firstIdx) {
+      e.preventDefault();
+      setSingleDigitSelection(prevDigitIdx(pos));
+    }
+    // → 다음 숫자리 이동
+    if (e.key === 'ArrowRight' && pos !== lastIdx) {
+      e.preventDefault();
+      setSingleDigitSelection(nextDigitIdx(pos));
+    }
+  });
+
+  // 숫자 입력, 백스페이스 등은 기본 동작 O, 입력 후 input에서 커서 이동
+  input.addEventListener('input', function(e) {
+    // 현재 selection의 위치를 기준으로, 입력한 직후라면 다음자리로 이동
+    let pos = input.selectionStart;
+    // (IMask 적용: 입력 즉시 값이 바뀌므로, nextDigitIdx로)
+    if (digitIdx.includes(pos-1)) {
+      setSingleDigitSelection(nextDigitIdx(pos-1));
+    } else {
+      setSingleDigitSelection(getDigitPos(pos));
+    }
+  });
 }

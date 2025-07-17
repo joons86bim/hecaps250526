@@ -5,6 +5,15 @@
 export function setupPanel2Helpers(taskTree, wbsTree, taskData) {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
+      // 날짜 인풋에 포커스가 있을 때는 무시 (셀 편집 ESC만 동작)
+      if (
+        document.activeElement &&
+        document.activeElement.classList &&
+        document.activeElement.classList.contains("datepicker-input")
+      ) {
+        return; // panel2Helpers의 ESC 처리 무시!
+      }
+
       // Fancytree(작업트리)
       if (window.taskTree) {
         window.taskTree.visit(function(node){

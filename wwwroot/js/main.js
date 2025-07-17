@@ -21,6 +21,8 @@ let taskData = []; // 현재 모델의 Task 데이터 (트리용, 갱신됨)
 const SAMPLE_TASK_DATA = [
   {
     no: "1",
+    selectOptions: ["시공", "철거", "가설"],
+    selectedOption: "시공",
     title: "Task A",
     start: "2024-06-25",
     end: "2024-07-01",
@@ -30,6 +32,8 @@ const SAMPLE_TASK_DATA = [
     children: [
       {
         no: "1.1",
+        selectOptions: ["시공", "철거", "가설"],
+        selectedOption: "시공",
         title: "Subtask A1",
         start: "2024-06-26",
         end: "2024-06-30",
@@ -39,7 +43,7 @@ const SAMPLE_TASK_DATA = [
       }
     ],
   },
-  { no: "2", title: "Task B", start: "", end: "", linkedObjects: [] },
+  { no: "2", selectOptions: ["시공", "철거", "가설"], selectedOption: "시공", title: "Task B", start: "", end: "", linkedObjects: [] },
 ];
 
 // URN을 특수문자 없는 safe key로 변환
@@ -196,12 +200,15 @@ function destroyTaskPanel() {
             <button id="btn-select">객체 선택</button>
             <button id="btn-link">데이터 연결</button>
             <button id="btn-unlink">연결 해제</button>
-            <button id="btn-update">업데이트</button>
+            <button id="btn-date">공정현황</button>
+            <button id="btn-test">테스트</button>
+            <button id="btn-update">저장</button>
           </div>
         </div>
         <table id="treegrid" style="width: 100%" class="fancytree-ext-table">
           <colgroup>
             <col width="40px" />
+            <col width="60px" />
             <col width="260px" />
             <col width="100px" />
             <col width="100px" />
@@ -210,6 +217,7 @@ function destroyTaskPanel() {
           <thead>
             <tr>
               <th>No.</th>
+              <th>구분</th>
               <th>작업명</th>
               <th>시작일</th>
               <th>완료일</th>

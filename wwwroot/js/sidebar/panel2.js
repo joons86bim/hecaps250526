@@ -18,17 +18,24 @@ export function initPanel2Content(taskData, wbsData) {
     extensions: ["table", "gridnav"],
     checkbox: false,
     selectMode: 2,
-    table: { indentation: 20, nodeColumnIdx: 1 },
+    table: { indentation: 20, nodeColumnIdx: 2 },
     source: taskData,
     renderColumns: function (event, data) {
       var node = data.node, $tdList = $(node.tr).find(">td");
       let agg = aggregateTaskFields(node);
       $tdList.eq(0).text(node.data.no || "");
-      $tdList.eq(1).find(".fancytree-title").text(node.data.title || node.title || "");
-      $tdList.eq(2).text(agg.start || "").addClass("text-center");
-      $tdList.eq(3).text(agg.end || "").addClass("text-center");
+      $tdList.eq(1).html(
+        `<select class="treegrid-dropdown" style="width: 100%; box-sizing: border-box; height: 28px;">
+          ${node.data.selectOptions.map(opt =>
+            `<option${opt === node.data.selectedOption ? ' selected' : ''}>${opt}</option>`
+          ).join('')}
+        </select>`
+      );
+      $tdList.eq(2).find(".fancytree-title").text(node.data.title || node.title || "");
+      $tdList.eq(3).text(agg.start || "").addClass("text-center");
+      $tdList.eq(4).text(agg.end || "").addClass("text-center");
       let objCount = agg.objects.length || 0;
-      $tdList.eq(4)
+      $tdList.eq(5)
         .text(objCount || "")
         .addClass("text-center objcount")
         .toggleClass("highlight", objCount > 0);
@@ -71,7 +78,7 @@ export function initPanel2Content(taskData, wbsData) {
     if (!node) return;
 
     // No, 작업명 편집
-    if (colIdx === 0 || colIdx === 1) {
+    if (colIdx === 0 || colIdx === 2) {
       let field = (colIdx === 0 ? "no" : "title");
       let label = (colIdx === 0 ? "No." : "작업명");
       let oldValue = (colIdx === 0 ? node.data.no : node.data.title) || "";
@@ -88,8 +95,8 @@ export function initPanel2Content(taskData, wbsData) {
     }
 
     // 시작일/완료일(leaf)
-    if ((colIdx === 2 || colIdx === 3) && !node.hasChildren()) {
-      let field = (colIdx === 2 ? "start" : "end");
+    if ((colIdx === 3 || colIdx === 4) && !node.hasChildren()) {
+      let field = (colIdx === 3 ? "start" : "end");
       let oldValue = node.data[field] || "";
       let $td = $(this);
       if ($td.find("input").length > 0) return;
@@ -109,18 +116,39 @@ export function initPanel2Content(taskData, wbsData) {
         });
       }
 
+      // --- 셀 복원 함수 ---
+      function restoreCell() {
+        setTimeout(() => $td.text(node.data[field] || ""), 30);
+        $(document).off("mousedown.dateInput");
+      }
+      
+      // --- ESC, Enter, blur, 외부 클릭(셀 외) 처리 ---
+      $input.on("keydown", function(ev){
+        if (ev.key === "Enter") $input.blur();
+        //if (ev.key === "Escape") restoreCell();
+      });
+
+      setTimeout(() => {
+        $(document).on("mousedown.dateInput", function(e) {
+          if (!$.contains($td[0], e.target) && e.target !== $input[0] && e.target !== $iconBtn[0]) {
+            restoreCell();
+          }
+        });
+      }, 0);
+
       // 엔터/blur 확정
-      $input.on("keydown", function (ev) { if (ev.key === "Enter") $input.blur(); });
+      //$input.on("keydown", function (ev) { if (ev.key === "Enter") $input.blur(); });
       $input.on("blur", function () {
         const val = $input.val();
         if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
           node.data[field] = val;
+          mask.updateValue();
           node.render();
           propagateDatesFromChildren(node.parent || node.tree.getRootNode());
           node.tree.render(true, true);
           setTimeout(updateWBSHighlight, 0);
         }
-        setTimeout(() => $td.text(node.data[field] || ""), 100);
+        restoreCell();
       });
 
       // 달력
@@ -128,17 +156,19 @@ export function initPanel2Content(taskData, wbsData) {
         ev.stopPropagation();
         showDatePickerInput($td, node.data[field], function (dateStr) {
           node.data[field] = dateStr;
+          mask.updateValue();
           node.render();
           propagateDatesFromChildren(node.parent || node.tree.getRootNode());
           node.tree.render(true, true);
           setTimeout(updateWBSHighlight, 0);
+          restoreCell();
         });
       });
       return;
     }
 
     // 객체개수: 팝업
-    if (colIdx === 4) {
+    if (colIdx === 5) {
       const objs = aggregateTaskFields(node).objects;
       let msg = objs.length === 0
         ? "연결된 객체 없음"
@@ -146,6 +176,17 @@ export function initPanel2Content(taskData, wbsData) {
       alert(msg);
       return;
     }
+  });
+
+  // 3. 드롭다운 값 변경시 node data 업데이트
+  $("#treegrid").on("change", ".treegrid-dropdown", function(e){
+    let $tr = $(this).closest("tr");
+    let node = $.ui.fancytree.getNode($tr);
+    node.data.selectedOption = this.value;
+    // 필요하면 node.title 등도 업데이트!
+    console.log("드롭다운 값 변경:", node.data.selectedOption);
+    node.tree.render(true, true);
+    setTimeout(updateWBSHighlight, 0);
   });
 
   setupPanel2Helpers(taskTree, wbsTree, taskData);

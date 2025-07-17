@@ -226,3 +226,14 @@
 .datepicker-input {
   text-align: center;
 }
+
+/* TASK 드롭다운 셀 서식 */
+.treegrid-dropdown {
+  width: 100%;
+  box-sizing: border-box;
+  background-color: transparent;
+  border: none;
+  height: 28px; /* 또는 100% */
+  font-size: 14px;
+  padding: 0;
+}

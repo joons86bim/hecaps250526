@@ -24,12 +24,15 @@
     />
 
     <!-- flatpickr CSS/JS CDN 추가 -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css"
+    />
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
     <!-- jQuery (필수) -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    
+
     <!-- Fancytree core + table ext + edit ext -->
     <link
       rel="stylesheet"
@@ -50,6 +53,8 @@
     <link rel="stylesheet" href="/css/panel-task-wbs.css" />
     <!-- task모달창 전용 스타일 -->
     <link rel="stylesheet" href="/css/current-task.css" />
+    <!-- 간트 스타일 -->
+    <link rel="stylesheet" href="/css/gantt.css" />
 
     <!-- Lucide Icons -->
     <link
@@ -57,19 +62,131 @@
       href="https://unpkg.com/lucide-static/font/css/lucide.css"
     />
 
-    <title>HEC BIM Platform</title>
+    <title>HEC-BIM 객체 공정 매핑도구</title>
   </head>
 
   <body>
+
+    <!-- Google Charts loader (전역 1회) -->
+    <script src="https://www.gstatic.com/charts/loader.js"></script>
+
+    <script type="module">
+      import { initGanttView } from "/js/sidebar/gantt-view.js";
+    
+      window.addEventListener('DOMContentLoaded', () => {
+        // 스플리터 드래그 + 접기/펼치기 토글
+        (function splitter(){
+          const host = document.getElementById('preview');
+          const sp   = document.getElementById('gantt-splitter');
+          const open = document.getElementById('gantt-open-btn');
+          if (!host || !sp) return;
+    
+          const saved = localStorage.getItem('ganttHeight');
+          if (saved) host.style.setProperty('--gantt-height', saved);
+    
+          let dragging = false, startY = 0, startH = 0;
+    
+          function onDown(e){
+            if (host.classList.contains('gantt-collapsed')) return;
+            dragging = true;
+            startY = e.clientY || (e.touches?.[0]?.clientY ?? 0);
+            const cs = getComputedStyle(host);
+            startH = parseFloat(cs.getPropertyValue('--gantt-height')) || 320;
+            document.body.style.userSelect = 'none';
+          }
+          function onMove(e){
+            if (!dragging) return;
+            const y = e.clientY || (e.touches?.[0]?.clientY ?? 0);
+            const dy = y - startY;
+            let h = Math.max(120, startH - dy);
+            h = Math.min(h, window.innerHeight - 160);
+            host.style.setProperty('--gantt-height', h + 'px');
+          }
+          function onUp(){
+            if (!dragging) return;
+            dragging = false;
+            document.body.style.userSelect = '';
+            const cs = getComputedStyle(host);
+            localStorage.setItem('ganttHeight', cs.getPropertyValue('--gantt-height').trim());
+            setTimeout(()=> window.gantt?.renderFromTrees(window.taskTree, window.wbsTree), 80);
+          }
+    
+          sp.addEventListener('mousedown', onDown);
+          sp.addEventListener('touchstart', onDown, { passive: true });
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('touchmove', onMove, { passive: false });
+          window.addEventListener('mouseup', onUp);
+          window.addEventListener('touchend', onUp);
+    
+          // 더블클릭/버튼으로 접기/펼치기
+          sp.addEventListener('dblclick', () => {
+            host.classList.toggle('gantt-collapsed');
+            setTimeout(()=> window.gantt?.renderFromTrees(window.taskTree, window.wbsTree), 120);
+          });
+          document.addEventListener('click', (e) => {
+            if (e.target?.id === 'gantt-toggle') {
+              host.classList.toggle('gantt-collapsed');
+              setTimeout(()=> window.gantt?.renderFromTrees(window.taskTree, window.wbsTree), 120);
+            }
+          });
+          open?.addEventListener('click', () => {
+            const wasCollapsed = host.classList.contains('gantt-collapsed');
+            host.classList.remove('gantt-collapsed');
+            if (wasCollapsed) setTimeout(()=> window.gantt?.renderFromTrees(window.taskTree, window.wbsTree), 120);
+          });
+        })();
+    
+        // panel2 준비되면 간트 초기화 + 최초 렌더
+        window.addEventListener("panel2-ready", async () => {
+          console.log('[gantt] panel2-ready received');
+          if (!window.gantt) {
+            console.log('[gantt] init…');
+            window.gantt = await initGanttView({
+              container: "#gantt-chart",
+              saveBtn:   "#gantt-save-png"
+            });
+          }
+          if (window.taskTree) {
+            console.log('[gantt] renderFromTrees…');
+            window.gantt.renderFromTrees(window.taskTree, window.wbsTree);
+          }
+        });
+      });
+    </script>
+
+    <!-- 로딩 중 -->
+    <div
+      id="loading"
+      style="
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100vw;
+        height: 100vh;
+        font-size: 2rem; /* 큰 글씨 */
+        font-weight: 500; /* 약간 굵게 */
+        color: #555; /* 부드러운 색상 */
+        background: #f7f8fa; /* 밝은 배경 */
+        z-index: 9999; /* 맨 위에 올라오게 */
+      "
+    >
+      <h1>Welcome to HEC-BIM Platform...!!</h1>
+    </div>
     <!-- 헤더 -->
-    <div id="header">
+    <div id="header" style="display: none">
       <img class="logo" src="/images/hec_logo.png" alt="HYUNDAI ENGINEERING" />
-      <span class="title">HEC BIM Platform</span>
-      <button id="login" style="visibility: hidden">Login</button>
+      <span class="title" style="font-size: 25px">BIM 객체 공정 매핑도구</span>
+      <button id="login" style="visibility: visible">Login</button>
     </div>
 
     <!-- 사이드바 -->
-    <div id="sidebar">
+    <div id="sidebar" style="display: none">
       <div class="tabs">
         <button class="tab-button active" data-target="panel1">Files</button>
         <button class="tab-button" data-target="panel2">Tasks</button>
@@ -87,7 +204,6 @@
         <div id="panel2" class="panel">
           <!-- 수직 분할 패널 전체를 감싸는 컨테이너 -->
           <div id="vertical-split-container">
-
             <div id="task-list-panel">
               <div class="panel-header sticky-task-header">
                 <span class="title">Task List</span>
@@ -102,7 +218,7 @@
                   <button id="btn-update">저장</button>
                 </div>
               </div>
-              <div id="task-list-content">>
+              <div id="task-list-content">
                 <table
                   id="treegrid"
                   style="width: 100%"
@@ -118,6 +234,8 @@
                     <col width="100px" />
                     <!-- 시작일-->
                     <col width="100px" />
+                    <!-- 소요시간-->
+                    <col width="100px" />
                     <!-- 완료일-->
                     <col width="60px" />
                     <!-- 객체개수-->
@@ -128,6 +246,7 @@
                       <th>구분</th>
                       <th>작업명</th>
                       <th>시작일</th>
+                      <th>소요시간(Day)</th>
                       <th>완료일</th>
                       <th>객체개수</th>
                     </tr>
@@ -153,35 +272,28 @@
     </div>
 
     <!-- 사이드바 리사이저 -->
-    <div id="sidebar-resizer"></div>
+    <div id="sidebar-resizer" style="display: none"></div>
 
-    <!-- 뷰어 영역 -->
-    <div id="preview">
-      <div id="viewer-toolbar">
-        <button class="tool-button active" data-tool="click" title="클릭 선택">
-          <img src="/images/icon-click.svg" alt="click" />
-        </button>
-        <button class="tool-button" data-tool="drag" title="드래그 박스 선택">
-          <img src="/images/icon-drag.svg" alt="drag" />
-        </button>
-        <button
-          class="tool-button"
-          data-tool="hide-selected"
-          title="선택 숨기기"
-        >
-          <img src="/images/icon-hide-selected.svg" alt="hide" />
-        </button>
-        <button
-          class="tool-button"
-          data-tool="isolate-selected"
-          title="선택 제외 숨기기"
-        >
-          <img src="/images/icon-isolate-selected.svg" alt="isolate" />
-        </button>
-        <button class="tool-button" data-tool="reset" title="전체 보기">
-          <img src="/images/icon-reset.svg" alt="reset" />
-        </button>
-      </div>
+    <!-- 뷰어 + 간트 -->
+    <div id="preview" style="display:none">
+      <div id="viewer-host"><div id="forgeViewerMount"></div></div>
+      <div id="gantt-splitter" title="드래그하여 간트 높이 조절"></div>
+      <!-- #preview 내부, 간트 섹션 아래 어딘가에 추가 -->
+      <button id="gantt-open-btn" class="gantt-open-btn" title="간트 펼치기">▲ 간트</button>
+      <section id="gantt-pane">
+        <div class="gantt-toolbar">
+          <strong>공정현황개발중</strong>
+          <span id="gantt-range" class="gantt-range"></span>
+          <span style="flex:1"></span>
+          <button id="gantt-save-png" class="btn btn-sm">PNG 저장</button>
+          <button id="gantt-toggle"   class="btn btn-sm">접기/펼치기</button>
+        </div>
+        <!-- ✅ 추가: 커스텀 상단 축 -->
+        <div id="gantt-top-axis" class="gantt-top-axis">
+          <div class="axis-track"></div>
+        </div>
+        <div id="gantt-chart"></div>
+      </section>
     </div>
 
     <!-- 외부 라이브러리 -->
@@ -191,8 +303,103 @@
     <script src="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-dom.min.js"></script>
 
     <!-- 메인 부트스트랩 -->
+    <script type="module" src="/js/viewer/CustomViewerExtension.js"></script>
     <script type="module" src="/js/main.js"></script>
     <script type="module" src="/js/sidebar/sidebar-resizer.js"></script>
     <script type="module" src="/js/sidebar/panel2-resizer.js"></script>
+    
+
+    <!-- 뷰 선택 모달 -->
+    <div
+      id="view-select-modal"
+      style="
+        display: none;
+        position: fixed;
+        left: 50%;
+        top: 42%;
+        transform: translate(-50%, -40%);
+        min-width: 330px;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 32px #2223;
+        z-index: 10001;
+        padding: 28px 24px 22px 24px;
+      "
+    >
+      <div
+        style="
+          font-weight: 600;
+          font-size: 1.1em;
+          margin-bottom: 12px;
+          letter-spacing: 0.02em;
+        "
+      >
+        뷰 선택
+        <button
+          id="view-close-btn"
+          style="
+            float: right;
+            background: none;
+            border: none;
+            font-size: 22px;
+            color: #888;
+            cursor: pointer;
+            margin-right: -8px;
+            margin-top: -8px;
+          "
+          aria-label="닫기"
+        >
+          &times;
+        </button>
+      </div>
+      <div style="margin-bottom: 10px">
+        <label
+          for="view-type-dropdown"
+          style="font-size: 0.97em; font-weight: 500"
+          >뷰 타입</label
+        >
+        <select
+          id="view-type-dropdown"
+          style="width: 100%; padding: 6px; font-size: 1em; margin-top: 4px"
+        >
+          <option value="3d">3D 뷰</option>
+          <option value="2d">2D 뷰</option>
+        </select>
+      </div>
+      <div style="margin-bottom: 14px">
+        <label
+          for="view-list-dropdown"
+          style="font-size: 0.97em; font-weight: 500"
+          >뷰 리스트</label
+        >
+        <select
+          id="view-list-dropdown"
+          style="width: 100%; padding: 6px; font-size: 1em; margin-top: 4px"
+        >
+          <!-- JS로 동적 생성 -->
+        </select>
+      </div>
+      <div style="text-align: right">
+        <button
+          id="view-ok-btn"
+          style="
+            padding: 7px 20px;
+            font-size: 1em;
+            background: #1976d2;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+          "
+        >
+          확인
+        </button>
+        <button
+          id="view-cancel-btn"
+          style="padding: 7px 20px; margin-right: 8px; font-size: 1em"
+        >
+          취소
+        </button>
+      </div>
+    </div>
   </body>
 </html>

@@ -8,7 +8,7 @@
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.22);
   z-index: 10000;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'MyCustomFont', 'Noto Sans KR', Arial, sans-serif;
 }
 .current-task-modal-header {
   cursor: move;
@@ -61,7 +61,7 @@
   background: #f6f8ff;
   padding: 5px 8px 3px 8px;
   letter-spacing: 2px;
-  font-family: 'Roboto Mono', monospace;
+  font-family: 'MyCustomFont', 'Noto Sans KR', Arial, sans-serif;
   transition: border-color 0.2s;
 }
 .current-task-date-input:focus {
@@ -116,4 +116,12 @@
   outline: none;
   margin: 0 auto;
   display: block;
+}
+
+.current-task-slider-row {
+  margin: 10px 0 14px 0;
+}
+.current-task-slider {
+  width: 100%;
+  max-width: 200px;
 }

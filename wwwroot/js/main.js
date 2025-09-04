@@ -4,7 +4,7 @@ import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
 import { initPanel2Content } from "./sidebar/panel2.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
-import { initToolbar } from "./viewer/toolbar.js";
+// import { initToolbar } from "./viewer/toolbar.js";
 import {
   initTaskListButtons,
   setSavedTaskData,
@@ -12,6 +12,18 @@ import {
 import { buildWbsTreeData } from "./sidebar/wbsloader.js";
 import { bindPanel2Resizer } from "./sidebar/panel2-resizer.js";
 import { updateWBSHighlight } from "./sidebar/panel2-ui-helpers.js";
+
+// --- Repaint Gantt on window resize (throttled) ---
+window.addEventListener('resize', _.throttle(() => {
+  try {
+    if (window.gantt && window.taskTree) {
+      window.gantt.renderFromTrees(window.taskTree, window.wbsTree);
+      // console.log('[gantt] redraw on resize');
+    }
+  } catch (e) {
+    console.warn('[gantt] resize redraw failed', e);
+  }
+}, 200));
 
 const login = document.getElementById("login");
 let taskData = []; // 현재 모델의 Task 데이터 (트리용, 갱신됨)
@@ -21,7 +33,7 @@ let taskData = []; // 현재 모델의 Task 데이터 (트리용, 갱신됨)
 const SAMPLE_TASK_DATA = [
   {
     no: "1",
-    selectOptions: ["시공", "철거", "가설"],
+    selectOptions: ["시공", "가설", "철거"],
     selectedOption: "시공",
     title: "Task A",
     start: "2024-06-25",
@@ -32,7 +44,7 @@ const SAMPLE_TASK_DATA = [
     children: [
       {
         no: "1.1",
-        selectOptions: ["시공", "철거", "가설"],
+        selectOptions: ["시공", "가설", "철거"],
         selectedOption: "시공",
         title: "Subtask A1",
         start: "2024-06-26",
@@ -43,7 +55,7 @@ const SAMPLE_TASK_DATA = [
       }
     ],
   },
-  { no: "2", selectOptions: ["시공", "철거", "가설"], selectedOption: "시공", title: "Task B", start: "", end: "", linkedObjects: [] },
+  { no: "2", selectOptions: ["시공", "가설", "철거"], selectedOption: "시공", title: "Task B", start: "", end: "", linkedObjects: [] },
 ];
 
 // URN을 특수문자 없는 safe key로 변환
@@ -52,16 +64,21 @@ function safeUrn(urn) {
 }
 
 // taskData의 모든 linkedObjects에 urn이 없으면 자동입력
-function fillUrnRecursive(task) {
+// function fillUrnRecursive(task) {
+function fillUrnRecursive(task, defaultUrn) {
   if (Array.isArray(task.linkedObjects)) {
     task.linkedObjects.forEach(obj => {
-      if (!obj.urn) obj.urn = window.CURRENT_MODEL_URN;
+      // if (!obj.urn) obj.urn = window.CURRENT_MODEL_URN;
+      if (!obj.urn) obj.urn = defaultUrn || window.CURRENT_MODEL_URN;
     });
   }
   if (Array.isArray(task.children)) {
-    task.children.forEach(fillUrnRecursive);
+    // task.children.forEach(fillUrnRecursive);
+    task.children.forEach(child => fillUrnRecursive(child, defaultUrn));
   }
 }
+
+
 
 
 // -------- 앱 전체 초기화 IIFE ---------
@@ -84,10 +101,33 @@ function fillUrnRecursive(task) {
         };
       };
 
+      // 로그인 상태면 UI 초기화
+      const Sidebar = document.getElementById("sidebar");
+      const Header = document.getElementById("header");
+      const Preview = document.getElementById("preview");
+      const sidebarResizer = document.getElementById("sidebar-resizer");
+      const Loading = document.getElementById("loading");
+
+      Sidebar.style.display = "";
+      Sidebar.style.width = "500px";  // 원하는 값
+
+      sidebarResizer.style.display = "";
+      sidebarResizer.style.left = "500px";
+
+      Preview.style.display = "";
+      Preview.style.left = Sidebar.style.width;   // "500px"
+      Preview.style.right = "0";
+      Preview.style.top = "3em";
+      Preview.style.bottom = "0";
+
+      Header.style.display = "";
+      
+      Loading.style.display = "none"; // 로딩 화면 숨김
+
       // 2. 각 영역별 초기화
       initTabs("#sidebar"); // 좌측 탭 (프로젝트/Task 등)
-      const viewer = await initViewer(document.getElementById("preview")); // 3D 뷰어
-      initToolbar(viewer);
+      const viewer = await initViewer(document.getElementById("viewer-host")); // 3D 뷰어
+      // initToolbar(viewer);
 
       // 3. 트리 영역(프로젝트) 초기화: 모델 선택 시 콜백 등록
       initTree("#tree", async (versionId) => {
@@ -105,46 +145,94 @@ function fillUrnRecursive(task) {
         await loadTaskDataIfExists();
 
         // [**변경**] 모든 taskData에 urn이 누락된 linkedObject 자동 보정!
+        // taskData.forEach(task => fillUrnRecursive(task, urn));
         taskData.forEach(task => fillUrnRecursive(task, urn));
-         
+
         // 뷰어에 모델 로드 (OBJECT_TREE_CREATED_EVENT까지 기다림)
         console.log("[main.js] 모델 선택! versionId:", versionId, "urn:", urn);
         await loadModel(viewer, urn);
         
-        // 3D모델 구조(오브젝트 트리) 완성 시점에 Task/WBS UI 구성
-        viewer.addEventListener(
-          Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT,
-          async function handler() {
-            viewer.removeEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, handler);
-      
-            // WBS(공정 분류) 데이터 빌드
-            let wbsData = [];
+        // OBJECT_TREE_CREATED_EVENT 이벤트 핸들러 내에서 Task/WBS 패널 구성
+        const proceed = async () => {
+          let wbsData = [];
+          try { wbsData = await buildWbsTreeData(viewer); }
+          catch (e) { wbsData = []; console.warn("[main.js] WBS 데이터 생성 실패!", e); }
+
+          initTaskListButtons();
+          initPanel2Content(taskData, wbsData);
+          bindPanel2Resizer();
+
+          // 1) panel2-ready 먼저: index.html에서 이 이벤트를 받아
+          //    initGanttView → window.gantt 생성 + 최초 렌더를 수행함
+          window.dispatchEvent(new Event('panel2-ready'));
+          // 2) 혹시 이미 window.gantt가 살아있는(핫리로드 등) 케이스를 위해 한 번 더 시도
+          setTimeout(() => {
             try {
-              wbsData = await buildWbsTreeData(viewer);
-            } catch (e) {
-              wbsData = [];
-              console.warn("[main.js] WBS 데이터 생성 실패!", e);
+              console.log('[gantt] redraw after panel2-ready');
+              window.gantt?.renderFromTrees(window.taskTree, window.wbsTree);
+            } catch(e) { console.warn('[gantt] draw failed', e); }
+          }, 0);
+
+          setTimeout(() => {
+            if (window.taskTree && window.wbsTree) {
+              window.taskTree.render(true, true);
+              setTimeout(updateWBSHighlight, 0);
             }
+          }, 0);
+        };
 
-            // panel2 (Task + WBS) 및 버튼, 리사이저, 이벤트 등 UI 재구성
-            initTaskListButtons();
-            initPanel2Content(taskData, wbsData);
-            bindPanel2Resizer();
-
-            // 강조(연결 표시)는 완전히 트리/DOM이 다 생성된 후 실행 (최종 1회)
-            setTimeout(() => {
-              if (window.taskTree && window.wbsTree) {
-                window.taskTree.render(true, true); // 이미 렌더돼 있다면 생략 가능
-                setTimeout(updateWBSHighlight, 0);  // <- import로 온 함수
-              }
-            }, 0);
-          }
-        );
+        if (viewer.model?.getData?.()?.instanceTree) {
+          await proceed();
+        } else {
+          viewer.addEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, async function handler() {
+            viewer.removeEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, handler);
+            await proceed();
+          });
+        }
       });
+
+
+        // // 3D모델 구조(오브젝트 트리) 완성 시점에 Task/WBS UI 구성
+        // viewer.addEventListener(
+        //   Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT,
+        //   async function handler() {
+        //     viewer.removeEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, handler);
+      
+        //     // WBS(공정 분류) 데이터 빌드
+        //     let wbsData = [];
+        //     try {
+        //       wbsData = await buildWbsTreeData(viewer);
+        //     } catch (e) {
+        //       wbsData = [];
+        //       console.warn("[main.js] WBS 데이터 생성 실패!", e);
+        //     }
+
+        //     // panel2 (Task + WBS) 및 버튼, 리사이저, 이벤트 등 UI 재구성
+        //     initTaskListButtons();
+        //     initPanel2Content(taskData, wbsData);
+        //     bindPanel2Resizer();
+            
+        //     //간트차트 동기화
+        //     try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_) {}
+        //     window.dispatchEvent(new Event('panel2-ready'));
+
+        //     // 강조(연결 표시)는 완전히 트리/DOM이 다 생성된 후 실행 (최종 1회)
+        //     setTimeout(() => {
+        //       if (window.taskTree && window.wbsTree) {
+        //         window.taskTree.render(true, true); // 이미 렌더돼 있다면 생략 가능
+        //         setTimeout(updateWBSHighlight, 0);  // <- import로 온 함수
+        //       }
+        //     }, 0);
+        //   }
+        // );
+      // });
+      
     } else {
       // 미로그인 상태면 Login 버튼만
-      login.innerText = "Login";
-      login.onclick = () => window.location.replace("/api/auth/login");
+      // login.innerText = "Login";
+      // login.onclick = () => window.location.replace("/api/auth/login");
+      window.location.replace("/api/auth/login");
+      return;
     }
 
     login.style.visibility = "visible";
@@ -172,7 +260,12 @@ async function loadTaskDataIfExists() {
         SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
         setSavedTaskData(taskData);
       }
+    } else {
+      taskData.length = 0;
+      SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+      setSavedTaskData(taskData);
     }
+
   } catch (err) {
     taskData.length = 0;
     SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
@@ -187,6 +280,8 @@ function destroyTaskPanel() {
   try { $.ui.fancytree.getTree("#treegrid")?.destroy(); } catch (e) {}
   window.taskTree = null;
   window.wbsTree = null;
+  // 간트 쪽은 DOM만 지워도 되지만, 확실히 초기화하고 싶다면:
+  try { window.gantt?.drawFromRows?.([]); } catch(_) {}
   $("#wbs-group-content").empty(); // ← 기존 DOM, 이벤트도 전부 날려줌
   $("#panel2").html(`
     <div id="vertical-split-container">
@@ -212,6 +307,7 @@ function destroyTaskPanel() {
             <col width="260px" />
             <col width="100px" />
             <col width="100px" />
+            <col width="100px" />
             <col width="60px" />
           </colgroup>
           <thead>
@@ -220,6 +316,7 @@ function destroyTaskPanel() {
               <th>구분</th>
               <th>작업명</th>
               <th>시작일</th>
+              <th>소요시간(Day)</th>
               <th>완료일</th>
               <th>객체개수</th>
             </tr>
@@ -239,4 +336,3 @@ function destroyTaskPanel() {
     </div>
   `);
 }
-

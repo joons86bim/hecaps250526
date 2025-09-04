@@ -138,26 +138,66 @@
   vertical-align: middle !important;
 }
 
-/* 객체개수 강조 */
+/* 객체개수 강조 
 #treegrid td.objcount.highlight {
   background: #f55;
   color: #fff;
-}
+} */
+
+/* ── Task 표: 객체개수 셀 색상 (구분별) ───────── */
+#treegrid td.objcount { transition: background 0.15s, color 0.15s; }
+#treegrid td.objcount.objcount--c { background:#2e7d32; color:#fff; }  /* 시공=초록 */
+#treegrid td.objcount.objcount--t { background:#1976d2; color:#fff; }  /* 가설=파랑 */
+#treegrid td.objcount.objcount--d { background:#f44336; color:#fff; }  /* 철거=빨강 */
 
 /* WBS 연결된 항목 배경색 강조 */
-/* connected+selected (더 밝은 붉은색) */
+/* connected+selected (더 밝은 붉은색) 
 #wbs-group-list li.connected.selected > .title-wrap,
 #wbs-group-list li.selected.connected > .title-wrap {
   background: #ffd0d0 !important;
   color: #fff !important;
   border-radius: 2px;
-}
-/* connected만 (기존 붉은색) */
+} */
+/* connected만 (기존 붉은색) 
 #wbs-group-list li.connected > .title-wrap {
   background: #f66 !important;
   color: #fff !important;
   border-radius: 2px;
+} */
+
+/* ── WBS 트리: 연결 상태(leaf 기준) ─────────── */
+#wbs-group-list li.wbs-c   > .title-wrap { background:#2e7d32 !important; color:#fff !important; font-weight:600 !important; border-radius:2px; } /* 시공 */
+#wbs-group-list li.wbs-blue> .title-wrap { color:#1976d2 !important; background:transparent !important; font-weight:600 !important; }            /* 가설-only or 철거-only */
+#wbs-group-list li.wbs-td  > .title-wrap { background:#f44336 !important; color:#1976d2 !important; font-weight:600 !important; border-radius:2px;  } /* 가설+철거 */
+
+/* 각 항목 한 줄(.title-wrap) 안에 우측 뱃지 표시 */
+#wbs-group-list li > .title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;             /* 체크박스/타이틀 사이 여백 */
 }
+
+/* 우측 숫자 뱃지 */
+#wbs-group-list .count-badge {
+  margin-left: auto;    /* 오른쪽 끝으로 밀기 */
+  font-size: 12px;
+  color: #666;
+  background: #f1f3f5;
+  border-radius: 12px;
+  padding: 0 8px;
+  line-height: 18px;
+  min-width: 24px;
+  text-align: right;
+}
+
+/* (옵션) 연결된 항목일 때 뱃지 톤 */
+#wbs-group-list li.connected > .title-wrap .count-badge {
+  background: #ffe3e3;
+  color: #b00;
+}
+
+/* 숫자가 없으면 아예 표시 X (공간 제거) */
+.count-badge:empty { display: none; }
 
 /* WBS Group List 헤더 고정 */
 #wbs-group-list-panel .panel-header {
@@ -237,3 +277,4 @@
   font-size: 14px;
   padding: 0;
 }
+

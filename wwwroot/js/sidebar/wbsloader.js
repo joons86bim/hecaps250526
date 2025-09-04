@@ -72,60 +72,120 @@ export async function buildWbsTreeData(viewer) {
   // 3. 그룹핑/키명 처리
   const wbsMap = {};
   for (const obj of allProps) {
-    // 1. WBS, Level
+    // 1. WBS, Level, 객체이름
     let wbs = "WBS 미지정";
     let level = "Level 미지정";
+    let name = obj.name || "";
+    // 속성 매핑
     if (Array.isArray(obj.properties)) {
       for (const prop of obj.properties) {
         if (prop.displayName === "HEC.WBS" && prop.displayValue)
           wbs = prop.displayValue;
         if (prop.displayName === "HEC.Level" && prop.displayValue)
           level = prop.displayValue;
+        if (prop.displayName === "명칭" && prop.displayValue) 
+          name = prop.displayValue;
       }
     }
 
     // 2. 이름 파싱: 대괄호 포함부분 제거
-    let name = obj.name || "";
     name = name.replace(/\s*\[[^\]]*\]/g, "").trim();
 
     if (!wbsMap[wbs]) wbsMap[wbs] = {};
-    if (!wbsMap[wbs][level]) wbsMap[wbs][level] = [];
-    wbsMap[wbs][level].push({
-      dbId: obj.dbId,
-      modelId: obj.modelId,
-      name, // [ ] 제거된 이름
-    });
+    if (!wbsMap[wbs][level]) wbsMap[wbs][level] = {};
+    if (!wbsMap[wbs][level][name]) wbsMap[wbs][level][name] = [];
+    wbsMap[wbs][level][name].push(obj.dbId);
+    // wbsMap[wbs][level].push({
+    //   dbId: obj.dbId,
+    //   modelId: obj.modelId,
+    //   name, // [ ] 제거된 이름
+    // });
+  }
+
+  // 재귀적으로 하위 노드 개수 집계
+  function getTotalCount(node) {
+    if (Array.isArray(node)) return node.length;
+    return Object.values(node).reduce((sum, child) => sum + getTotalCount(child), 0);
+  }
+
+  // 카운트 글자 꾸미기
+  function countBadge(n) {
+    return n > 0 ? ` (${n})` : "";
+  }
+
+  // 정렬 함수: "WBS 미지정" 또는 "Level 미지정"이 마지막에 오도록
+  function sortEntryMissedLast([a], [b]) {
+    if (a === "WBS 미지정" || a === "Level 미지정") return 1;
+    if (b === "WBS 미지정" || b === "Level 미지정") return -1;
+    return a.localeCompare(b, "ko");
   }
 
   // 4. 트리 변환
   const wbsTreeData = Object.entries(wbsMap)
-    .sort(([a], [b]) => {
-      if (a === "WBS 미지정") return 1;
-      if (b === "WBS 미지정") return -1;
-      return a.localeCompare(b, "ko");
-    })
-    .map(([wbs, levels]) => ({
-      id: `${urn}::${wbs}`,
-      text: wbs,
-      urn,
-      children: Object.entries(levels)
-        .sort(([a], [b]) => {
-          if (a === "Level 미지정") return 1;
-          if (b === "Level 미지정") return -1;
-          return a.localeCompare(b, "ko");
-        })
-        .map(([level, objs]) => ({
-          id: `${urn}::${wbs}::${level}`,
-          text: level,
-          urn,
-          children: objs.map((obj) => ({
-            id: `${urn}::${obj.dbId}`,
-            text: `${obj.name || ""} [${obj.dbId}]`, // ★ 실제 dbId만 출력
-            dbId: obj.dbId,
-            urn,
-          })),
-        })),
-    }));
+    .sort(sortEntryMissedLast) // WBS 미지정 마지막
+    .map(([wbs, levels]) => {
+      const wbsCount = getTotalCount(levels);
+      return {
+        id: `${urn}::${wbs}`,
+        text: `${wbs}${countBadge(wbsCount)}`,
+        urn,
+        children: Object.entries(levels)
+          .sort(sortEntryMissedLast) // Level 미지정 마지막
+          .map(([level, names]) => {
+            const levelCount = getTotalCount(names);
+            return {
+              id: `${urn}::${wbs}::${level}`,
+              text: `${level}${countBadge(levelCount)}`,
+              urn,
+              children: Object.entries(names)
+                .sort(sortEntryMissedLast) // Name 미지정 마지막 (필요시)
+                .map(([name, dbIds]) => {
+                  const nameCount = dbIds.length;
+                  return {
+                    id: `${urn}::${wbs}::${level}::${name}`,
+                    text: `${name}${countBadge(nameCount)}`,
+                    urn,
+                    children: dbIds.map((dbId) => ({
+                      id: `${urn}::${wbs}::${level}::${name}::${dbId}`,
+                      text: `[${dbId}]`,
+                      dbId,
+                      urn,
+                      children: [],
+                    })),
+                  };
+                }),
+            };
+          }),
+      };
+    });
+  // const wbsTreeData = Object.entries(wbsMap)
+  //   .sort(([a], [b]) => {
+  //     if (a === "WBS 미지정") return 1;
+  //     if (b === "WBS 미지정") return -1;
+  //     return a.localeCompare(b, "ko");
+  //   })
+  //   .map(([wbs, levels]) => ({
+  //     id: `${urn}::${wbs}`,
+  //     text: wbs,
+  //     urn,
+  //     children: Object.entries(levels)
+  //       .sort(([a], [b]) => {
+  //         if (a === "Level 미지정") return 1;
+  //         if (b === "Level 미지정") return -1;
+  //         return a.localeCompare(b, "ko");
+  //       })
+  //       .map(([level, objs]) => ({
+  //         id: `${urn}::${wbs}::${level}`,
+  //         text: level,
+  //         urn,
+  //         children: objs.map((obj) => ({
+  //           id: `${urn}::${obj.dbId}`,
+  //           text: `${obj.name || ""} [${obj.dbId}]`, // ★ 실제 dbId만 출력
+  //           dbId: obj.dbId,
+  //           urn,
+  //         })),
+  //       })),
+  //   }));
 
   //   console.log("== 최종 wbsTreeData ==", JSON.stringify(wbsTreeData, null, 2));
   return wbsTreeData;

@@ -1,0 +1,164 @@
+/* /wwwroot/css/gantt.css */
+:root {
+  --sidebar-width: 500px;    /* 좌측 사이드바 기본 너비 */
+  --gantt-height: 320px;     /* 간트 초기 높이 */
+}
+
+/* 전역 오버플로 제거: 페이지 스크롤바 방지 */
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 미리보기(뷰어+간트) 영역: 뷰포트 안에서만 배치 */
+#preview {
+  position: fixed;
+  top: 3em; /* 헤더 높이 */
+  left: var(--sidebar-width, 500px);
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 뷰어 호스트는 남는 공간 모두 */
+#viewer-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 스플리터 바: 드래그로 간트 높이 조절 */
+#gantt-splitter {
+  position: relative;        /* ← 추가 */
+  z-index: 2600;             /* ← 추가 */
+  flex: 0 0 4px;
+  height: 4px;
+  cursor: row-resize;
+  background: linear-gradient(to bottom,#e9edf3,#dfe5ee);
+  border-top: 1px solid #cfd6e3;
+  border-bottom: 1px solid #cfd6e3;
+}
+
+/* 간트 패널 */
+#gantt-pane {
+  flex: 0 0 var(--gantt-height, 320px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+  z-index: 2000;
+  position: relative;
+}.gantt-open-btn { z-index: 3000;}
+
+/* 간트 툴바 */
+.gantt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eef1f6;
+  background: #f9fafb;
+}
+
+.gantt-toolbar .btn {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.gantt-toolbar .btn:hover { background: #f3f4f6; }
+
+.gantt-range {
+  margin-left: 8px;
+  color: #6b7280;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* 캔버스(차트) */
+#gantt-chart {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+} 
+
+/* 간트 접힘 상태 */
+#preview.gantt-collapsed #gantt-pane {
+  flex-basis: 0px !important;
+  height: 0 !important;
+  border-top: none;
+}
+#preview.gantt-collapsed #gantt-splitter {
+  cursor: ns-resize;
+}
+
+/* 접힌 상태에서도 항상 보이는 작은 토글 버튼 */
+.gantt-open-btn{
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3000;
+  display: none;               /* 기본은 숨김 */
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  cursor: pointer;
+}
+.gantt-open-btn:hover { background: #f3f4f6; }
+
+/* 접힌 상태에서만 나타나게 */
+#preview.gantt-collapsed .gantt-open-btn { display: inline-flex; }
+
+#gantt-chart > div { height: 100% !important; }
+
+/* Gantt 라벨 좌측정렬 강제 */
+#gantt-chart svg text { text-anchor: start !important; }
+
+
+/* 상단 날짜축(커스텀) */
+.gantt-top-axis {
+  position: sticky;
+  top: 0;                 /* #gantt-pane 상단에 붙음 */
+  z-index: 2;
+  background: #fafbff;
+  border-bottom: 1px solid #eef1f6;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;       /* 본체는 숨겨두고 내부 스크롤러만 이동 */
+  padding: 0 8px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+/* 커스텀 축 안쪽의 스크롤러(폭은 JS에서 동기화) */
+.gantt-top-axis .axis-track {
+  position: relative;
+  height: 100%;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+/* 월 구간 블럭 */
+.gantt-top-axis .axis-month {
+  display: inline-block;
+  text-align: center;
+  border-left: 1px solid #e5e7eb;
+  height: 100%;
+  line-height: 26px;
+  padding: 0 4px;
+}

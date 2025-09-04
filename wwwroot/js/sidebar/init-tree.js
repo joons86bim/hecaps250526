@@ -59,8 +59,12 @@ async function getVersions(hubId, projectId, itemId) {
   const versions = await getJSON(
     `/api/hubs/${hubId}/projects/${projectId}/contents/${itemId}/versions`
   );
-  return versions.map((version) =>
-    createTreeNode(`version|${version.id}`, version.name, "icon-version")
+  return versions.map((version, idx) =>
+    createTreeNode(
+      `version|${version.id}`,
+      formatVersion(version, versions.length - idx - 1), // ← 여기서 포맷된 이름 사용
+      "icon-version"
+    )
   );
 }
 
@@ -95,4 +99,22 @@ export function initTree(selector, onSelectionChanged) {
     }
   });
   return new InspireTreeDOM(tree, { target: selector });
+}
+
+// version.name 또는 version.createTime 처럼 날짜가 들어오는 경우
+function formatVersion(version, idx) {
+  // idx는 배열 순서(예: 0,1,2...) 또는 버전 번호로 넘겨주면 됨
+  const dateStr = version.name || version.createTime; // 실제 데이터에 맞게 조정
+  const date = new Date(dateStr); // JS Date 객체로 파싱
+
+  // 버전번호: idx + 1 (예: V2)
+  const versionNum = "V" + (idx + 1);
+
+  // 날짜 yyyy-mm-dd 포맷
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const dateOnly = `${y}-${m}-${d}`;
+
+  return `${versionNum}_${dateOnly}`;
 }

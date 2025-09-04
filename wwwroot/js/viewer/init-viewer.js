@@ -1,17 +1,24 @@
 import { getAccessToken } from "./token-provider.js";
+import { MyCustomViewerExtension } from './CustomViewerExtension.js';
 
 /**
  * Autodesk Viewer 초기화
  * @param {HTMLElement} container - Viewer를 넣을 DOM 엘리먼트
  * @returns {Promise<Autodesk.Viewing.GuiViewer3D>}
  */
+
+Autodesk.Viewing.theExtensionManager.registerExtension(
+  'MyCustomViewerExtensionId',
+  MyCustomViewerExtension
+);
+
 export function initViewer(container) {
   return new Promise((resolve, reject) => {
     Autodesk.Viewing.Initializer(
       { env: "AutodeskProduction", getAccessToken },
       () => {
         const config = {
-          extensions: ["Autodesk.DocumentBrowser"],
+          extensions: ['MyCustomViewerExtensionId'],  
         };
         const viewer = new Autodesk.Viewing.GuiViewer3D(container, config);
         window.viewer = viewer;

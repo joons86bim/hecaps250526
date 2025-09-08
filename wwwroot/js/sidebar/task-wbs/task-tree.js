@@ -1,0 +1,259 @@
+// Task(Fancytree) 초기화 + 편집 + 날짜/집계/간트 플러시
+import { calcLeadtime, calcEnd, calcStart } from "./core/date-helpers.js";
+import { propagateCategoryDown, enforceCategoryInheritance, normalizeTaskCategory } from "./core/categories.js";
+import { recomputeAggDown, recomputeAggUp, recomputeAggObjects } from "./core/aggregate.js";
+import { aggregateTaskFields } from "./logic/task-aggregate.js";
+import { showDatePickerInput, calendarSvg } from "./ui/mask-and-picker.js";
+import { requestWbsHighlight, requestWbsHighlightGateOn } from "./wbs/highlight.js";
+
+// 외부에서 필요하면 끌어다 씁니다.
+export function initTaskPanel(taskData) {
+  $("#treegrid").fancytree({
+    extensions: ["table", "gridnav"],
+    checkbox: false,
+    selectMode: 2,
+    table: { indentation: 20, nodeColumnIdx: 2 },
+    source: taskData,
+    init: function (event, data) {
+      // 리드타임 전체 재계산 + 객체 집계
+      try { recomputeAggObjects(data.tree); } catch(e){}
+      data.tree.render(true, true);
+      enforceCategoryInheritance(data.tree);
+      setTimeout(() => scheduleFlush(), 0);
+    },
+    renderColumns: function (event, data) {
+      const node = data.node;
+      const $tdList = $(node.tr).find(">td");
+      const isTop = (typeof node.getLevel === "function") ? node.getLevel() === 1 : (node.parent?.isRoot?.() === true);
+
+      $tdList.eq(0).text(node.data.no || "");
+      $tdList.eq(1).html(
+        `<select class="treegrid-dropdown" ${isTop ? "" : "disabled"} style="width:100%;box-sizing:border-box;height:28px;">
+          ${node.data.selectOptions.map(opt => `<option${opt === node.data.selectedOption ? " selected" : ""}>${opt}</option>`).join("")}
+        </select>`
+      );
+      $tdList.eq(2).find(".fancytree-title").text(node.data.title || node.title || "");
+      $tdList.eq(3).text(node.data.start || "").addClass("text-center");
+      $tdList.eq(4).text(node.data.leadtime || "").addClass("text-center");
+      $tdList.eq(5).text(node.data.end || "").addClass("text-center");
+
+      const objCount = Number(node.data._aggObjCount || 0);
+      $tdList.eq(6)
+        .text(objCount || "")
+        .addClass("text-center objcount")
+        .removeClass("highlight objcount--c objcount--t objcount--d")
+        .each(function(){
+          if (!objCount) return;
+          const cat = normalizeTaskCategory(node.data?.selectedOption);
+          if (cat === "C") $(this).addClass("objcount--c");
+          else if (cat === "T") $(this).addClass("objcount--t");
+          else if (cat === "D") $(this).addClass("objcount--d");
+        });
+    }
+  });
+
+  const tree = $.ui.fancytree.getTree("#treegrid");
+  window.taskTree = tree;
+
+  // 편집/더블클릭
+  $("#treegrid")
+    .off("dblclick", "td")
+    .on("dblclick", "td", function(){
+      const colIdx = this.cellIndex;
+      const node = $.ui.fancytree.getNode(this);
+      if (!node) return;
+
+      if (colIdx === 0 || colIdx === 2) {
+        const field = (colIdx === 0 ? "no" : "title");
+        const label = (colIdx === 0 ? "No." : "작업명");
+        const oldValue = (colIdx === 0 ? node.data.no : node.data.title) || "";
+        const newValue = prompt(`${label} 값을 입력하세요:`, oldValue);
+        if (newValue !== null && newValue !== oldValue) {
+          commit(node, { [field]: newValue });
+          if (field === "title") node.setTitle(newValue);
+        }
+        return;
+      }
+
+      if (!node.hasChildren() && (colIdx === 3 || colIdx === 4 || colIdx === 5)) {
+        const $td = $(this);
+        if ($td.find("input").length) return;
+        if (colIdx === 4) openLeadtimeEditor($td, node);
+        else openDateEditor($td, node, (colIdx === 3 ? "start" : "end"));
+        return;
+      }
+
+      if (colIdx === 6) {
+        const objs = aggregateTaskFields(node).objects;
+        if (objs.length === 0) return alert("연결된 객체 없음");
+        const CUR_URN = window.CURRENT_MODEL_URN || "";
+        const pathMap = window.__WBS_PATHMAP || new Map();
+        const lines = objs.map(o => {
+          const urn = o.urn || CUR_URN;
+          const key = `${urn}:${o.dbId}`;
+          const fallback = (o.text || "").trim();
+          const path = pathMap.get(key) || fallback || "(이름없음)";
+          return `${path} - [${o.dbId}]`;
+        });
+        alert(lines.join("\n"));
+      }
+    });
+
+  // 구분 변경 → 전면 하이라이트 1회 (게이트 ON 상태)
+  $("#treegrid").on("change", ".treegrid-dropdown", function(){
+    const $tr = $(this).closest("tr");
+    const node = $.ui.fancytree.getNode($tr);
+    const isTop = (typeof node.getLevel === "function") ? node.getLevel() === 1 : (node.parent?.isRoot?.() === true);
+    if (!isTop) { this.value = node.data.selectedOption; return; }
+    const newCat = this.value;
+    propagateCategoryDown(node, newCat);
+    node.tree.render(true, true);
+    window.requestTaskTreeFlush?.();
+    requestWbsHighlightGateOn();
+    requestWbsHighlight();
+  });
+
+  // 글로벌 플러시 유틸 등록
+  window.requestTaskTreeFlush = () => scheduleFlush();
+  window.requestTaskRecalcAndFlush = function () {
+    scheduleFlush({ full: true });
+  };
+}
+
+let __pending = false;
+function scheduleFlush({ full = false } = {}) {
+  if (__pending) return;
+  __pending = true;
+  requestAnimationFrame(() => {
+    try {
+      const tree = window.taskTree;
+      if (full) recomputeAggObjects(tree);
+      if (window.savedTaskData) {
+        // buttons.js 가 export 하는 setSavedTaskData를 호출하게 되어 있으므로
+        // 여기서는 저장본 스냅샷만 갱신해줍니다(필요 시).
+      }
+    } finally { __pending = false; }
+  });
+  // 간트는 가볍게 스로틀
+  const draw = () => { try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_){} };
+  (typeof _ !== "undefined" && _.throttle) ? _.throttle(draw, 250)() : draw();
+}
+
+function commit(node, patch, changedField, adjustTarget) {
+  if (!node?.data) return;
+  if (typeof patch === "function") patch(node.data);
+  else if (patch && typeof patch === "object") Object.assign(node.data, patch);
+
+  recalcLeadtimeFields(node, changedField, adjustTarget);
+  recalcLeadtimeDescendants(node);
+  recalcLeadtimeAncestors(node);
+
+  const isDate = (changedField === "start" || changedField === "end" || changedField === "leadtime");
+  if (!isDate) { recomputeAggDown(node); recomputeAggUp(node); }
+
+  node.render();
+  scheduleFlush();
+}
+
+// 리드타임 보조 (inline)
+function recalcLeadtimeFields(node, changedField, popupCallback) {
+  node.data = node.data || {};
+  let { start, end, leadtime } = node.data;
+  const has = v => v !== undefined && v !== null && v !== "";
+  const cnt = (has(start)?1:0) + (has(end)?1:0) + (has(leadtime)?1:0);
+
+  if (cnt === 2) {
+    if (has(start) && has(leadtime) && !has(end)) node.data.end = calcEnd(start, leadtime);
+    else if (has(start) && has(end) && !has(leadtime)) node.data.leadtime = calcLeadtime(start, end);
+    else if (has(end) && has(leadtime) && !has(start)) node.data.start = calcStart(end, leadtime);
+    return;
+  }
+  if (cnt === 3 && changedField) {
+    if (changedField === "leadtime" && typeof popupCallback === "function") {
+      popupCallback((updateField) => {
+        start = node.data.start; end = node.data.end; leadtime = node.data.leadtime;
+        if (updateField === "start") node.data.start = calcStart(end, leadtime);
+        else if (updateField === "end") node.data.end = calcEnd(start, leadtime);
+      });
+    } else if (changedField === "start" || changedField === "end") {
+      node.data.leadtime = calcLeadtime(node.data.start, node.data.end);
+    }
+  }
+}
+function recalcLeadtimeDescendants(node) {
+  if (!(node.hasChildren && node.hasChildren())) recalcLeadtimeFields(node);
+  else (node.children || []).forEach(recalcLeadtimeDescendants);
+}
+function recalcLeadtimeAncestors(node) {
+  if (!node.parent) return;
+  const p = node.parent, children = p.children || [];
+  if (!children.length) return;
+  let minStart = "", maxEnd = "";
+  for (const c of children) {
+    const cs = c.data && c.data.start || "";
+    const ce = c.data && c.data.end   || "";
+    if (cs) minStart = (!minStart || cs < minStart) ? cs : minStart;
+    if (ce) maxEnd   = (!maxEnd   || ce > maxEnd)   ? ce : maxEnd;
+  }
+  p.data = p.data || {};
+  p.data.start = minStart || "";
+  p.data.end   = maxEnd   || "";
+  p.data.leadtime = (p.data.start && p.data.end) ? calcLeadtime(p.data.start, p.data.end) : "";
+  recalcLeadtimeAncestors(p);
+}
+
+// 인라인 에디터들
+function openLeadtimeEditor($td, node) {
+  const field = "leadtime";
+  const oldValue = node.data.leadtime || "";
+  $td.empty();
+
+  const $input = $('<input type="number" min="1" step="1" style="width:60px;text-align:center;">').val(oldValue);
+  $td.append($input);
+  $input.focus();
+
+  function restoreCell() { setTimeout(() => $td.text(node.data[field] ?? ""), 10); $(document).off("mousedown.cellEdit"); }
+  $input.on("keydown", (ev) => { if (ev.key === "Enter") $input.blur(); if (ev.key === "Escape") restoreCell(); });
+  $input.on("blur", () => {
+    const v = $input.val();
+    if (/^\d+$/.test(v) && Number(v) > 0) {
+      const val = parseInt(v, 10);
+      commit(node, { leadtime: val }, "leadtime", (choose) => {
+        const okMeansEnd = confirm("소요시간을 변경했습니다.\n\n확인: 시작일 고정 → 종료일 재계산\n취소: 종료일 고정 → 시작일 재계산");
+        choose(okMeansEnd ? "end" : "start");
+      });
+    }
+    restoreCell();
+  });
+  setTimeout(() => {
+    $(document).on("mousedown.cellEdit", (e) => {
+      if (!$.contains($td[0], e.target) && e.target !== $input[0]) restoreCell();
+    });
+  }, 0);
+}
+function openDateEditor($td, node, field) {
+  const oldValue = node.data[field] || "";
+  $td.empty();
+
+  const $input = $('<input type="text" class="datepicker-input" style="width:100px;text-align:center;" placeholder="yyyy-mm-dd">').val(oldValue);
+  const $iconBtn = $('<button type="button" class="datepicker-btn" style="margin-left:4px; padding:0; background:none; border:none; cursor:pointer;"></button>').html(calendarSvg);
+  $td.append($input, $iconBtn);
+
+  if (window.IMask) IMask($input[0], { mask: "0000-00-00", lazy: false, autofix: true });
+
+  function restoreCell() { setTimeout(() => $td.text(node.data[field] || ""), 10); $(document).off("mousedown.cellEdit"); }
+
+  $input.on("keydown", (ev) => { if (ev.key === "Enter") $input.blur(); if (ev.key === "Escape") restoreCell(); });
+  setTimeout(() => {
+    $(document).on("mousedown.cellEdit", (e) => {
+      if (!$.contains($td[0], e.target) && e.target !== $input[0] && e.target !== $iconBtn[0]) restoreCell();
+    });
+  }, 0);
+
+  function commitDate(dateStr) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) commit(node, { [field]: dateStr }, field);
+    restoreCell();
+  }
+  $input.on("blur", () => commitDate($input.val()));
+  $iconBtn.on("click", (ev) => { ev.stopPropagation(); showDatePickerInput($td, node.data[field], (dateStr) => commitDate(dateStr)); });
+}

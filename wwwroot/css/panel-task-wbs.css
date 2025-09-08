@@ -103,8 +103,8 @@
   /* flex: 1 1 0%;                초기에 공간을 균등하게 나눔 */
   min-height: 100px;           /* 최소 높이 제한 */
   overflow-y: auto;            /* 내용이 넘치면 스크롤바 표시 */
-  height: 50%;              /* 각 패널의 높이를 50%로 설정 */
-  transition: height 0.2s; /* 높이 변경 시 부드러운 전환 효과 */
+  height: 50%;                 /* 각 패널의 높이를 50%로 설정 */
+  transition: height 0.2s;     /* 높이 변경 시 부드러운 전환 효과 */
 }
 
 /* 패널 헤더(버튼+타이틀) sticky */
@@ -119,10 +119,8 @@
 /* 구분선(드래그 바) 스타일 */
 #resizer {
   height: 2px;
-  /* flex: 0 0 5px;               5px 높이의 고정 바 */
   background: #ccc;
-  cursor: row-resize;         /* 세로 드래그 커서 */        
-  /* transition: background 0.2s; */
+  cursor: row-resize;        
   flex-shrink: 0;
 }
 
@@ -138,56 +136,39 @@
   vertical-align: middle !important;
 }
 
-/* 객체개수 강조 
-#treegrid td.objcount.highlight {
-  background: #f55;
-  color: #fff;
-} */
-
 /* ── Task 표: 객체개수 셀 색상 (구분별) ───────── */
 #treegrid td.objcount { transition: background 0.15s, color 0.15s; }
 #treegrid td.objcount.objcount--c { background:#2e7d32; color:#fff; }  /* 시공=초록 */
 #treegrid td.objcount.objcount--t { background:#1976d2; color:#fff; }  /* 가설=파랑 */
 #treegrid td.objcount.objcount--d { background:#f44336; color:#fff; }  /* 철거=빨강 */
 
-/* WBS 연결된 항목 배경색 강조 */
-/* connected+selected (더 밝은 붉은색) 
-#wbs-group-list li.connected.selected > .title-wrap,
-#wbs-group-list li.selected.connected > .title-wrap {
-  background: #ffd0d0 !important;
-  color: #fff !important;
-  border-radius: 2px;
-} */
-/* connected만 (기존 붉은색) 
-#wbs-group-list li.connected > .title-wrap {
-  background: #f66 !important;
-  color: #fff !important;
-  border-radius: 2px;
-} */
-
 /* ── WBS 트리: 연결 상태(leaf 기준) ─────────── */
 #wbs-group-list li.wbs-c   > .title-wrap { background:#2e7d32 !important; color:#fff !important; font-weight:600 !important; border-radius:2px; } /* 시공 */
 #wbs-group-list li.wbs-blue> .title-wrap { color:#1976d2 !important; background:transparent !important; font-weight:600 !important; }            /* 가설-only or 철거-only */
-#wbs-group-list li.wbs-td  > .title-wrap { background:#f44336 !important; color:#1976d2 !important; font-weight:600 !important; border-radius:2px;  } /* 가설+철거 */
+#wbs-group-list li.wbs-td  > .title-wrap { background:#f44336 !important; color:#1976d2 !important; font-weight:600 !important; border-radius:2px; } /* 가설+철거 */
 
-/* 각 항목 한 줄(.title-wrap) 안에 우측 뱃지 표시 */
+/* 각 항목 한 줄(.title-wrap) 안에 우측 뱃지/아이콘 표시 */
 #wbs-group-list li > .title-wrap {
   display: flex;
   align-items: center;
-  gap: 6px;             /* 체크박스/타이틀 사이 여백 */
+  gap: .5rem; /* 체크박스/타이틀 사이 여백 */
 }
 
-/* 우측 숫자 뱃지 */
+/* 숫자 뱃지(비-리프, 2개 이상일 때만 표시) */
 #wbs-group-list .count-badge {
-  margin-left: auto;    /* 오른쪽 끝으로 밀기 */
-  font-size: 12px;
-  color: #666;
-  background: #f1f3f5;
-  border-radius: 12px;
+  display: inline-flex;
+  min-width: 20px;
   padding: 0 8px;
-  line-height: 18px;
-  min-width: 24px;
-  text-align: right;
+  height: 20px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  justify-content: center;
+  background: #eef2ff;   /* 연한 파랑 */
+  color: #3b82f6;        /* 파랑 텍스트 */
+  border: 1px solid #dbeafe;
+  user-select: none;
 }
 
 /* (옵션) 연결된 항목일 때 뱃지 톤 */
@@ -196,8 +177,44 @@
   color: #b00;
 }
 
-/* 숫자가 없으면 아예 표시 X (공간 제거) */
-.count-badge:empty { display: none; }
+/* ⚠️ 텍스트 없으면 완전 제거 (점/테두리도 X) */
+#wbs-group-list .count-badge:empty{
+  display:none !important;
+  padding:0 !important;
+  border:0 !important;
+  min-width:0 !important;
+  height:auto !important;
+}
+
+/* ── 👁 WBS 가시성(눈) 아이콘 ─────────── */
+#wbs-group-list .eye-toggle{
+  margin-left: auto;               /* 오른쪽 끝 정렬 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: .7;
+  border: 1px solid transparent;
+  user-select: none;
+  flex: 0 0 auto;
+}
+#wbs-group-list .eye-toggle:hover{
+  opacity: 1;
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+#wbs-group-list .eye-toggle i{
+  font-size: 16px;
+  line-height: 1;
+}
+#wbs-group-list .eye-toggle.hidden{  opacity: .85; }  /* 전체 숨김 상태 */
+#wbs-group-list .eye-toggle.mixed{   opacity: .45; }  /* 일부만 숨김 (희미) */
+
+#wbs-group-list .eye-toggle svg { width:16px; height:16px; display:block; pointer-events: none; }
+
 
 /* WBS Group List 헤더 고정 */
 #wbs-group-list-panel .panel-header {
@@ -277,4 +294,3 @@
   font-size: 14px;
   padding: 0;
 }
-

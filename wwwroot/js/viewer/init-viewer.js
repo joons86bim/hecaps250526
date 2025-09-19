@@ -1,5 +1,6 @@
 import { getAccessToken } from "./token-provider.js";
 import { MyCustomViewerExtension } from './CustomViewerExtension.js';
+import { BoxSelectionTool } from './selection-tool.js';
 
 /**
  * Autodesk Viewer 초기화
@@ -25,6 +26,11 @@ export function initViewer(container) {
         viewer.start();
         viewer.setTheme("light-theme");
         resolve(viewer);
+        const boxTool = new BoxSelectionTool(viewer);
+        viewer.toolController.registerTool(boxTool);
+        viewer.__boxSelectionTool = boxTool; // (디버그용 핸들)
+        // (권장) 단순 활성화
+        viewer.toolController.activateTool('BoxSelectionTool');
       }
     );
   });

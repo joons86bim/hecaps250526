@@ -80,16 +80,31 @@ export class MyCustomViewerExtension extends Autodesk.Viewing.Extension {
       return b;
     };
 
+    // 🔧 측정 비활성 헬퍼 (unload 금지: 버튼이 사라짐)
+    const deactivateMeasure = (v) => {
+      try {
+        if (v.isExtensionLoaded?.('Autodesk.Measure')) {
+          const ext = v.getExtension('Autodesk.Measure');
+          ext?.deactivate?.();
+          ext?.clearMeasurements?.();
+        }
+      } catch(_) {}
+    };
+
     // ── 버튼 생성
     const clickBtn = mkBtn("my-click-button", "단일 선택", "click-button-class", () => {
       const v = this._viewer;
       if (!v) return;
+      deactivateMeasure(v);
       v.toolController?.deactivateTool("BoxSelectionTool");
       v.setSelectionMode(Autodesk.Viewing.SelectionMode.MIXED);
       v.container.style.cursor = "default";
     });
 
     const dragBtn = mkBtn("my-drag-button", "올가미 선택", "drag-button-class", () => {
+      const v = this._viewer;
+      if (!v) return;
+      deactivateMeasure(v);               // 이벤트 충돌 방지
       enableBoxSelectionMode(this._viewer);
     });
 
@@ -237,6 +252,11 @@ function hideNavTools(toolbar) {
   const nav = safeGetGroup(toolbar, 'navTools');
   if (!nav) return false;
   try { nav.setVisible(false); } catch(_) {}
+  // DOM 레벨에서도 한 번 더 강제
+  try {
+    const el = nav.container || document.getElementById('navTools');
+    if (el) el.style.display = 'none';
+  } catch(_) {}
   return true;
 }
 function scheduleHideNavTools(toolbar) {
@@ -247,6 +267,16 @@ function scheduleHideNavTools(toolbar) {
     setTimeout(tick, 100);
   };
   if (!hideNavTools(toolbar)) setTimeout(tick, 100);
+
+  // 🔧 추가: 영구 옵저버(측정/다른 확장으로 DOM 바뀌어도 즉시 숨김)
+  try {
+    const root = toolbar.container || document.querySelector('.adsk-viewing-toolbar');
+    if (root && !root.__navToolsObserver) {
+      const obs = new MutationObserver(() => hideNavTools(toolbar));
+      obs.observe(root, {childList:true, subtree:true, attributes:true, attributeFilter:['style','class','hidden']});
+      root.__navToolsObserver = obs;
+    }
+  } catch(_) {}
 }
 
 /* ───────── 보수적 반복 제거: 필요 없는 3개만 ───────── */

@@ -1,0 +1,533 @@
+// /wwwroot/js/sidebar/task-wbs/ui/current-task-modal.js
+import { calendarSvg } from "./calendar-svg.js";
+// import { checkTaskStatusByDate } from "../logic/task-check-basedondate.js"; // 사용 안 함(정책 오버라이드)
+
+export function showCurrentTaskModal() {
+  if (document.querySelector(".current-task-modal")) return;
+
+  const todayStr = isoToday();
+
+  // ─ UI
+  const modal = document.createElement("div");
+  modal.className = "current-task-modal";
+  modal.tabIndex = 0;
+  modal.innerHTML = `
+    <div class="current-task-modal-header">
+      <span class="modal-title">공정현황</span>
+      <button type="button" class="modal-close" title="닫기" aria-label="닫기">×</button>
+    </div>
+    <div class="current-task-modal-body">
+      <div class="current-task-date-row">
+        <input type="text" class="current-task-date-input" maxlength="10" placeholder="yyyy-mm-dd" value="${todayStr}" autocomplete="off" />
+        <button type="button" class="datepicker-btn" tabindex="-1" title="달력 열기">${calendarSvg}</button>
+        <button type="button" class="btn-today" title="오늘로 이동">오늘</button>
+      </div>
+
+      <div class="current-task-slider-row">
+        <input type="range" class="current-task-slider" min="-15" max="15" value="0" />
+      </div>
+
+      <div class="sim-toolbar" aria-label="시뮬레이션 컨트롤">
+        <button type="button" class="sim-btn sim-begin" title="처음으로" aria-label="처음으로">${svgIcon('begin')}</button>
+        <button type="button" class="sim-btn sim-play"  title="재생"     aria-label="재생">${svgIcon('play')}</button>
+        <button type="button" class="sim-btn sim-stop"  title="정지"     aria-label="정지">${svgIcon('stop')}</button>
+        <button type="button" class="sim-btn sim-end"   title="끝으로"   aria-label="끝으로">${svgIcon('end')}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  applyInlineStyles(modal);   // 폭 300 고정, 여백 최소화
+  centerModal(modal);         // 픽셀 좌표 확정(드래그 점프 방지)
+
+  // 핸들
+  const $input    = modal.querySelector(".current-task-date-input");
+  const $btnCal   = modal.querySelector(".datepicker-btn");
+  const $btnToday = modal.querySelector(".btn-today");
+  const $close    = modal.querySelector(".modal-close");
+  const $header   = modal.querySelector(".current-task-modal-header");
+  const $slider   = modal.querySelector(".current-task-slider");
+
+  // IMask
+  let mask = null;
+  if (window.IMask) mask = window.IMask($input, { mask: "0000-00-00", lazy: false, autofix: true });
+  enforceSmartSelection($input);
+
+  // flatpickr
+  const fp = window.flatpickr($input, {
+    dateFormat: "Y-m-d",
+    defaultDate: todayStr,
+    allowInput: true,
+    clickOpens: false,
+    onChange: (_, dateStr) => { if (isISO(dateStr)) setDateInput(dateStr, { apply: true, from: "flatpickr" }); }
+  });
+
+  // 직접 입력
+  $input.addEventListener("change", () => {
+    const val = $input.value.trim();
+    if (isISO(val)) setDateInput(val, { apply: true, from: "input-change" });
+  });
+
+  // 달력 버튼
+  $btnCal.addEventListener("click", (e) => { e.stopPropagation(); fp.open(); });
+
+  // 오늘 버튼
+  $btnToday.addEventListener("click", () => setDateInput(isoToday(), { apply: true, from: "today" }));
+
+  // 슬라이더 범위
+  const tree = window.taskTree;
+  updateSliderRangeFromTaskData(tree?.getRootNode()?.children || [], $slider);
+
+  // 슬라이더: 드래그 중 빠른 반응(40ms), 드롭 시 즉시
+  const debouncedApply = debounce((d) => applyByPolicy(d, "slider-input", modal), 40);
+  $slider.addEventListener("input", () => {
+    const d = isoOffsetFromToday(parseInt($slider.value, 10));
+    setDateInput(d, { apply: false, from: "slider-input" });
+    debouncedApply(d);
+  });
+  $slider.addEventListener("change", () => {
+    const d = isoOffsetFromToday(parseInt($slider.value, 10));
+    setDateInput(d, { apply: true, from: "slider-change" });
+  });
+
+  // 헤더 드래그(포인터 캡처) — 버튼 클릭은 드래그 무시
+  enableModalDrag(modal, $header);
+
+  // 닫기(모델 원복) — 캡처/드래그보다 먼저 가로채지 않도록 별도 리스너
+  $close.addEventListener("click", (e) => { e.stopPropagation(); resetViewerAndClose(modal); });
+
+  modal.addEventListener("keydown", (ev) => { if (ev.key === "Escape") resetViewerAndClose(modal); });
+
+  // 최초 1회 적용(오늘)
+  setDateInput(todayStr, { apply: true, from: "init" });
+
+  function setDateInput(dateStr, { apply = true, from = "" } = {}) {
+    $input.value = dateStr;
+    if (mask) { try { mask.updateValue(); } catch(_) {} }
+    syncSliderFromDate($slider, dateStr);
+    if (apply) applyByPolicy(dateStr, from, modal);
+  }
+}
+
+/* ───────────── 정책 적용: C/T/D 규칙을 즉시 뷰어에 반영 ─────────────
+   C(시공):  시작 전 숨김 / 기간 중 녹색 / 이후 원래색(보이기)
+   T(가설):  시작 전 숨김 / 기간 중 파랑 / 이후 원래색(보이기)
+   D(철거):  시작 전 원래색(보이기) / 기간 중 빨강 / 이후 숨김
+*/
+function applyByPolicy(dateStr, source, ctxEl){
+  const v = window.viewer; const tree = window.taskTree;
+  if (!v || !tree || !isISO(dateStr)) return;
+
+  const model = (v.getVisibleModels && v.getVisibleModels()[0]) || v.model;
+  if (!model) return;
+
+  const urnCur = String(window.CURRENT_MODEL_URN || "");
+  const showSet  = new Set();
+  const hideSet  = new Set();
+  const themeC   = new Set(); // green
+  const themeT   = new Set(); // blue
+  const themeD   = new Set(); // red
+
+  const inRange = (d, s, e) => (isISO(s) && isISO(e) && d >= s && d <= e);
+  const beforeS = (d, s)     => (isISO(s) && d < s);
+  const afterE  = (d, e)     => (isISO(e) && d > e);
+
+  // 트리 전수 조사
+  tree.getRootNode()?.visit((n) => {
+    const d = n.data || {};
+    const cat = normCat(d.selectedOption);
+    if (!cat) return;
+
+    const objs = Array.isArray(d.linkedObjects) ? d.linkedObjects : [];
+    for (const o of objs) {
+      const urn = String(o.urn || urnCur);
+      if (!urnCur || urn !== urnCur) continue;
+      const id = Number(o.dbId);
+      if (!Number.isFinite(id)) continue;
+
+      // 규칙 적용
+      if (cat === "C") {
+        if (beforeS(dateStr, d.start)) { hideSet.add(id); }
+        else if (inRange(dateStr, d.start, d.end)) { showSet.add(id); themeC.add(id); }
+        else if (afterE(dateStr, d.end)) { showSet.add(id); }
+        else { showSet.add(id); } // 경계값/결측치는 보이기
+      } else if (cat === "T") {
+        if (beforeS(dateStr, d.start)) { hideSet.add(id); }
+        else if (inRange(dateStr, d.start, d.end)) { showSet.add(id); themeT.add(id); }
+        else if (afterE(dateStr, d.end)) { showSet.add(id); }
+        else { showSet.add(id); }
+      } else if (cat === "D") {
+        if (beforeS(dateStr, d.start)) { showSet.add(id); }
+        else if (inRange(dateStr, d.start, d.end)) { showSet.add(id); themeD.add(id); }
+        else if (afterE(dateStr, d.end)) { hideSet.add(id); }
+        else { showSet.add(id); }
+      }
+    }
+  });
+
+  // 충돌 해소: 보이기가 우선
+  for (const id of showSet) hideSet.delete(id);
+
+  // 적용(빠르게): 테마 초기화 → show/hide → 테마 칠하기
+  try {
+    // 최초 1회만 전체 가시화(이후는 증감만)
+    if (!ctxEl.__simVisInit) {
+      v.impl?.visibilityManager?.setAllOn?.();
+      ctxEl.__simVisInit = true;
+    }
+
+    // 테마 전체 초기화 후 다시 칠함
+    try { v.clearThemingColors?.(model); } catch(_) {}
+    try { v.clearThemingColors?.(); } catch(_) {} // 일부 버전 호환
+
+    // show/hide를 묶음 호출(성능)
+    const showArr = [...showSet];
+    const hideArr = [...hideSet];
+    if (showArr.length) v.show(showArr, model);
+    if (hideArr.length) v.hide(hideArr, model);
+
+    // 테마 색상
+    const V4 = (r,g,b,a=1) => (window.THREE ? new window.THREE.Vector4(r,g,b,a) : { r,g,b,a });
+    const cGreen = V4(0.16, 0.57, 0.20, 1); // 시공
+    const cBlue  = V4(0.12, 0.45, 0.90, 1); // 가설
+    const cRed   = V4(0.95, 0.27, 0.23, 1); // 철거
+
+    // chunked theming(너무 많으면 몇 프레임 분할)
+    const paintChunk = (ids, color) => {
+      const CHUNK = 4000;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const slice = ids.slice(i, i + CHUNK);
+        for (let j = 0; j < slice.length; j++) {
+          v.setThemingColor(slice[j], color, model);
+        }
+      }
+    };
+    if (themeC.size) paintChunk([...themeC], cGreen);
+    if (themeT.size) paintChunk([...themeT], cBlue);
+    if (themeD.size) paintChunk([...themeD], cRed);
+
+    // 렌더 스냅
+    v.impl?.sceneUpdated?.(true);
+    v.impl?.invalidate?.(true, true, true);
+  } catch (err) {
+    console.warn("[CurrentTask] policy apply error", err);
+  }
+}
+
+/* ───────────── 스타일 ───────────── */
+function applyInlineStyles(modal){
+  Object.assign(modal.style, {
+    zIndex: 10000,
+    width: "300px",
+    maxWidth: "90vw",
+    background: "#fff",
+    border: "1px solid #d9d9d9",
+    borderRadius: "10px",
+    boxShadow: "0 10px 24px rgba(0,0,0,.12)",
+    fontFamily: "'Noto Sans KR', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif",
+    position: "fixed",
+  });
+
+  const header = modal.querySelector(".current-task-modal-header");
+  Object.assign(header.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "6px",
+    padding: "6px 8px",
+    borderBottom: "1px solid #eee",
+    cursor: "grab",
+    userSelect: "none",
+    touchAction: "none"
+  });
+
+  const close = modal.querySelector(".modal-close");
+  Object.assign(close.style, {
+    border: "none",
+    background: "transparent",
+    fontSize: "18px",
+    cursor: "pointer",
+    lineHeight: "1",
+  });
+
+  const body = modal.querySelector(".current-task-modal-body");
+  Object.assign(body.style, {
+    padding: "8px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px"
+  });
+
+  const row = modal.querySelector(".current-task-date-row");
+  Object.assign(row.style, {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    justifyContent: "center",
+    margin: "0"
+  });
+
+  const input = modal.querySelector(".current-task-date-input");
+  Object.assign(input.style, {
+    width: "118px",
+    textAlign: "center",
+    padding: "4px 6px",
+    border: "1px solid #bbb",
+    borderRadius: "6px",
+    outline: "none",
+  });
+
+  const btnCal = modal.querySelector(".datepicker-btn");
+  Object.assign(btnCal.style, {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "28px",
+    height: "28px",
+    borderRadius: "6px",
+    border: "1px solid #ddd",
+    background: "#fafafa",
+    cursor: "pointer",
+    padding: "0"
+  });
+
+  const calSvg = btnCal.querySelector("svg");
+  if (calSvg) { calSvg.setAttribute("width","16"); calSvg.setAttribute("height","16"); }
+
+  const btnToday = modal.querySelector(".btn-today");
+  Object.assign(btnToday.style, {
+    height: "28px",
+    padding: "0 10px",
+    borderRadius: "6px",
+    border: "1px solid #1976d2",
+    background: "#1976d2",
+    color: "#fff",
+    cursor: "pointer"
+  });
+
+  const sliderRow = modal.querySelector(".current-task-slider-row");
+  Object.assign(sliderRow.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0",
+    margin: "0"
+  });
+
+  const slider = modal.querySelector(".current-task-slider");
+  Object.assign(slider.style, {
+    width: "100%",
+    maxWidth: "260px",
+    display: "block",
+    margin: "2px 0"
+  });
+
+  const sim = modal.querySelector(".sim-toolbar");
+  Object.assign(sim.style, {
+    display: "flex",
+    justifyContent: "center",
+    gap: "6px",
+    paddingTop: "4px",
+    borderTop: "1px dashed #eee",
+    marginTop: "0"
+  });
+  sim.querySelectorAll(".sim-btn").forEach(btn => {
+    Object.assign(btn.style, {
+      width: "36px",
+      height: "30px",
+      borderRadius: "8px",
+      border: "1px solid #ddd",
+      background: "#f8f9fb",
+      cursor: "pointer",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "0"
+    });
+  });
+}
+
+function centerModal(modal){
+  modal.style.visibility = "hidden";
+  requestAnimationFrame(() => {
+    const { innerWidth: w, innerHeight: h } = window;
+    const r = modal.getBoundingClientRect();
+    modal.style.left = Math.max(8, (w / 2 - r.width / 2)) + "px";
+    modal.style.top  = Math.max(8, (h / 3 - r.height / 2)) + "px";
+    modal.style.visibility = "visible";
+  });
+}
+
+/* ───── 유틸 ───── */
+function svgIcon(name){
+  const stroke = "currentColor";
+  if (name === "play")  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M8 5v14l11-7-11-7z" fill="${stroke}"/></svg>`;
+  if (name === "stop")  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" rx="2" fill="${stroke}"/></svg>`;
+  if (name === "begin") return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 6l-7 6 7 6V6z" fill="${stroke}"/><rect x="5" y="6" width="2" height="12" fill="${stroke}"/></svg>`;
+  if (name === "end")   return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 6l7 6-7 6V6z" fill="${stroke}"/><rect x="17" y="6" width="2" height="12" fill="${stroke}"/></svg>`;
+  return "";
+}
+
+function isISO(s){ return /^\d{4}-\d{2}-\d{2}$/.test(String(s||"")); }
+function isoToday(){ return new Date().toISOString().slice(0,10); }
+function isoOffsetFromToday(offsetDays){
+  const base = new Date();
+  base.setDate(base.getDate() + (Number(offsetDays) || 0));
+  return base.toISOString().slice(0,10);
+}
+
+function updateSliderRangeFromTaskData(nodes, sliderEl){
+  if (!Array.isArray(nodes) || !sliderEl) return;
+  const all = [];
+  (function walk(arr){
+    for (const n of arr) {
+      const d = n.data || n;
+      if (isISO(d.start)) all.push(d.start);
+      if (isISO(d.end))   all.push(d.end);
+      if (n.children) walk(n.children);
+    }
+  })(nodes);
+  if (!all.length) { sliderEl.min = -15; sliderEl.max = 15; sliderEl.value = 0; return; }
+
+  const minISO = all.reduce((a,b)=> a < b ? a : b);
+  const maxISO = all.reduce((a,b)=> a > b ? a : b);
+  const t = isoToday();
+
+  const diffMin = Math.ceil((Date.parse(minISO) - Date.parse(t)) / 86400000);
+  const diffMax = Math.ceil((Date.parse(maxISO) - Date.parse(t)) / 86400000);
+
+  sliderEl.min = String(diffMin);
+  sliderEl.max = String(diffMax);
+  sliderEl.value = "0";
+}
+
+function syncSliderFromDate(sliderEl, dateStr){
+  if (!sliderEl || !isISO(dateStr)) return;
+  const t = isoToday();
+  const diff = Math.round((Date.parse(dateStr) - Date.parse(t)) / 86400000);
+  sliderEl.value = String(Math.min(Math.max(diff, Number(sliderEl.min)), Number(sliderEl.max)));
+}
+
+function normCat(v){
+  const s = String(v || "").trim();
+  if (s === "C" || s.startsWith("시공")) return "C";
+  if (s === "T" || s.startsWith("가설")) return "T";
+  if (s === "D" || s.startsWith("철거")) return "D";
+  return "";
+}
+
+function enforceSmartSelection(input){
+  const digitIdx = [0,1,2,3,5,6,8,9];
+  const setSel = (pos) => { if (digitIdx.includes(pos)) input.setSelectionRange(pos, pos + 1); };
+  const getDigitPos = (pos) => digitIdx.includes(pos) ? pos : (digitIdx.find(d => d > pos) ?? 9);
+  const nextDigitIdx = (pos) => { const i = digitIdx.indexOf(pos); return (i !== -1 && i < digitIdx.length - 1) ? digitIdx[i+1] : pos; };
+  const prevDigitIdx = (pos) => { const i = digitIdx.indexOf(pos); return (i > 0) ? digitIdx[i-1] : pos; };
+
+  ["focus", "click"].forEach(evt => input.addEventListener(evt, () => setTimeout(() => setSel(getDigitPos(input.selectionStart)), 0)));
+  input.addEventListener("keydown", (e) => {
+    const pos = input.selectionStart;
+    if (e.key === "ArrowLeft"  && pos !== 0)  { e.preventDefault(); setSel(prevDigitIdx(pos)); }
+    if (e.key === "ArrowRight" && pos !== 9)  { e.preventDefault(); setSel(nextDigitIdx(pos)); }
+  });
+  input.addEventListener("input", () => {
+    const pos = input.selectionStart;
+    if (digitIdx.includes(pos - 1)) setSel(nextDigitIdx(pos - 1));
+    else setSel(getDigitPos(pos));
+  });
+}
+
+/* 포인터 캡처 기반 드래그(점프 방지: Δ이동 + dragstart 차단) */
+function enableModalDrag(modal, handle){
+  let dragging = false, pid = null;
+  let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+  let raf = 0, nextLeft = 0, nextTop = 0;
+
+  // 헤더 내 인터랙티브 요소는 드래그 무시 (닫기/버튼 등 클릭 보장)
+  const isInteractive = (el) =>
+    el.closest?.('.modal-close, .datepicker-btn, .btn-today, .sim-toolbar, .sim-btn, input, button, svg, path, rect, circle');
+
+  // 기본 drag 이벤트(HTML5 DnD) 차단 → 점프 예방
+  const killDrag = (e) => e.preventDefault();
+  handle.addEventListener('dragstart', killDrag);
+  modal.addEventListener('dragstart', killDrag);
+
+  const onPointerDown = (e) => {
+    if (isInteractive(e.target)) return;     // 버튼/아이콘 클릭은 드래그 시작 안 함
+    if (e.button !== 0) return;              // 좌클릭만
+    e.preventDefault();
+    e.stopPropagation();
+
+    pid = e.pointerId;
+    handle.setPointerCapture(pid);
+
+    // 현재 style 좌표를 기준점으로 고정
+    const cs = window.getComputedStyle(modal);
+    const l = parseFloat(cs.left);
+    const t = parseFloat(cs.top);
+    // style 값이 없으면 getBoundingClientRect로 폴백
+    if (Number.isFinite(l) && Number.isFinite(t)) {
+      startLeft = l; startTop = t;
+    } else {
+      const r = modal.getBoundingClientRect();
+      startLeft = r.left; startTop = r.top;
+      // 다음 계산을 위해 style에도 확정값을 심어둠
+      modal.style.left = `${startLeft}px`;
+      modal.style.top  = `${startTop}px`;
+    }
+
+    startX = e.clientX;
+    startY = e.clientY;
+    dragging = true;
+    handle.style.cursor = "grabbing";
+  };
+
+  const onPointerMove = (e) => {
+    if (!dragging) return;
+    // Δ 이동만 반영 → 점프 없음
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    nextLeft = Math.max(0, Math.round(startLeft + dx));
+    nextTop  = Math.max(0, Math.round(startTop  + dy));
+
+    // rAF로 한 프레임에 한 번만 반영 (부드럽게)
+    if (!raf) {
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        modal.style.left = `${nextLeft}px`;
+        modal.style.top  = `${nextTop}px`;
+      });
+    }
+  };
+
+  const stopDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    if (pid !== null) { try { handle.releasePointerCapture(pid); } catch(_){} }
+    pid = null;
+    handle.style.cursor = "grab";
+  };
+
+  handle.addEventListener("pointerdown", onPointerDown);
+  handle.addEventListener("pointermove", onPointerMove);
+  handle.addEventListener("pointerup", stopDrag);
+  handle.addEventListener("pointercancel", stopDrag);
+  // (선택) 포인터가 창 밖으로 나가도 마무리
+  window.addEventListener("pointerup", stopDrag, { passive: true });
+}
+
+
+function resetViewerAndClose(m){
+  try {
+    const v = window.viewer;
+    v?.clearThemingColors?.();
+    const vm = v?.impl?.visibilityManager;
+    vm?.setAllOn?.();
+    v?.impl?.invalidate?.(true, true, true);
+  } catch(_){}
+  m.remove();
+}
+
+function debounce(fn, ms){
+  let t=0;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}

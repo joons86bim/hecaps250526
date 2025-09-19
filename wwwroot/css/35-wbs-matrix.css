@@ -1,0 +1,104 @@
+/* =========================
+   WBS (Fancytree + table)
+========================= */
+
+/* 컨테이너/테이블 기본 */
+#wbs-group-content { overflow:auto; }
+#wbs-tree { width: 100%; table-layout: fixed; }
+
+/* 열 비율: 제목 넓게, 개수 좁게, 현황 적당히 */
+#wbs-tree col.col-title  { width: auto; }
+#wbs-tree col.col-count  { width: 84px; }
+#wbs-tree col.col-status { width: 180px; }
+
+/* 셀/타이틀 */
+#wbs-tree th, #wbs-tree td { padding: 6px 8px; }
+#wbs-tree td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#wbs-tree .fancytree-title{ white-space: nowrap; }
+
+/* 클릭성 강화 (모바일/포인터 혼용 환경) */
+#wbs-tree .fancytree-checkbox,
+#wbs-tree .fancytree-expander,
+#wbs-tree .fancytree-title{ cursor: pointer; }
+
+/* 확장/체크 UI는 Fancytree 스킨을 따르고, 추가 오버라이드는 최소화 */
+
+/* ───────── 행 색칠(그룹 상태) ─────────
+   JS에서 node.tr에 'wbs-c' / 'wbs-td' 클래스를 붙여줌 */
+#wbs-tree tr.wbs-c  > td { background: rgba(255, 0,   0,  .06); } /* 시공 */
+#wbs-tree tr.wbs-td > td { background: rgba(0,   80,  255, .06); } /* 가설/철거(혼합) */
+
+/* ───────── 현황 뱃지 (임시 요약 UI) ───────── */
+.wbs-status { display:flex; gap:6px; align-items:center; }
+.wbs-status .b { display:inline-block; min-width:18px; padding:0 4px; border-radius:10px; font-size:11px; text-align:center; background:#f1f3f5; }
+.wbs-status .b.c    { background:#e7f5ff; } /* 시공 */
+.wbs-status .b.t    { background:#e6fcf5; } /* 가설 */
+.wbs-status .b.d    { background:#fff0f6; } /* 철거 */
+.wbs-status .b.td   { background:#e9ecef; opacity:.9; } /* 혼합 */
+.wbs-status .b.total{ background:#f8f9fa; font-weight:600; }
+
+/* 패널 헤더 고정 */
+#wbs-group-list-panel .panel-header {
+  position: sticky;
+  top: 0;
+  background: #f9f9f9;
+  z-index: 5;
+  box-shadow: 0 2px 2px -1px #ddd;
+}
+
+/* 불필요한 오래된(InspireTree) 규칙들이 wbs-tree에 영향주지 않도록 
+   유사 셀렉터는 사용하지 않음(예: #wbs-group-list li … 제거) */
+
+   /* 현황 박스: 숫자 + 눈알을 양 끝으로 */
+.wbs-status { 
+   display:flex; 
+   align-items:center; 
+   justify-content: space-between; 
+   gap:10px; 
+ }
+ .wbs-status .nums { display:flex; gap:6px; align-items:center; }
+ 
+ /* 눈알 버튼 (Fancytree 용) */
+ #wbs-tree .eye-toggle{
+   display:inline-flex;
+   align-items:center;
+   justify-content:center;
+   width:22px; height:22px;
+   border-radius:50%;
+   cursor:pointer;
+   opacity:.8;
+   border:1px solid transparent;
+   user-select:none;
+   flex:0 0 auto;
+ }
+ #wbs-tree .eye-toggle:hover{ opacity:1; border-color:#e5e7eb; background:#f9fafb; }
+ 
+ /* 상태 표시: hidden=강조, mixed=연함 */
+ #wbs-tree .eye-toggle.hidden { opacity:1; }
+ #wbs-tree .eye-toggle.mixed  { opacity:.5; }
+ 
+ /* SVG 크기 */
+ #wbs-tree .eye-toggle svg{ width:16px; height:16px; display:block; pointer-events:none; }
+
+ /* 개수: 가운데 정렬 (thead/tbody 공통) */
+#wbs-tree th.text-center,
+#wbs-tree td.text-center { text-align: center !important; }
+
+/* 눈알 버튼: 항목(첫 칼럼) 내 문서아이콘 자리에 렌더됨 */
+#wbs-tree .eye-toggle{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:22px; height:22px;
+  border-radius:50%;
+  cursor:pointer;
+  opacity:.8;
+  border:1px solid transparent;
+  user-select:none;
+  margin-right: 2px;
+}
+#wbs-tree .eye-toggle:hover{ opacity:1; border-color:#e5e7eb; background:#f9fafb; }
+#wbs-tree .eye-toggle.hidden { opacity:1; }
+#wbs-tree .eye-toggle.mixed  { opacity:.5; }
+#wbs-tree .eye-toggle svg{ width:16px; height:16px; display:block; pointer-events:none; }
+

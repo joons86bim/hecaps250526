@@ -8,8 +8,7 @@ const maxWidth = 750; // 최대폭
 
 function setSidebarWidth(px) {
   sidebar.style.width = px + "px";
-  resizer.style.left = px + "px"; // resizer를 sidebar 끝에 위치시킴
-  // preview의 left도 sidebar width와 맞춰 이동
+  resizer.style.left = px + "px";
   if (preview) preview.style.left = px + "px";
 }
 
@@ -19,7 +18,6 @@ resizer.addEventListener("mousedown", function (e) {
 
   function onMouseMove(e2) {
     let newWidth = e2.clientX;
-    // 보정: 화면 넘어가는 것 방지, 최소/최대
     if (newWidth < minWidth) newWidth = minWidth;
     if (newWidth > maxWidth) newWidth = maxWidth;
     setSidebarWidth(newWidth);
@@ -35,7 +33,6 @@ resizer.addEventListener("mousedown", function (e) {
   document.addEventListener("mouseup", onMouseUp);
 });
 
-// 처음 로딩 시에도 위치 초기화 (비율→px로 변환)
 window.addEventListener("DOMContentLoaded", () => {
   const sidebarRect = sidebar.getBoundingClientRect();
   setSidebarWidth(sidebarRect.width);

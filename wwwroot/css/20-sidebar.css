@@ -1,0 +1,108 @@
+/* 사이드바 전체 */
+#sidebar{
+  position: fixed;
+  top: 3em; left: 0; bottom: 0;
+  width: var(--sidebar-width, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:#fff;
+}
+
+/* 탭 헤더 */
+.tabs{
+  display: flex;
+  border-bottom: 1px solid #e0e0e0;
+  background-color: #fafafa;
+}
+.tab-button{
+  flex: 1;
+  padding: 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color .2s, border-bottom-color .2s;
+  font-size: 18px;
+}
+.tab-button.active{
+  color: #0078d4;
+  border-bottom-color: #0078d4;
+}
+
+/* 탭 컨텐츠 래퍼 */
+.panels{
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+  margin: 0; padding: 0;
+}
+.panels .panel{
+  display: none;
+  height: 100%;
+}
+.panels .panel.active{
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* 사이드바 리사이저 */
+#sidebar-resizer{
+  position: fixed;
+  top: 3em;
+  left: var(--sidebar-left);
+  width: 4px;
+  height: calc(100vh - 3em);
+  background: linear-gradient(to right,#e3eaf3,#d2d9e6);
+  cursor: ew-resize;
+  z-index: 30;
+  transition: background .15s;
+  border-right: 1px solid #ccd4e3;
+  border-left: 1px solid #f8fafb;
+  border-radius: 4px;
+}
+#sidebar-resizer:hover{ background: #a4cef7; }
+
+/* ───── 프로젝트/파일 트리(panel1) 스타일 ───── */
+#panel1 .panel-content{ flex:1; overflow-y:auto; padding:8px; min-height:0; }
+.tree-list{ list-style:none; margin:0; padding-left:0; }
+.tree-list .tree-item{
+  display:flex; align-items:center; padding:4px 0;
+  font-size:13px; color:#333; cursor:pointer;
+}
+.tree-list .tree-item .toggle{
+  border:1px solid #ccc; width:1em; height:1em;
+  display:inline-flex; align-items:center; justify-content:center;
+  margin-right:8px; cursor:pointer; border-radius:2px;
+}
+.tree-list .tree-item .toggle::after{
+  content: attr(data-icon);
+  font-size:12px; line-height:1;
+}
+.tree-list .tree-item .checkbox{ margin-right:4px; }
+.tree-list .tree-item .label{ flex:1; }
+#panel1 .tree-list .tree-item.selected{ background-color:#e6f7ff; }
+#panel1 .tree-list .tree-item:hover{ background:#f5faff; }
+.tree-list .tree-children{ list-style:none; padding-left:20px; margin:2px 0; }
+
+/* (옵션) 트리 아이콘 */
+.icon-hub:before{ background:url(https://raw.githubusercontent.com/primer/octicons/main/icons/apps-16.svg) center/cover no-repeat; }
+.icon-project:before{ background:url(https://raw.githubusercontent.com/primer/octicons/main/icons/project-16.svg) center/cover no-repeat; }
+.icon-my-folder:before{ background:url(https://raw.githubusercontent.com/primer/octicons/main/icons/file-directory-16.svg) center/cover no-repeat; }
+.icon-item:before{ background:url(https://raw.githubusercontent.com/primer/octicons/main/icons/file-16.svg) center/cover no-repeat; }
+.icon-version:before{ background:url(https://raw.githubusercontent.com/primer/octicons/main/icons/clock-16.svg) center/cover no-repeat; }
+
+/* 드래그 중 UX 보조 */
+body.resizing-x { cursor: ew-resize; user-select: none; }
+
+/* WBS 내에서는 panel1 트리 hover/selected 배경을 무효화 */
+#wbs-group-list .tree-list .tree-item,
+#wbs-group-list .tree-list .tree-item:hover,
+#wbs-group-list .tree-list .tree-item.selected{
+  background: transparent !important;
+  box-shadow: none !important;
+}
+

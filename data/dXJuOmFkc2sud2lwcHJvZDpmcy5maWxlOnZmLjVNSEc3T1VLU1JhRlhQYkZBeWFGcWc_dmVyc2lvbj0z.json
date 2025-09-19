@@ -8,42 +8,10 @@
     ],
     "selectedOption": "시공",
     "title": "Task A",
-    "start": "2024-06-26",
-    "end": "2025-10-13",
+    "start": "2025-08-04",
+    "end": "2025-09-22",
     "linkedObjects": [],
     "children": [
-      {
-        "no": "1.1",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "Subtask A1",
-        "start": "2024-06-26",
-        "end": "2024-06-30",
-        "linkedObjects": [
-          {
-            "urn": "SAMPLE_URN",
-            "dbId": 1002,
-            "text": "벽체2"
-          }
-        ]
-      },
-      {
-        "no": "1.2",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "2025-07-28",
-        "end": "2025-08-16",
-        "linkedObjects": []
-      },
       {
         "no": "1.3",
         "selectOptions": [
@@ -55,7 +23,56 @@
         "title": "새 작업",
         "start": "2025-08-04",
         "end": "2025-09-22",
-        "linkedObjects": []
+        "linkedObjects": [
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7496,
+            "elementId": "1353431",
+            "text": "[1353431]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7497,
+            "elementId": "1353432",
+            "text": "[1353432]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7498,
+            "elementId": "1353433",
+            "text": "[1353433]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7499,
+            "elementId": "1353434",
+            "text": "[1353434]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7532,
+            "elementId": "1353832",
+            "text": "[1353832]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7533,
+            "elementId": "1353833",
+            "text": "[1353833]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7534,
+            "elementId": "1353834",
+            "text": "[1353834]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7535,
+            "elementId": "1353835",
+            "text": "[1353835]"
+          }
+        ]
       },
       {
         "no": "1.4",
@@ -68,150 +85,26 @@
         "title": "새 작업",
         "start": "2025-08-04",
         "end": "2025-08-13",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.5",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "2025-08-04",
-        "end": "2025-09-12",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.6",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "2025-08-11",
-        "end": "2025-09-19",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.7",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "2025-08-04",
-        "end": "2025-08-07",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.8",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "2025-09-03",
-        "end": "2025-09-17",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.9",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "2025-08-05",
-        "end": "2025-09-13",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.10",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "2025-08-05",
-        "end": "2025-10-13",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.11",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.12",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.13",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.14",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
-      },
-      {
-        "no": "1.15",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "시공",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
+        "linkedObjects": [
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7506,
+            "elementId": "1353455",
+            "text": "[1353455]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7524,
+            "elementId": "1353754",
+            "text": "[1353754]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7544,
+            "elementId": "1354002",
+            "text": "[1354002]"
+          }
+        ]
       }
     ]
   },
@@ -224,7 +117,7 @@
     ],
     "selectedOption": "가설",
     "title": "Task B",
-    "start": "2025-07-07",
+    "start": "2025-08-04",
     "end": "2025-08-13",
     "linkedObjects": [],
     "children": [
@@ -239,85 +132,181 @@
         "title": "새 작업",
         "start": "2025-08-04",
         "end": "2025-08-13",
-        "linkedObjects": []
-      },
+        "linkedObjects": [
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7516,
+            "elementId": "1353581",
+            "text": "[1353581]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7517,
+            "elementId": "1353594",
+            "text": "[1353594]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7518,
+            "elementId": "1353607",
+            "text": "[1353607]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7519,
+            "elementId": "1353619",
+            "text": "[1353619]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7520,
+            "elementId": "1353677",
+            "text": "[1353677]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7521,
+            "elementId": "1353712",
+            "text": "[1353712]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7536,
+            "elementId": "1353872",
+            "text": "[1353872]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7537,
+            "elementId": "1353885",
+            "text": "[1353885]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7538,
+            "elementId": "1353898",
+            "text": "[1353898]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7539,
+            "elementId": "1353910",
+            "text": "[1353910]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7540,
+            "elementId": "1353943",
+            "text": "[1353943]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7541,
+            "elementId": "1353972",
+            "text": "[1353972]"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "no": "3",
+    "selectOptions": [
+      "시공",
+      "가설",
+      "철거"
+    ],
+    "selectedOption": "철거",
+    "title": "새 작업",
+    "start": "2025-10-03",
+    "end": "2025-10-22",
+    "linkedObjects": [],
+    "children": [
       {
-        "no": "2.2",
+        "no": "3.1",
         "selectOptions": [
           "시공",
           "가설",
           "철거"
         ],
-        "selectedOption": "가설",
+        "selectedOption": "철거",
         "title": "새 작업",
-        "start": "2025-07-07",
-        "end": "2025-07-11",
-        "linkedObjects": []
-      },
-      {
-        "no": "2.3",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "가설",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
-      },
-      {
-        "no": "2.4",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "가설",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
-      },
-      {
-        "no": "2.5",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "가설",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
-      },
-      {
-        "no": "2.6",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "가설",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
-      },
-      {
-        "no": "2.7",
-        "selectOptions": [
-          "시공",
-          "가설",
-          "철거"
-        ],
-        "selectedOption": "가설",
-        "title": "새 작업",
-        "start": "",
-        "end": "",
-        "linkedObjects": []
+        "start": "2025-10-03",
+        "end": "2025-10-22",
+        "linkedObjects": [
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7516,
+            "elementId": "1353581",
+            "text": "[1353581]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7517,
+            "elementId": "1353594",
+            "text": "[1353594]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7518,
+            "elementId": "1353607",
+            "text": "[1353607]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7519,
+            "elementId": "1353619",
+            "text": "[1353619]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7520,
+            "elementId": "1353677",
+            "text": "[1353677]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7521,
+            "elementId": "1353712",
+            "text": "[1353712]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7536,
+            "elementId": "1353872",
+            "text": "[1353872]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7537,
+            "elementId": "1353885",
+            "text": "[1353885]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7538,
+            "elementId": "1353898",
+            "text": "[1353898]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7539,
+            "elementId": "1353910",
+            "text": "[1353910]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7540,
+            "elementId": "1353943",
+            "text": "[1353943]"
+          },
+          {
+            "urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z",
+            "dbId": 7541,
+            "elementId": "1353972",
+            "text": "[1353972]"
+          }
+        ]
       }
     ]
   }

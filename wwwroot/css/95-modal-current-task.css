@@ -1,0 +1,45 @@
+/* 현재 공정 모달 */
+.current-task-modal{
+  position: fixed;
+  left: 50%; top: 30%;
+  transform: translate(-50%,-20%);
+  min-width: 260px; background:#fff; border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.22);
+  z-index: 10000;
+}
+.current-task-modal-header{
+  cursor: move; background:#f4f4f4; border-bottom:1px solid #d0d0d0;
+  font-weight:600; display:flex; justify-content:space-between; align-items:center;
+  padding: 10px 18px 8px 16px; border-radius: 8px 8px 0 0; user-select:none;
+}
+.current-task-modal-header .modal-close{
+  background:none; border:0; font-size:22px; color:#888; cursor:pointer; padding:2px 6px; margin-left:6px; font-weight:bold;
+}
+.current-task-modal-body{ padding:22px 20px 18px; text-align:center; }
+
+.current-task-date-row{ display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:14px; }
+.current-task-date-input{
+  width:120px; font-size:16px; text-align:center; border:none; border-bottom:2px solid #1976d2; outline:none;
+  background:#f6f8ff; padding:5px 8px 3px; letter-spacing:2px; transition: border-color .2s;
+}
+.current-task-date-input:focus{ border-color:#1565c0; background:#fff; }
+.datepicker-btn{ background:none; border:0; padding:0; margin-left:3px; cursor:pointer; }
+.current-task-date-result{ margin:7px 0 0; min-height:20px; font-size:13px; }
+
+.modal-actions{ margin:4px 0 8px; }
+.modal-confirm{
+  padding:5px 32px; font-size:14px; border-radius:5px; border:0; background:#1976d2; color:#fff; cursor:pointer; font-weight:bold;
+  letter-spacing:.1em; box-shadow:0 1px 6px 0 #dde3ea88; transition: background .17s;
+}
+.modal-confirm:hover{ background:#1158ad; }
+
+/* flatpickr는 반드시 모달 위로 */
+.flatpickr-calendar{ z-index: 99999 !important; }
+
+/* 모달 내 인풋 */
+.current-task-modal .datepicker-input{
+  font-size:14px; font-weight:600; color:#333; text-align:center; padding:8px 0; width:130px; letter-spacing:2px;
+  border:none; border-bottom:2px solid #1976d2; background:transparent; outline:none; margin:0 auto; display:block;
+}
+.current-task-slider-row{ margin:10px 0 14px; }
+.current-task-slider{ width:100%; max-width:200px; }

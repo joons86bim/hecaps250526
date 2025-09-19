@@ -1,151 +1,309 @@
-// WBS(InspireTree) 초기화 + 뱃지 + 눈알 + 경로맵 + 필요시 하이라이트 부분 반응
-import { stripCountSuffix } from "./core/categories.js";
 import { ensureEyeButton, installWbsVisibilityDelegate } from "./ui/wbs-visibility.js";
-import { applyHighlightForSubtreeUI, attachWbsTreeHighlightEvents } from "./ui/wbs-highlight.js";
+import { applyHighlightForSubtreeUI } from "./ui/wbs-highlight.js";
+import { activateFixedPaint, refreshFixedPaint, requestDebouncedRepaint, paintSubtreeNow } from "./ui/wbs-fixed-paint.js";
 
-export function initWbsPanel(wbsData){
-  const wbsContainer = document.getElementById("wbs-group-content");
-  if (!wbsContainer) return;
-  wbsContainer.innerHTML = `<div id="wbs-group-list"></div>`;
+const rIC = typeof requestIdleCallback === "function"
+  ? requestIdleCallback
+  : (fn)=>setTimeout(()=>fn({ timeRemaining:()=>5 }),0);
 
-  function toInspireNodes(arr, parentName) {
-    return (arr || []).map(n => {
-      const isLeaf = (typeof n.dbId === "number");
-      const parentClean = stripCountSuffix(parentName || "");
-      const children = toInspireNodes(n.children, n.text);
-      const leafCount = isLeaf ? 1 : children.reduce((acc, ch) => acc + (ch.leafCount || 0), 0);
-      return {
-        id: n.id,
-        urn: isLeaf ? window.CURRENT_MODEL_URN : undefined,
-        dbId: isLeaf ? n.dbId : undefined,
-        text: stripCountSuffix(n.text),
-        objName: isLeaf
-          ? ((String(n.text) === String(n.dbId)) ? (parentClean || stripCountSuffix(n.text)) : stripCountSuffix(n.text))
-          : undefined,
-        children,
-        leafCount
-      };
-    });
+// 체크 프리픽스 규칙 (전역 공유)
+const CHECK_RULES = (window.__WBS_CHECK_RULES = window.__WBS_CHECK_RULES || { on:new Set(), off:new Set() });
+const PSEP = "¦";
+const pkey = (path) => (path||[]).join(PSEP);
+const startsWithKey = (full, key) => (full===key || full.startsWith(key + PSEP));
+
+function registerAutoCheck(pathArr, turnOn){
+  const k = pkey(pathArr);
+  if (turnOn){
+    Array.from(CHECK_RULES.off).forEach(x => { if (startsWithKey(x,k) || startsWithKey(k,x)) CHECK_RULES.off.delete(x); });
+    Array.from(CHECK_RULES.on).forEach(x => { if (startsWithKey(x,k)) CHECK_RULES.on.delete(x); });
+    CHECK_RULES.on.add(k);
+  }else{
+    Array.from(CHECK_RULES.on).forEach(x => { if (startsWithKey(x,k) || startsWithKey(k,x)) CHECK_RULES.on.delete(x); });
+    CHECK_RULES.off.add(k);
   }
+}
+function shouldBeChecked(pathArr){
+  const k = pkey(pathArr);
+  for (const off of CHECK_RULES.off) if (startsWithKey(k,off)) return false;
+  for (const on  of CHECK_RULES.on ) if (startsWithKey(k,on )) return true;
+  return null; // 규칙 없음
+}
+const shouldBeCheckedByNode = (n) => shouldBeChecked(pathOf(n));
 
-  const wbsNodes = toInspireNodes(wbsData, undefined);
-  const wbsTree = new window.InspireTree({
-    data: wbsNodes,
-    selection: { multi: true, mode: "simple", autoSelectChildren: false, autoDselectChildren: false, require: false, autoSelectParents: false }
-  });
-  window.wbsTree = wbsTree;
-
-  new window.InspireTreeDOM(wbsTree, { target: "#wbs-group-list", showCheckboxes: true, dragAndDrop: { enabled: false } });
-
-  // 숫자 뱃지
-  function rowFor(node){
-    const uid = node?._id ?? node?.id;
-    const li = document.querySelector(`#wbs-group-list li[data-uid="${uid}"]`);
-    return li?.querySelector(':scope > .title-wrap') || li;
-  }
-  function ensureWbsCountBadge(node) {
-    const row = rowFor(node); if (!row) return;
-    let badge = row.querySelector('.count-badge');
-    if (!badge) { badge = document.createElement('span'); badge.className = 'count-badge'; row.appendChild(badge); }
-    const isLeaf = !(node.hasChildren && node.hasChildren());
-    const count = isLeaf ? 0 : (node.leafCount || 0);
-    badge.textContent = (!isLeaf && count > 1) ? String(count) : '';
-  }
-  function ensureDecor(node){ ensureWbsCountBadge(node); try { ensureEyeButton(node); } catch(e) {} }
-
-  // 초기 아이들-청크 데코
-  (function refreshInitial(){
-    const nodes = wbsTree.nodes(); let i = 0;
-    function chunk(deadline){
-      let iter = 0;
-      while (i < nodes.length && (!deadline || deadline.timeRemaining() > 3) && iter < 400) {
-        ensureDecor(nodes[i++]); iter++;
-      }
-      if (i < nodes.length) {
-        if (typeof requestIdleCallback === 'function') requestIdleCallback(chunk, { timeout: 60 });
-        else setTimeout(chunk, 0);
-      }
-    }
-    if (typeof requestIdleCallback === 'function') requestIdleCallback(chunk, { timeout: 60 });
-    else setTimeout(chunk, 0);
+export function initWbsPanel(input){
+  // 1) 확장 반짝임 억제용 CSS 1회 주입
+  (function injectWbsPaintCss(){
+    if (document.getElementById('wbs-expanding-css')) return;
+    const st = document.createElement('style');
+    st.id = 'wbs-expanding-css';
+    st.textContent = `
+      /* 확장되는 노드의 직계 자식 목록은 칠 완료까지 숨김 */
+      #wbs-group-list li.expanding > ol { visibility: hidden; }
+    `;
+    document.head.appendChild(st);
   })();
 
-  // 렌더/확장/축소 시 데코 보정 + (필요할 때만) 부분 하이라이트
-  wbsTree.on("node.rendered", (n) => requestAnimationFrame(() => {
-    ensureDecor(n);
-    try {
-      const map = window.__WBS_CATMAP; // 이미 계산돼 있으면 사용
-      if (map) applyHighlightForSubtreeUI(n, map);
-    } catch(e){}
-  }));
-  wbsTree.on("node.expanded", (n) => {
-    ensureDecor(n);
-    const kids = [...(n.children || [])];
-    const map  = window.__WBS_CATMAP;
-    function step(deadline){
-      let k = 0;
-      while (kids.length && (!deadline || deadline.timeRemaining() > 3) && k < 400) {
-        try {
-          ensureDecor(kids[0]);
-          if (map) applyHighlightForSubtreeUI(kids[0], map);
-          kids.shift();
-        } catch(e){}
-        k++;
-      }
-      if (kids.length) {
-        if (typeof requestIdleCallback === 'function') requestIdleCallback(step, { timeout: 60 });
-        else setTimeout(step, 0);
-      }
-    }
-    if (typeof requestIdleCallback === 'function') requestIdleCallback(step, { timeout: 60 });
-    else setTimeout(step, 0);
-  });
-  wbsTree.on("node.collapsed", (n) => ensureDecor(n));
+  const wrap = document.getElementById("wbs-group-content");
+  if (!wrap) return;
+  wrap.innerHTML = `<div id="wbs-group-list"></div>`;
+  const host = document.getElementById("wbs-group-list");
 
-  // 체크박스 전파(게으른 청크)
-  function cascadeCheck(node, checked) {
-    if (!(node.hasChildren && node.hasChildren())) return;
-    const q = [...node.children];
-    function step(deadline){
-      while (q.length && (!deadline || deadline.timeRemaining() > 2)) {
-        const ch = q.shift();
-        checked ? ch.check() : ch.uncheck();
-        if (ch.hasChildren && ch.hasChildren()) q.push(...ch.children);
-      }
-      if (q.length) {
-        if (typeof requestIdleCallback === 'function') requestIdleCallback(step, { timeout: 60 });
-        else setTimeout(step, 0);
-      }
-    }
-    if (typeof requestIdleCallback === 'function') requestIdleCallback(step, { timeout: 60 });
-    else setTimeout(step, 0);
+  const rawProvider = (input && input.__provider) ? input : null;
+  let provider = rawProvider;
+  const usingProvider = !!rawProvider;
+
+  function pathOf(node){
+    if (node && Array.isArray(node.__path)) return node.__path.slice();
+    const out = []; let cur = node;
+    while (cur && cur.text && !cur.isRoot?.()) { out.unshift(cur.text); cur = cur.parent; }
+    return out;
   }
-  wbsTree.on("node.checked",   (n) => cascadeCheck(n, true));
-  wbsTree.on("node.unchecked", (n) => cascadeCheck(n, false));
+  const rawPathOf = pathOf; // 별칭
 
-  // 경로맵 1회 캐시(객체개수 셀 팝업용)
-  function buildWbsPathMapOnce() {
-    const CUR_URN = window.CURRENT_MODEL_URN || "";
-    const map = new Map();
-    (function walk(nodes, ancestors){
-      (nodes || []).forEach(n => {
-        const nameClean = (n.text || "").trim();
-        const hasKids = n.hasChildren && n.hasChildren();
-        const nextAnc = hasKids ? (nameClean ? [...ancestors, nameClean] : ancestors) : ancestors;
-        if (hasKids) walk(n.children, nextAnc);
-        else if (typeof n.dbId === "number") {
-          const urn = n.urn || CUR_URN;
-          map.set(`${urn}:${n.dbId}`, ancestors.join(" - "));
+  // 2) ★★★ 체크 규칙을 '초기 데이터'에 주입하는 래퍼 프로바이더
+  if (usingProvider) {
+    const coerceCheckOnData = (items, parentPath=[]) => {
+      if (!Array.isArray(items)) return items;
+      return items.map(item => {
+        // 버킷이면 내부 항목까지 재귀 적용
+        if (item?._isBucket && Array.isArray(item.__bucket)) {
+          item.__bucket = coerceCheckOnData(item.__bucket, parentPath);
+          return item;
         }
+        // 정상 노드: label로 경로 확장
+        const label = item?.text ?? "";
+        const path = parentPath.concat([label]);
+        const want = shouldBeChecked(path);
+        if (want !== null) {
+          item.itree = item.itree || {};
+          item.itree.state = item.itree.state || {};
+          item.itree.state.checked = !!want;
+        }
+        return item;
       });
-    })(wbsTree.nodes(), []);
-    return map;
+    };
+
+    provider = {
+      __provider: true,
+      async roots(){
+        const items = await rawProvider.roots();
+        return coerceCheckOnData(items, []);
+      },
+      async childrenByPath(path){
+        const items = await rawProvider.childrenByPath(path);
+        return coerceCheckOnData(items, path);
+      },
+      countAt: (...a)=>rawProvider.countAt(...a),
+      getDbIdsForPath: (...a)=>rawProvider.getDbIdsForPath(...a),
+      ensurePathMapForDbIds: (...a)=>rawProvider.ensurePathMapForDbIds?.(...a)
+    };
   }
-  window.__WBS_PATHMAP = buildWbsPathMapOnce();
 
-  // 눈알 클릭 위임 1회
-  installWbsVisibilityDelegate(wbsTree);
+  const tree = new window.InspireTree({
+    selection: { multi:true, mode:"simple", autoSelectChildren:false, autoDselectChildren:false, require:false, autoSelectParents:false },
+    data: usingProvider
+      ? function(node, resolve){
+          if (!node) { provider.roots().then(resolve); return; }
+          if (node._isBucket && Array.isArray(node.__bucket)) { resolve(node.__bucket); return; }
+          provider.childrenByPath(pathOf(node)).then(resolve);
+        }
+      : (input || [])
+  });
+  window.wbsTree = tree;
 
-  // (옵션) 확장/축소에만 부분 하이라이트 반응하려면 켜기
-  // attachWbsTreeHighlightEvents(wbsTree, { includeExpand: true });
+  new window.InspireTreeDOM(tree, { target:"#wbs-group-list", showCheckboxes:true, dragAndDrop:{enabled:false} });
+
+  if (usingProvider) {
+    window.__WBS_PROVIDER = provider;
+    window.__WBS_GET_DBIDS_FOR_NODE = (node, opts) => provider.getDbIdsForPath(pathOf(node), opts);
+  }
+
+  function rowFor(node){
+    const wrap = ensureRowShell(node);
+    if (wrap) return wrap;
+    const uid = node?._id ?? node?.id;
+    const li = host.querySelector(`li[data-uid="${uid}"]`);
+    return li?.querySelector(':scope > .title-wrap') || li;
+  }
+
+  function ensureCountBadge(node){
+    const row = rowFor(node); if (!row) return;
+
+    let badge = row.querySelector('.count-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'count-badge';
+      row.appendChild(badge);
+    }
+
+    const isLeaf = (typeof node.dbId === "number");
+    if (isLeaf) {
+      badge.textContent = '';
+      badge.style.display = 'none';
+      return;
+    }
+
+    let cnt = (typeof node.leafCount === 'number') ? node.leafCount : undefined;
+    if (cnt == null && usingProvider) { cnt = provider.countAt(pathOf(node)); }
+
+    badge.textContent = (typeof cnt === 'number') ? String(cnt) : '…';
+    badge.style.display = '';
+  }
+
+  function ensureDecor(n){ try { ensureCountBadge(n); } catch {} try { ensureEyeButton(n); } catch {} }
+
+  function decorateDeep(root){
+    const Q = [root]; const CHUNK = 600;
+    (function step(deadline){
+      let n=0;
+      while (Q.length && (!deadline || deadline.timeRemaining()>3) && n<CHUNK){
+        const cur = Q.shift();
+        try { ensureDecor(cur); } catch {}
+        if (cur.hasChildren && cur.hasChildren()) (cur.children||[]).forEach(ch=>Q.push(ch));
+        n++;
+      }
+      if (Q.length) rIC(step,{timeout:60});
+    })();
+  }
+
+  // 하이라이트 스로틀
+  let HL_SUSPENDED = false;
+  const q = new Set(); let scheduled = false;
+  function scheduleHL(n){
+    if (HL_SUSPENDED || window.__WBS_FIXED_MODE) return;
+    q.add(n); if (scheduled) return; scheduled = true;
+    requestAnimationFrame(()=>{
+      const map = window.__WBS_CATMAP;
+      if (!window.__WBS_FIXED_MODE && map) {
+        q.forEach(x=>{ try{ applyHighlightForSubtreeUI(x,map);}catch{} });
+      }
+      q.clear(); scheduled=false;
+    });
+  }
+  function flushOnce(){
+    if (window.__WBS_FIXED_MODE) return;
+    const map = window.__WBS_CATMAP; if (!map) return;
+    tree.nodes().forEach(r=>{ try{ applyHighlightForSubtreeUI(r,map);}catch{} });
+  }
+
+  tree.on("node.rendered", (n)=>requestAnimationFrame(()=>{ ensureDecor(n); scheduleHL(n); }));
+
+  // 막 로드된 자식들에게 규칙/칠 즉시 적용 (보조 안전장치)
+  tree.on("children.loaded", (parent) => {
+    try {
+      (parent.children || []).forEach(ch => {
+        try {
+          const want = shouldBeCheckedByNode(ch);
+          if (want === true) ch.check?.();
+          else if (want === false) ch.uncheck?.();
+        } catch {}
+      });
+      paintSubtreeNow(parent);
+    } catch {}
+  });
+
+  // 확장시 반짝임 억제 + 고정색칠 경로 최신화
+  tree.on("node.expanded",  async (n)=>{
+    HL_SUSPENDED = true;
+    decorateDeep(n);
+
+    const uid = n?._id ?? n?.id;
+    const li  = uid ? host.querySelector(`li[data-uid="${uid}"]`) : null;
+    li?.classList.add('expanding');
+
+    const prevLock = window.__WBS_PAINT_LOCK === true;
+    window.__WBS_PAINT_LOCK = true;
+
+    if (usingProvider) { try { await provider.childrenByPath(rawPathOf(n)); } catch {} }
+
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
+
+    try { paintSubtreeNow(n); } catch {}
+    try { await refreshFixedPaint({ repaint:true }); } catch {}
+
+    window.__WBS_PAINT_LOCK = prevLock;
+    li?.classList.remove('expanding');
+    HL_SUSPENDED = false;
+
+    flushOnce();
+  });
+
+  requestAnimationFrame(()=>{ try { tree.nodes().forEach(ensureDecor); } catch {} });
+  requestAnimationFrame(()=>{ try { activateFixedPaint(); } catch {} });
+
+  installWbsVisibilityDelegate();
+
+  // DOM 추가 감시
+  try {
+    if (!host.__wbsDecorObserver){
+      const obs = new MutationObserver((mutList)=>{
+        let addedSomething = false;
+        for (const m of mutList){
+          m.addedNodes && m.addedNodes.forEach(el=>{
+            if (el.nodeType !== 1) return;
+            const lis = el.matches?.('li[data-uid]') ? [el] : Array.from(el.querySelectorAll?.('li[data-uid]') || []);
+            if (!lis.length) return;
+            addedSomething = true;
+            requestAnimationFrame(()=>{
+              lis.forEach(li => {
+                try {
+                  const uid = li.getAttribute('data-uid');
+                  const node = uid ? tree.node(uid) : null;
+                  if (!node) return;
+                  ensureRowShell(node);
+                  ensureCountBadge(node);
+                  ensureEyeButton(node);
+                  try {
+                    const want = shouldBeCheckedByNode(node);
+                    if (want === true) node.check?.();
+                    else if (want === false) node.uncheck?.();
+                  } catch {}
+                } catch {}
+              });
+            });
+          });
+        }
+        if (addedSomething) requestDebouncedRepaint?.(32);
+      });
+      obs.observe(host, { childList:true, subtree:true });
+      host.__wbsDecorObserver = obs;
+    }
+  } catch {}
+
+  // 체크 이벤트 → 규칙 갱신(미확장 자식에도 적용되도록)
+  tree.on("node.checked", (n)=>{
+    registerAutoCheck(pathOf(n), true);
+    if (n.hasChildren && n.hasChildren()) (n.children||[]).forEach(ch => { try{ ch.check?.(); }catch{} });
+  });
+  tree.on("node.unchecked", (n)=>{
+    registerAutoCheck(pathOf(n), false);
+    if (n.hasChildren && n.hasChildren()) (n.children||[]).forEach(ch => { try{ ch.uncheck?.(); }catch{} });
+  });
+}
+
+function ensureRowShell(node){
+  const uid = node?._id ?? node?.id;
+  if (!uid) return null;
+  const li = document.querySelector(`#wbs-group-list li[data-uid="${uid}"]`);
+  if (!li) return null;
+
+  let wrap = li.querySelector(':scope > .title-wrap');
+  if (wrap) return wrap;
+
+  wrap = document.createElement('div');
+  wrap.className = 'title-wrap';
+
+  const moveSelectors = ['a.toggle', 'input[type="checkbox"]', '.title'];
+  const moving = [];
+  moveSelectors.forEach(sel => {
+    const el = li.querySelector(`:scope > ${sel}`);
+    if (el) moving.push(el);
+  });
+
+  li.insertBefore(wrap, li.firstChild);
+  moving.forEach(el => wrap.appendChild(el));
+
+  return wrap;
 }

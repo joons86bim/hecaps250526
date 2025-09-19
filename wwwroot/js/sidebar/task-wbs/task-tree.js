@@ -1,12 +1,12 @@
 // Task(Fancytree) 초기화 + 편집 + 날짜/집계/간트 플러시
-import { calcLeadtime, calcEnd, calcStart } from "./core/date-helpers.js";
+import { calcLeadtime, calcEnd, calcStart, recalcAllLeadtime } from "./core/date-helpers.js";
 import { propagateCategoryDown, enforceCategoryInheritance, normalizeTaskCategory } from "./core/categories.js";
 import { recomputeAggDown, recomputeAggUp, recomputeAggObjects } from "./core/aggregate.js";
 import { aggregateTaskFields } from "./logic/task-aggregate.js";
-import { showDatePickerInput, calendarSvg } from "./ui/mask-and-picker.js";
+import { attachDatePickerToInput } from "./ui/mask-and-picker.js";
+import { calendarSvg } from "./ui/calendar-svg.js";
 import { requestWbsHighlight, requestWbsHighlightGateOn } from "./wbs/highlight.js";
 
-// 외부에서 필요하면 끌어다 씁니다.
 export function initTaskPanel(taskData) {
   $("#treegrid").fancytree({
     extensions: ["table", "gridnav"],
@@ -14,17 +14,22 @@ export function initTaskPanel(taskData) {
     selectMode: 2,
     table: { indentation: 20, nodeColumnIdx: 2 },
     source: taskData,
+
     init: function (event, data) {
       // 리드타임 전체 재계산 + 객체 집계
+      try { recalcAllLeadtime(data.tree); } catch(e){}
       try { recomputeAggObjects(data.tree); } catch(e){}
       data.tree.render(true, true);
       enforceCategoryInheritance(data.tree);
       setTimeout(() => scheduleFlush(), 0);
     },
+
     renderColumns: function (event, data) {
       const node = data.node;
       const $tdList = $(node.tr).find(">td");
-      const isTop = (typeof node.getLevel === "function") ? node.getLevel() === 1 : (node.parent?.isRoot?.() === true);
+      const isTop = (typeof node.getLevel === "function")
+        ? node.getLevel() === 1
+        : (node.parent?.isRoot?.() === true);
 
       $tdList.eq(0).text(node.data.no || "");
       $tdList.eq(1).html(
@@ -55,7 +60,14 @@ export function initTaskPanel(taskData) {
   const tree = $.ui.fancytree.getTree("#treegrid");
   window.taskTree = tree;
 
-  // 편집/더블클릭
+  // Fancytree 초기화 직후 어딘가(중복 감싸기 방지)
+  const $tbl = $("#treegrid");
+  if ($tbl.length && !$tbl.parent().hasClass("table-scroll")) {
+    $tbl.wrap('<div class="table-scroll"></div>');
+  }
+
+
+  // 더블클릭 편집
   $("#treegrid")
     .off("dblclick", "td")
     .on("dblclick", "td", function(){
@@ -99,16 +111,18 @@ export function initTaskPanel(taskData) {
       }
     });
 
-  // 구분 변경 → 전면 하이라이트 1회 (게이트 ON 상태)
+  // 구분 변경 → 전면 하이라이트 1회 (게이트 ON 후 트리거)
   $("#treegrid").on("change", ".treegrid-dropdown", function(){
     const $tr = $(this).closest("tr");
     const node = $.ui.fancytree.getNode($tr);
     const isTop = (typeof node.getLevel === "function") ? node.getLevel() === 1 : (node.parent?.isRoot?.() === true);
     if (!isTop) { this.value = node.data.selectedOption; return; }
     const newCat = this.value;
+
     propagateCategoryDown(node, newCat);
     node.tree.render(true, true);
     window.requestTaskTreeFlush?.();
+
     requestWbsHighlightGateOn();
     requestWbsHighlight();
   });
@@ -120,23 +134,30 @@ export function initTaskPanel(taskData) {
   };
 }
 
+/* ───────── 내부 유틸 ───────── */
 let __pending = false;
 function scheduleFlush({ full = false } = {}) {
+  const tree = window.taskTree || $.ui.fancytree.getTree("#treegrid");
+  if (!tree) return;
   if (__pending) return;
+
   __pending = true;
   requestAnimationFrame(() => {
     try {
-      const tree = window.taskTree;
-      if (full) recomputeAggObjects(tree);
-      if (window.savedTaskData) {
-        // buttons.js 가 export 하는 setSavedTaskData를 호출하게 되어 있으므로
-        // 여기서는 저장본 스냅샷만 갱신해줍니다(필요 시).
+      if (full) {
+        // 링크 개수 등 집계 필요 시
+        recomputeAggObjects(tree);
       }
-    } finally { __pending = false; }
+      // ✅ 전체 테이블 렌더(헤더/부모/형제까지 모두 갱신)
+      tree.render(true, true);
+    } finally {
+      __pending = false;
+    }
   });
+
   // 간트는 가볍게 스로틀
-  const draw = () => { try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_){} };
-  (typeof _ !== "undefined" && _.throttle) ? _.throttle(draw, 250)() : draw();
+  const redraw = () => { try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_){} };
+  (typeof _ !== "undefined" && _.throttle) ? _.throttle(redraw, 250)() : redraw();
 }
 
 function commit(node, patch, changedField, adjustTarget) {
@@ -144,18 +165,30 @@ function commit(node, patch, changedField, adjustTarget) {
   if (typeof patch === "function") patch(node.data);
   else if (patch && typeof patch === "object") Object.assign(node.data, patch);
 
+  // 날짜/리드타임 계산
   recalcLeadtimeFields(node, changedField, adjustTarget);
   recalcLeadtimeDescendants(node);
   recalcLeadtimeAncestors(node);
 
+  // 객체 집계는 날짜 변경이 아닐 때만
   const isDate = (changedField === "start" || changedField === "end" || changedField === "leadtime");
   if (!isDate) { recomputeAggDown(node); recomputeAggUp(node); }
 
-  node.render();
+  // ✅ 즉시 반영: 해당 노드 + 조상 노드까지 바로 렌더
+  let cur = node;
+  while (cur) {
+    try { cur.render && cur.render(); } catch(_) {}
+    const p = cur.parent;
+    if (!p || (p.isRoot && p.isRoot())) break;
+    cur = p;
+  }
+
+  // ✅ 배치 플러시: 전체 테이블 렌더 + 간트 갱신(스로틀)
   scheduleFlush();
 }
 
-// 리드타임 보조 (inline)
+
+/* ───────── 리드타임 보조(이 파일 내 구현) ───────── */
 function recalcLeadtimeFields(node, changedField, popupCallback) {
   node.data = node.data || {};
   let { start, end, leadtime } = node.data;
@@ -202,7 +235,7 @@ function recalcLeadtimeAncestors(node) {
   recalcLeadtimeAncestors(p);
 }
 
-// 인라인 에디터들
+/* ───────── 인라인 에디터 ───────── */
 function openLeadtimeEditor($td, node) {
   const field = "leadtime";
   const oldValue = node.data.leadtime || "";
@@ -231,18 +264,38 @@ function openLeadtimeEditor($td, node) {
     });
   }, 0);
 }
+
 function openDateEditor($td, node, field) {
   const oldValue = node.data[field] || "";
   $td.empty();
 
-  const $input = $('<input type="text" class="datepicker-input" style="width:100px;text-align:center;" placeholder="yyyy-mm-dd">').val(oldValue);
+  const $input   = $('<input type="text" class="datepicker-input" style="width:100px;text-align:center;" placeholder="yyyy-mm-dd">').val(oldValue);
   const $iconBtn = $('<button type="button" class="datepicker-btn" style="margin-left:4px; padding:0; background:none; border:none; cursor:pointer;"></button>').html(calendarSvg);
   $td.append($input, $iconBtn);
 
-  if (window.IMask) IMask($input[0], { mask: "0000-00-00", lazy: false, autofix: true });
+  // ⛔ 여기서 IMask 직접 붙이지 마세요(아래 attachDatePickerToInput에서 처리)
+  function restoreCell() {
+    setTimeout(() => $td.text(node.data[field] || ""), 10);
+    $(document).off("mousedown.cellEdit");
+  }
+  function commitDate(dateStr) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      commit(node, { [field]: dateStr }, field); // → 리드타임/조상 집계 계산 + node.render() + flush
+    }
+    restoreCell();
+  }
 
-  function restoreCell() { setTimeout(() => $td.text(node.data[field] || ""), 10); $(document).off("mousedown.cellEdit"); }
+  // ✅ 안전하게 달력+마스크+스마트커서 부착
+  attachDatePickerToInput($input[0], {
+    initial: oldValue,
+    onPicked: commitDate,
+    onCancel: restoreCell
+  });
 
+  // 아이콘으로 달력 열기
+  $iconBtn.on("click", (ev) => { ev.stopPropagation(); $input[0].__fp?.open(); });
+
+  // 엔터/ESC 처리 + 바깥 클릭 시 복구
   $input.on("keydown", (ev) => { if (ev.key === "Enter") $input.blur(); if (ev.key === "Escape") restoreCell(); });
   setTimeout(() => {
     $(document).on("mousedown.cellEdit", (e) => {
@@ -250,10 +303,19 @@ function openDateEditor($td, node, field) {
     });
   }, 0);
 
-  function commitDate(dateStr) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) commit(node, { [field]: dateStr }, field);
-    restoreCell();
-  }
+  // 입력만으로도 커밋 허용
   $input.on("blur", () => commitDate($input.val()));
-  $iconBtn.on("click", (ev) => { ev.stopPropagation(); showDatePickerInput($td, node.data[field], (dateStr) => commitDate(dateStr)); });
+}
+
+
+function renderRowAndAncestors(node) {
+  // 현재 행
+  if (node?.render) node.render();
+
+  // 부모/조상 행들
+  let p = node?.parent;
+  while (p && (!p.isRoot || !p.isRoot())) {
+    if (p.render) p.render();
+    p = p.parent;
+  }
 }

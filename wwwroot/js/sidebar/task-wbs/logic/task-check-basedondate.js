@@ -1,4 +1,4 @@
-// wwwroot/js/sidebar/task-check-basedondate.js
+// /wwwroot/js/sidebar/task-wbs/logic/task-check-basedondate.js
 
 /**
  * 날짜별 Task 객체 상태 갱신 함수 (APS Viewer 호환)
@@ -6,6 +6,20 @@
  * @param {object} taskTree - fancytree 인스턴스 (window.taskTree)
  * @param {Autodesk.Viewing.GuiViewer3D} viewer - 전역 viewer 객체
  */
+
+function themeForAll(viewer, ids, hex) {
+  if (!ids?.length || !window.THREE) return;
+  const color = new window.THREE.Color(hex);
+  const models = (viewer.getVisibleModels && viewer.getVisibleModels().length)
+    ? viewer.getVisibleModels()
+    : (viewer.model ? [viewer.model] : []);
+  for (const m of models) {
+    for (let i=0;i<ids.length;i++) {
+      try { viewer.setThemingColor(ids[i], color, m); } catch(_) {}
+    }
+  }
+}
+
 export function checkTaskStatusByDate(dateStr, taskTree, viewer) {
   if (!dateStr || !taskTree || !viewer) return;
 
@@ -23,33 +37,29 @@ export function checkTaskStatusByDate(dateStr, taskTree, viewer) {
       const end = node.data.end;
       const objs = node.data.linkedObjects || [];
 
-      // yyyy-mm-dd 문자열 비교 → OK (동일 포맷이면)
       const inputDate = dateStr;
 
       objs.forEach((o) => {
         const dbId = o.dbId;
-        // 기본적으로 모두 보이게 (각 조건에서 hide 처리)
         if (type === "시공") {
           if (inputDate < start) {
-            viewer.impl.visibilityManager.hide(dbId); // 숨김
+            viewer.impl.visibilityManager.hide(dbId);
           } else if (start <= inputDate && inputDate < end) {
             viewer.impl.visibilityManager.show(dbId);
-            // 초록색 강조 (투명도 0.5)
             viewer.setThemingColor(dbId, new THREE.Vector4(0, 1, 0, 0.5));
           } else if (end && inputDate >= end) {
             viewer.impl.visibilityManager.show(dbId);
-            viewer.setThemingColor(dbId, null); // 색상 제거
+            viewer.setThemingColor(dbId, null);
           }
         } else if (type === "철거") {
           if (inputDate < start) {
             viewer.impl.visibilityManager.show(dbId);
-            viewer.setThemingColor(dbId, null); // 색상 없음
+            viewer.setThemingColor(dbId, null);
           } else if (start <= inputDate && inputDate < end) {
             viewer.impl.visibilityManager.show(dbId);
-            // 빨간색 강조 (투명도 0.5)
             viewer.setThemingColor(dbId, new THREE.Vector4(1, 0, 0, 0.5));
           } else if (end && inputDate >= end) {
-            viewer.impl.visibilityManager.hide(dbId); // 숨김
+            viewer.impl.visibilityManager.hide(dbId);
           }
         } else if (type === "가설") {
           // 향후 로직 구현
@@ -58,5 +68,5 @@ export function checkTaskStatusByDate(dateStr, taskTree, viewer) {
     }
   });
 
-  viewer.impl.invalidate(true); // 화면 갱신
+  viewer.impl.invalidate(true);
 }

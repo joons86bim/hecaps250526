@@ -1,0 +1,48 @@
+/* 뷰어 박스: 남는 공간 모두 */
+#viewer-host{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 커스텀 툴 버튼 아이콘 */
+.click-button-class{
+  background-image: url('/images/icon-click.svg');
+  background-size: 32px 32px;
+  background-repeat: no-repeat;
+  background-position: center;
+  width: 32px; height: 32px; padding: 0; margin: 0; border: none; background-color: transparent;
+  border-radius: 4px; display: inline-block; box-sizing: border-box; transition: filter .3s;
+}
+.click-button-class:hover{ filter: brightness(0) saturate(100%) invert(37%) sepia(89%) saturate(672%) hue-rotate(180deg); }
+
+.drag-button-class{
+  background-image: url('/images/icon-drag.svg');
+  background-size: 32px 32px;
+  background-repeat: no-repeat;
+  background-position: center;
+  width: 32px; height: 32px; padding: 0; margin: 0; border: none; background-color: transparent;
+  border-radius: 4px; display: inline-block; box-sizing: border-box; transition: filter .3s;
+}
+.drag-button-class:hover{ filter: brightness(0) saturate(100%) invert(37%) sepia(89%) saturate(672%) hue-rotate(180deg); }
+
+.hide-button-class{
+  background-image: url('/images/icon-hide-selected.svg');
+  background-size: 32px 32px; background-repeat:no-repeat; background-position:center;
+  width:32px; height:32px; border:0; background-color:transparent; border-radius:4px; transition: filter .3s;
+}
+.hide-button-class:hover{ filter: brightness(0) saturate(100%) invert(37%) sepia(89%) saturate(672%) hue-rotate(180deg); }
+
+.isolate-button-class{
+  background-image: url('/images/icon-isolate-selected.svg');
+  background-size: 32px 32px; background-repeat:no-repeat; background-position:center;
+  width:32px; height:32px; border:0; background-color:transparent; border-radius:4px; transition: filter .3s;
+}
+.isolate-button-class:hover{ filter: brightness(0) saturate(100%) invert(37%) sepia(89%) saturate(672%) hue-rotate(180deg); }
+
+.reset-button-class{
+  background-image: url('/images/icon-reset.svg');
+  background-size: 32px 32px; background-repeat:no-repeat; background-position:center;
+  width:32px; height:32px; border:0; background-color:transparent; border-radius:4px; transition: filter .3s;
+}
+.reset-button-class:hover{ filter: brightness(0) saturate(100%) invert(37%) sepia(89%) saturate(672%) hue-rotate(180deg); }

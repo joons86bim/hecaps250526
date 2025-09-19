@@ -1,5 +1,5 @@
 // /wwwroot/js/sidebar/gantt-view.js
-import { normalizeTaskCategory, stripCountSuffix } from "../sidebar/panel2-ui-helpers.js";
+import { normalizeTaskCategory, stripCountSuffix } from "../core/categories.js";
 
 const DAY = 24*60*60*1000;
 
@@ -213,54 +213,21 @@ export async function initGanttView({ container, saveBtn }){
     view.setColumns([0,1,2,3,4,5,6,7,8]);
     view.setRows(rows.map((_, i) => i));
 
-    // // 초기 높이(컨테이너 기준)
-    // try { options.height = Math.max(120, el.clientHeight || 320); } catch(_) {}
     // 1) 행 수 기반으로 캔버스 높이 산정(스크롤 생기도록)
     const trackH = (options.gantt?.trackHeight || 28);
     const header  = 56;           // 상단 헤더 여백(경험값)
     const rowGap  = 4;            // 트랙 간 여백 세팅
     const content = rows.length * (trackH + rowGap) + header;
-    // 컨테이너보다 크면 스크롤이 생기도록, 작을 때는 컨테이너 높이를 최소로
     const minH = Math.max(el.clientHeight || 320, 120);
     options.height = Math.max(content, minH);
 
-
-    // 매 드로우 후 후처리: 하단 축 숨김 + 필요 시 높이 재조정
     google.visualization.events.addOneTimeListener(chart, 'ready', ()=>{
-      hideBottomAxis(el);   // ⬅️ 하단 월/연 텍스트 제거 (컨테이너 전체 감시)
-      // try {
-      //   const svg = el.querySelector('svg');
-      //   if (svg) {
-      //     // 특수기호 제거 + 좌측정렬 시도(브라우저에 따라 한계)
-      //     svg.querySelectorAll('text').forEach(t => {
-      //       t.textContent = (t.textContent || '')
-      //         .replace(/^[■●▪▫◼◻□\s]+/, '')
-      //         .replace(/^\s*[▸▹▻▶▷]\s*/, '');
-      //       t.setAttribute('text-anchor','start');
-      //       t.removeAttribute('dx');
-      //     });
-      //   }
-      // } catch(_) {}
-
-
-      // // 실제 콘텐츠 높이로 1회 재-드로우(하단 여백 제거)
-      // if (!_heightAdjusted) {
-      //   const h = measureContentHeight(el);
-      //   if (h && Math.abs((options.height||0) - h) > 2) {
-      //     _heightAdjusted = true;
-      //     options.height = h;
-      //     chart.draw(view, options);   // ⚠️ 다시도 view로!
-      //     return; // 두 번째 ready에서 다시 hideBottomAxis 호출됨
-      //   }
-      // }
+      hideBottomAxis(el);
     });
 
-    // 첫 드로우도 view로!
     chart.draw(view, options);
 
-    // 상단 범위 텍스트
     updateRangeSummary(rows);
-    // (선택) 상단 커스텀 축 유지 시 사용
     renderTopAxis(rows, el);
   }
 
@@ -320,7 +287,6 @@ function renderTopAxis(rows, chartEl){
 
 // ── 하단(월/연) 타임라인 숨김 ─────────────────────
 function hideBottomAxis(containerEl){
-  // 기존 옵저버 정리
   if (containerEl.__bottomAxisObs) {
     containerEl.__bottomAxisObs.disconnect();
     containerEl.__bottomAxisObs = null;
@@ -330,7 +296,7 @@ function hideBottomAxis(containerEl){
     try {
       const svg = containerEl.querySelector('svg');
       if (!svg) return;
-      // SVG 전체 높이 기준 하단 40px 텍스트 + 월/연 텍스트 제거
+
       const svgH =
         (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.height) ||
         svg.getBBox().height ||
@@ -340,7 +306,7 @@ function hideBottomAxis(containerEl){
       const year  = /^\d{4}$/;
 
       svg.querySelectorAll('text').forEach(t=>{
-        const bb = t.getBBox(); // y는 텍스트 상단이므로 약간 보정 불필요(40px 여유)
+        const bb = t.getBBox();
         const txt = (t.textContent || '').trim();
         if (bb.y > svgH - 40 || month.test(txt) || year.test(txt)) {
           t.style.display = 'none';
@@ -349,21 +315,17 @@ function hideBottomAxis(containerEl){
     } catch(_) {}
   };
 
-  // 즉시 1회
   apply();
-  // 컨테이너 전체를 관찰(차트가 다시 그려져 svg가 갈아껴져도 대응)
   const obs = new MutationObserver(apply);
   obs.observe(containerEl, { childList: true, subtree: true });
   containerEl.__bottomAxisObs = obs;
 }
 
-// ── 실제 컨텐츠 높이(행 영역 + 헤더) 계산 ───────────
 function measureContentHeight(containerEl){
   try {
     const svg = containerEl.querySelector('svg');
     if (!svg) return null;
 
-    // 1) 행 배경 rect(줄무늬)들의 (y+height) 최댓값
     let gridBottomY = 0;
     svg.querySelectorAll('rect').forEach(r=>{
       const y = parseFloat(r.getAttribute('y') || '0');
@@ -371,9 +333,7 @@ function measureContentHeight(containerEl){
       gridBottomY = Math.max(gridBottomY, y + h);
     });
 
-    // 2) 상단 헤더 마진(경험값)
     const headerMargin = 32;
-
     return Math.max(120, Math.round(gridBottomY + headerMargin));
   } catch(_) { return null; }
 }

@@ -1,14 +1,16 @@
-// 하이라이트 게이트 + 스로틀
-import { updateWBSHighlight as _update } from "../ui/wbs-highlight.js";
+// /wwwroot/js/sidebar/task-wbs/wbs/highlight.js
+import { updateWBSHighlight } from "../ui/wbs-highlight.js";
+
+console.info("[hec] wbs/highlight.js loaded");
 
 window.__ALLOW_WBS_UPDATE = window.__ALLOW_WBS_UPDATE ?? false;
 
 export function requestWbsHighlightGateOn()  { window.__ALLOW_WBS_UPDATE = true; }
 export function requestWbsHighlightGateOff() { window.__ALLOW_WBS_UPDATE = false; }
 
-const throttled = (typeof _ !== "undefined" && _.throttle)
-  ? _.throttle(() => { if (window.__ALLOW_WBS_UPDATE) _update(); }, 120)
-  : () => { if (window.__ALLOW_WBS_UPDATE) _update(); };
+const _req = () => { if (window.__ALLOW_WBS_UPDATE) updateWBSHighlight(); };
+const _throttled = (typeof _ !== "undefined" && _.throttle) ? _.throttle(_req, 120) : _req;
 
-export function requestWbsHighlight(){ throttled(); }
-export const updateWBSHighlight = _update; // 퍼사드 호환
+export function requestWbsHighlight() { _throttled(); }
+// 대량 처리 후 마지막에 1번 강제 반영
+export function requestWbsHighlightNow() { if (window.__ALLOW_WBS_UPDATE) updateWBSHighlight(); }

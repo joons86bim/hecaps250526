@@ -5,87 +5,65 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <!-- Favicon -->
-    <link
-      rel="icon"
-      type="image/x-icon"
-      href="https://cdn.autodesk.io/favicon.ico"
-    />
+    <link rel="icon" type="image/x-icon" href="https://cdn.autodesk.io/favicon.ico" />
 
     <!-- Autodesk Viewer 스타일 -->
-    <link
-      rel="stylesheet"
-      href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.css"
-    />
+    <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.css" />
 
     <!-- Inspire Tree 스타일 -->
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-light.min.css"
-    />
+    <link rel="stylesheet" href="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-light.min.css" />
 
-    <!-- flatpickr CSS/JS CDN 추가 -->
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css"
-    />
+    <!-- flatpickr CSS/JS CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
-    <!-- jQuery (필수) -->
+    <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 
-    <!-- Fancytree core + table ext + edit ext -->
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/skin-win8/ui.fancytree.min.css"
-    />
+    <!-- Fancytree -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/skin-win8/ui.fancytree.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js"></script>
 
-    <!-- CDN 추가(달력입력마스킹) -->
+    <!-- 입력 마스킹 -->
     <script src="https://unpkg.com/imask"></script>
 
     <!-- 전역 CSS -->
-    <link rel="stylesheet" href="/css/main.css" />
-    <!-- 사이드바 -->
-    <link rel="stylesheet" href="/css/sidebar.css" />
-    <!-- 탭 헤더/패널 스타일 -->
-    <link rel="stylesheet" href="/css/panel-tree.css" />
-    <!-- 2번 패널(Task/WBS) 전용 스타일 -->
-    <link rel="stylesheet" href="/css/panel-task-wbs.css" />
-    <!-- task모달창 전용 스타일 -->
-    <link rel="stylesheet" href="/css/current-task.css" />
-    <!-- 간트 스타일 -->
-    <link rel="stylesheet" href="/css/gantt.css" />
-
+    <link rel="stylesheet" href="/css/00-base.css">
+    <link rel="stylesheet" href="/css/05-hec-progress-overlay.css">
+    <link rel="stylesheet" href="/css/10-layout.css">
+    <link rel="stylesheet" href="/css/20-sidebar.css">
+    <link rel="stylesheet" href="/css/30-task-wbs.css">
+    <link rel="stylesheet" href="/css/35-wbs-matrix.css">
+    <link rel="stylesheet" href="/css/40-viewer-ui.css">
+    <link rel="stylesheet" href="/css/gantt.css">
+    <link rel="stylesheet" href="/css/95-modal-current-task.css">
+    
     <!-- Lucide Icons -->
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/lucide-static/font/css/lucide.css"
-    />
+    <link rel="stylesheet" href="https://unpkg.com/lucide-static/font/css/lucide.css" />
 
     <title>HEC-BIM 객체 공정 매핑도구</title>
   </head>
 
   <body>
-
-    <!-- Google Charts loader (전역 1회) -->
+    <!-- Google Charts loader -->
     <script src="https://www.gstatic.com/charts/loader.js"></script>
 
     <script type="module">
-      import { initGanttView } from "/js/sidebar/gantt-view.js";
-    
+      import { initGanttView } from "/js/sidebar/task-wbs/ui/gantt-view.js";;
+
       window.addEventListener('DOMContentLoaded', () => {
-        // 스플리터 드래그 + 접기/펼치기 토글
+        // 간트 스플리터
         (function splitter(){
           const host = document.getElementById('preview');
           const sp   = document.getElementById('gantt-splitter');
           const open = document.getElementById('gantt-open-btn');
           if (!host || !sp) return;
-    
+
           const saved = localStorage.getItem('ganttHeight');
           if (saved) host.style.setProperty('--gantt-height', saved);
-    
+
           let dragging = false, startY = 0, startH = 0;
-    
+
           function onDown(e){
             if (host.classList.contains('gantt-collapsed')) return;
             dragging = true;
@@ -110,15 +88,14 @@
             localStorage.setItem('ganttHeight', cs.getPropertyValue('--gantt-height').trim());
             setTimeout(()=> window.gantt?.renderFromTrees(window.taskTree, window.wbsTree), 80);
           }
-    
+
           sp.addEventListener('mousedown', onDown);
           sp.addEventListener('touchstart', onDown, { passive: true });
           window.addEventListener('mousemove', onMove);
           window.addEventListener('touchmove', onMove, { passive: false });
           window.addEventListener('mouseup', onUp);
           window.addEventListener('touchend', onUp);
-    
-          // 더블클릭/버튼으로 접기/펼치기
+
           sp.addEventListener('dblclick', () => {
             host.classList.toggle('gantt-collapsed');
             setTimeout(()=> window.gantt?.renderFromTrees(window.taskTree, window.wbsTree), 120);
@@ -135,19 +112,16 @@
             if (wasCollapsed) setTimeout(()=> window.gantt?.renderFromTrees(window.taskTree, window.wbsTree), 120);
           });
         })();
-    
-        // panel2 준비되면 간트 초기화 + 최초 렌더
+
+        // panel2 준비되면 간트 초기화
         window.addEventListener("panel2-ready", async () => {
-          console.log('[gantt] panel2-ready received');
           if (!window.gantt) {
-            console.log('[gantt] init…');
             window.gantt = await initGanttView({
               container: "#gantt-chart",
               saveBtn:   "#gantt-save-png"
             });
           }
           if (window.taskTree) {
-            console.log('[gantt] renderFromTrees…');
             window.gantt.renderFromTrees(window.taskTree, window.wbsTree);
           }
         });
@@ -155,29 +129,10 @@
     </script>
 
     <!-- 로딩 중 -->
-    <div
-      id="loading"
-      style="
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: 100vw;
-        height: 100vh;
-        font-size: 2rem; /* 큰 글씨 */
-        font-weight: 500; /* 약간 굵게 */
-        color: #555; /* 부드러운 색상 */
-        background: #f7f8fa; /* 밝은 배경 */
-        z-index: 9999; /* 맨 위에 올라오게 */
-      "
-    >
+    <div id="loading" style="display:flex;flex-direction:column;justify-content:center;align-items:center;position:fixed;inset:0;width:100vw;height:100vh;font-size:2rem;font-weight:500;color:#555;background:#f7f8fa;z-index:9999;">
       <h1>Welcome to HEC-BIM Platform...!!</h1>
     </div>
+
     <!-- 헤더 -->
     <div id="header" style="display: none">
       <img class="logo" src="/images/hec_logo.png" alt="HYUNDAI ENGINEERING" />
@@ -193,7 +148,7 @@
       </div>
 
       <div class="panels">
-        <!-- 1번 패널: 트리 -->
+        <!-- 1번 패널: 파일 트리 -->
         <div id="panel1" class="panel active">
           <div class="panel-content">
             <div id="tree"></div>
@@ -202,7 +157,6 @@
 
         <!-- 2번 패널: Task / WBS -->
         <div id="panel2" class="panel">
-          <!-- 수직 분할 패널 전체를 감싸는 컨테이너 -->
           <div id="vertical-split-container">
             <div id="task-list-panel">
               <div class="panel-header sticky-task-header">
@@ -219,26 +173,15 @@
                 </div>
               </div>
               <div id="task-list-content">
-                <table
-                  id="treegrid"
-                  style="width: 100%"
-                  class="fancytree-ext-table"
-                >
+                <table id="treegrid" style="width: 100%" class="fancytree-ext-table">
                   <colgroup>
                     <col width="40px" />
-                    <!-- No-->
                     <col width="60px" />
-                    <!-- 구분-->
                     <col width="260px" />
-                    <!-- 작업명-->
                     <col width="100px" />
-                    <!-- 시작일-->
                     <col width="100px" />
-                    <!-- 소요시간-->
                     <col width="100px" />
-                    <!-- 완료일-->
                     <col width="60px" />
-                    <!-- 객체개수-->
                   </colgroup>
                   <thead>
                     <tr>
@@ -255,7 +198,8 @@
                 </table>
               </div>
             </div>
-            <!-- 패널 사이의 구분선(드래그 바) -->
+
+            <!-- 드래그 바 -->
             <div id="resizer"></div>
 
             <div class="sidebar-panel" id="wbs-group-list-panel">
@@ -278,7 +222,6 @@
     <div id="preview" style="display:none">
       <div id="viewer-host"><div id="forgeViewerMount"></div></div>
       <div id="gantt-splitter" title="드래그하여 간트 높이 조절"></div>
-      <!-- #preview 내부, 간트 섹션 아래 어딘가에 추가 -->
       <button id="gantt-open-btn" class="gantt-open-btn" title="간트 펼치기">▲ 간트</button>
       <section id="gantt-pane">
         <div class="gantt-toolbar">
@@ -288,10 +231,7 @@
           <button id="gantt-save-png" class="btn btn-sm">PNG 저장</button>
           <button id="gantt-toggle"   class="btn btn-sm">접기/펼치기</button>
         </div>
-        <!-- ✅ 추가: 커스텀 상단 축 -->
-        <div id="gantt-top-axis" class="gantt-top-axis">
-          <div class="axis-track"></div>
-        </div>
+        <div id="gantt-top-axis" class="gantt-top-axis"><div class="axis-track"></div></div>
         <div id="gantt-chart"></div>
       </section>
     </div>
@@ -305,100 +245,35 @@
     <!-- 메인 부트스트랩 -->
     <script type="module" src="/js/viewer/CustomViewerExtension.js"></script>
     <script type="module" src="/js/main.js"></script>
-    <script type="module" src="/js/sidebar/sidebar-resizer.js"></script>
-    <script type="module" src="/js/sidebar/panel2-resizer.js"></script>
-    
+
+    <!-- ⚠️ 유지: 좌측 사이드바(파일탭) 리사이저가 이 파일에 있다면 필요 -->
+    <script type="module" src="/js/sidebar/task-wbs/layout/sidebar-resizer.js"></script>
+
+    <!-- ⚠️ 제거: main.js에서 import하여 중복 바인딩되던 항목 -->
+    <!-- <script type="module" src="/js/sidebar/task-wbs/layout/panel2-resizer.js"></script> -->
 
     <!-- 뷰 선택 모달 -->
-    <div
-      id="view-select-modal"
-      style="
-        display: none;
-        position: fixed;
-        left: 50%;
-        top: 42%;
-        transform: translate(-50%, -40%);
-        min-width: 330px;
-        background: #fff;
-        border-radius: 12px;
-        box-shadow: 0 4px 32px #2223;
-        z-index: 10001;
-        padding: 28px 24px 22px 24px;
-      "
-    >
-      <div
-        style="
-          font-weight: 600;
-          font-size: 1.1em;
-          margin-bottom: 12px;
-          letter-spacing: 0.02em;
-        "
-      >
+    <div id="view-select-modal" style="display:none;position:fixed;left:50%;top:42%;transform:translate(-50%,-40%);min-width:330px;background:#fff;border-radius:12px;box-shadow:0 4px 32px #2223;z-index:10001;padding:28px 24px 22px 24px;">
+      <div style="font-weight:600;font-size:1.1em;margin-bottom:12px;letter-spacing:0.02em;">
         뷰 선택
-        <button
-          id="view-close-btn"
-          style="
-            float: right;
-            background: none;
-            border: none;
-            font-size: 22px;
-            color: #888;
-            cursor: pointer;
-            margin-right: -8px;
-            margin-top: -8px;
-          "
-          aria-label="닫기"
-        >
-          &times;
-        </button>
+        <button id="view-close-btn" style="float:right;background:none;border:none;font-size:22px;color:#888;cursor:pointer;margin-right:-8px;margin-top:-8px;" aria-label="닫기">&times;</button>
       </div>
-      <div style="margin-bottom: 10px">
-        <label
-          for="view-type-dropdown"
-          style="font-size: 0.97em; font-weight: 500"
-          >뷰 타입</label
-        >
-        <select
-          id="view-type-dropdown"
-          style="width: 100%; padding: 6px; font-size: 1em; margin-top: 4px"
-        >
+      <div style="margin-bottom:10px">
+        <label for="view-type-dropdown" style="font-size:0.97em;font-weight:500">뷰 타입</label>
+        <select id="view-type-dropdown" style="width:100%;padding:6px;font-size:1em;margin-top:4px">
           <option value="3d">3D 뷰</option>
           <option value="2d">2D 뷰</option>
         </select>
       </div>
-      <div style="margin-bottom: 14px">
-        <label
-          for="view-list-dropdown"
-          style="font-size: 0.97em; font-weight: 500"
-          >뷰 리스트</label
-        >
-        <select
-          id="view-list-dropdown"
-          style="width: 100%; padding: 6px; font-size: 1em; margin-top: 4px"
-        >
+      <div style="margin-bottom:14px">
+        <label for="view-list-dropdown" style="font-size:0.97em;font-weight:500">뷰 리스트</label>
+        <select id="view-list-dropdown" style="width:100%;padding:6px;font-size:1em;margin-top:4px">
           <!-- JS로 동적 생성 -->
         </select>
       </div>
-      <div style="text-align: right">
-        <button
-          id="view-ok-btn"
-          style="
-            padding: 7px 20px;
-            font-size: 1em;
-            background: #1976d2;
-            color: #fff;
-            border: none;
-            border-radius: 5px;
-          "
-        >
-          확인
-        </button>
-        <button
-          id="view-cancel-btn"
-          style="padding: 7px 20px; margin-right: 8px; font-size: 1em"
-        >
-          취소
-        </button>
+      <div style="text-align:right">
+        <button id="view-ok-btn" style="padding:7px 20px;font-size:1em;background:#1976d2;color:#fff;border:none;border-radius:5px;">확인</button>
+        <button id="view-cancel-btn" style="padding:7px 20px;margin-right:8px;font-size:1em">취소</button>
       </div>
     </div>
   </body>

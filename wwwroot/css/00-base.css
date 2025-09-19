@@ -1,0 +1,53 @@
+/* 파일 최상단 권장 */
+*, *::before, *::after { box-sizing: border-box; }
+
+:root{
+  --sidebar-min: 320px;              /* 최소폭 */
+  --viewer-min: 520px;               /* 뷰어가 최소로 유지할 폭 */
+  --sidebar-width: 900px;            /* 초기 기본 폭 (최초 1회) */
+}
+
+/* 공통 계산: 좌측 오프셋(= 실제 사이드바 폭) */
+:root{
+  --sidebar-left: clamp(
+    var(--sidebar-min),
+    var(--sidebar-width, 900px),
+    calc(100vw - var(--viewer-min))
+  );
+}
+
+html, body{
+  height: 100%;
+  margin: 0;
+  overflow: hidden; /* 페이지 스크롤 방지 */
+  font-family: '맑은고딕', 'Noto Sans KR', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  line-height: 1.4;             /* 기본 가독성 향상 */
+}
+
+@font-face {
+  font-family: 'HDHarmony_M';
+  src:
+    url("/fonts/현대하모니_M.woff2") format('woff2'),
+    url("/fonts/현대하모니_M.woff") format('woff'),
+    url("/fonts/현대하모니_M.ttf") format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* '맑은고딕'은 윈도우 시스템 폰트이므로 로컬 탐색만: 네트워크 요청 X */
+@font-face {
+  font-family: '맑은고딕';
+  src: local('Malgun Gothic'), local('맑은 고딕'), local('맑은고딕');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* 고급 타이틀 룩 (헤더 타이틀/큰 제목) */
+h1, h2, .display-title, #header .title {
+  font-family: 'HDHarmony_M';
+  letter-spacing: .02em;
+  font-weight: 600;
+}
+

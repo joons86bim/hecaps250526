@@ -1,0 +1,45 @@
+/* 헤더 */
+#header{
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 3em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 .5em;
+  gap: 10px;
+  background: #f8f9fa;
+  box-shadow: 0 2px 4px rgba(0,0,0,.1);
+  z-index: 1000;
+}
+
+#header .title{
+  margin-left: 20px;
+  font-size: 22px;
+  font-weight: bold;
+  color: #333;
+  white-space: nowrap;
+}
+#header .logo{ height: 1.75em; width: auto; }
+
+#login{
+  margin-left: auto;
+  padding: 4px 10px;
+  background:#6c757d; color:#fff; border:0; border-radius:5px; cursor:pointer;
+  font-size: 16px; transition: all .3s ease-in-out;
+}
+#login:hover{
+  background:#5a6268;
+  box-shadow: 0 4px 8px rgba(0,0,0,.2);
+  transform: translateY(-2px);
+}
+
+/* 미리보기(뷰어+간트) 전체 래퍼: 좌측은 사이드바 폭 변수에 종속 */
+#preview{
+  position: fixed;
+  top: 3em; right: 0; bottom: 0;
+  left: var(--sidebar-left);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}

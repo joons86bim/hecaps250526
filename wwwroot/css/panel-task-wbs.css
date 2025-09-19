@@ -294,3 +294,31 @@
   font-size: 14px;
   padding: 0;
 }
+
+/* Task 리스트 영역이 스크롤 컨테이너가 되도록 */
+#task-list-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;   /* flex 컨테이너 내부 스크롤 필수 */
+}
+
+/* 상단 헤더는 고정, 표 본문만 스크롤 */
+#task-list-panel .table-scroll {
+  flex: 1 1 auto;
+  overflow: auto;          /* 여기서 세로 스크롤 발생 */
+  min-height: 0;
+}
+
+/* sticky header */
+#treegrid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #fff;        /* 밑 행과 겹침 방지 */
+}
+
+/* 필요한 경우(브라우저별) 테이블 설정 */
+#treegrid {
+  border-collapse: separate; /* sticky 안정성 ↑ */
+}
+

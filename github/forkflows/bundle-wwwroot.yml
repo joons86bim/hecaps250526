@@ -1,0 +1,39 @@
+name: Bundle wwwroot for review
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'wwwroot/**'
+      - 'github/forkflows/bundle-wwwroot.yml'
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses : ubuntu-latest
+        with:
+          fetch-depth: 0
+      - name: Generate bundle markdown
+        run: |
+          out=review/wwwroot-bundle.md
+          mkdir -p review
+          echo "# wwwroot review bundle" > "$out"
+          echo "" >> "$out"
+          find wwwroot -type f \( -name "*.js" -o -name "*.css" -o -name "*.html" \) \
+          -not -path "/node_modules/*" -not -path "*./dist/*" -not -path "*/vendor/*" \
+          -size -200k | sort | while read f; do
+            echo -e "\n---\n\n## \'$f\ '\n" >> "$out"
+            lang="text"
+            case "$f" in
+              *.js) lang="javascript" ;;
+              *.css) lang="css" ;;
+              *.html) lang="html" ;;
+            esac
+            echo '```'"$lang" >> "$out"
+            sed 's/\t/  /g' "$f" | sed 's/\x0//g' >> "$out"
+            echo '```' >> "$out"
+          done
+      - name: Commit bundle
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Chore(review) : update wwwroot-bundle.md"
+          file_pattern: "review/wwwroot-bundle.md"

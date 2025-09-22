@@ -1,205 +1,298 @@
-좋아—import 라인은 전혀 건드리지 않고, 현재 폴더/파일 구조 그대로 쓴다는 전제로, main.js에 “멈춤/응답없음 방지 + 로딩팝업 완전 비활성 + 카메라 줌인 보장”을 넣는 안전 패치를 “삽입 위치 기준”으로 딱 정리해 줄게.
-(그대로 복붙하면 됩니다. import 라인 아래/뷰어 생성 직후/기존 호출부 교체 3곳만 만지면 끝!)
+// /wwwroot/js/main.js
 
+import { initTabs } from "./sidebar/init-tabs.js";
+import { initTree } from "./sidebar/init-tree.js";
+import { initPanel2Content } from "./sidebar/panel2.js";
+import { initViewer, loadModel } from "./viewer/init-viewer.js";
+// import { initToolbar } from "./viewer/toolbar.js";
+import {
+  initTaskListButtons,
+  setSavedTaskData,
+} from "./sidebar/panel2-buttons.js";
+import { buildWbsTreeData } from "./sidebar/wbsloader.js";
+import { bindPanel2Resizer } from "./sidebar/panel2-resizer.js";
+import {
+  updateWBSHighlight,
+  disableViewerEscReset,
+} from "./sidebar/panel2-ui-helpers.js";
 
----
+// ===== Viewer 준비 상태 대기 유틸 =====
+function onceViewer(viewer, type) {
+  return new Promise((resolve) => {
+    const h = () => { viewer.removeEventListener(type, h); resolve(); };
+    viewer.addEventListener(type, h);
+  });
+}
+function hasObjectTree(viewer) {
+  return !!(viewer.model?.getData?.()?.instanceTree);
+}
+async function waitObjectTree(viewer) {
+  if (hasObjectTree(viewer)) return;
+  await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
+}
+async function waitGeometry(viewer) {
+  const got = new Promise((r) =>
+    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => r(), { once: true })
+  );
+  await Promise.race([got, new Promise((r) => setTimeout(r, 800))]);
+}
+function waitIdle(timeout = 60) {
+  return new Promise((resolve) => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(() => resolve(), { timeout });
+    } else {
+      setTimeout(resolve, timeout);
+    }
+  });
+}
+async function waitViewerReady(viewer) {
+  await waitObjectTree(viewer);
+  await waitGeometry(viewer);
+  await waitIdle(60);
+}
 
-① import 라인 바로 아래에 “공통 유틸+스위치” 추가
+// 전면 하이라이트 게이트: 초기엔 OFF
+window.__ALLOW_WBS_UPDATE = false;
 
-(당신 파일의 import 구문 바로 다음 줄에 통째로 붙여넣기)
+// --- Repaint Gantt on window resize (throttled) ---
+window.addEventListener('resize', _.throttle(() => {
+  try {
+    if (window.gantt && window.taskTree) {
+      window.gantt.renderFromTrees(window.taskTree, window.wbsTree);
+    }
+  } catch (e) {
+    console.warn('[gantt] resize redraw failed', e);
+  }
+}, 200));
 
-// === [SAFE PATCH 1/3] 공통 유틸 + 스위치 (imports 바로 아래) ==================
+const login = document.getElementById("login");
+let taskData = []; // 현재 모델의 Task 데이터 (트리용)
 
-// lodash 없이도 안전하게 동작하는 throttle
-const throttle = (window._?.throttle)
-  ? window._.throttle
-  : (fn, wait = 200) => {
-      let last = 0, t = null, lastArgs;
-      return (...args) => {
-        const now = Date.now();
-        lastArgs = args;
-        if (now - last >= wait) { last = now; fn(...lastArgs); }
-        else {
-          clearTimeout(t);
-          t = setTimeout(() => { last = Date.now(); fn(...lastArgs); }, wait - (now - last));
-        }
+// 샘플 데이터 (서버에 데이터 없을 때 사용)
+const SAMPLE_TASK_DATA = [
+  {
+    no: "1",
+    selectOptions: ["시공", "가설", "철거"],
+    selectedOption: "시공",
+    title: "Task A",
+    start: "2024-06-25",
+    end: "2024-07-01",
+    linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1001, text: "벽체1" }],
+    children: [
+      {
+        no: "1.1",
+        selectOptions: ["시공", "가설", "철거"],
+        selectedOption: "시공",
+        title: "Subtask A1",
+        start: "2024-06-26",
+        end: "2024-06-30",
+        linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1002, text: "벽체2" }]
+      }
+    ],
+  },
+  { no: "2", selectOptions: ["시공", "가설", "철거"], selectedOption: "시공", title: "Task B", start: "", end: "", linkedObjects: [] },
+];
+
+// URN을 특수문자 없는 safe key로 변환
+function safeUrn(urn) {
+  return urn.replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+// taskData의 모든 linkedObjects에 urn 채워넣기
+function fillUrnRecursive(task, defaultUrn) {
+  if (Array.isArray(task.linkedObjects)) {
+    task.linkedObjects.forEach(obj => { if (!obj.urn) obj.urn = defaultUrn || window.CURRENT_MODEL_URN; });
+  }
+  if (Array.isArray(task.children)) {
+    task.children.forEach(child => fillUrnRecursive(child, defaultUrn));
+  }
+}
+
+// -------- 앱 전체 초기화 IIFE ---------
+(async function () {
+  try {
+    // 1. 로그인 상태 확인
+    const resp = await fetch("/api/auth/profile", { credentials: "include" });
+    if (!resp.ok) {
+      window.location.replace("/api/auth/login");
+      return;
+    }
+    const user = await resp.json();
+    login.innerText = `Logout (${user.name})`;
+    login.onclick = () => {
+      const iframe = document.createElement("iframe");
+      iframe.style.visibility = "hidden";
+      iframe.src = "https://accounts.autodesk.com/Authentication/LogOut";
+      document.body.appendChild(iframe);
+      iframe.onload = () => {
+        window.location.replace("/api/auth/logout");
+        document.body.removeChild(iframe);
       };
     };
 
-// invalidate 폭주 방지: 한 프레임에 1회만 실제 invalidate
-function withViewerBatch(viewer, work) {
-  let invalid = false;
-  const orig = viewer.impl.invalidate.bind(viewer.impl);
-  viewer.impl.invalidate = () => { invalid = true; };
-  try { work(); }
-  finally {
-    viewer.impl.invalidate = orig;
-    if (invalid) requestAnimationFrame(() => orig(true, true, true));
-  }
-}
+    // 2. 기본 레이아웃 표시
+    const Sidebar = document.getElementById("sidebar");
+    const Header = document.getElementById("header");
+    const Preview = document.getElementById("preview");
+    const sidebarResizer = document.getElementById("sidebar-resizer");
+    const Loading = document.getElementById("loading");
 
-// 동시 로드 경쟁상태(race) 방지용 토큰
-let __LOAD_TOKEN__ = 0;
+    Sidebar.style.display = "";
+    Sidebar.style.width = "500px";
+    sidebarResizer.style.display = "";
+    sidebarResizer.style.left = "500px";
+    Preview.style.display = "";
+    Preview.style.left = Sidebar.style.width;
+    Preview.style.right = "0";
+    Preview.style.top = "3em";
+    Preview.style.bottom = "0";
+    Header.style.display = "";
+    Loading.style.display = "none";
+    login.style.visibility = "visible";
 
-// 로딩 오버레이 끄기/켜기 스위치 (지금은 끔)
-const USE_LOADING_OVERLAY = false;
+    // 3. 뷰어/탭 초기화
+    initTabs("#sidebar");
+    const viewer = await initViewer(document.getElementById("viewer-host"));
+    disableViewerEscReset(viewer);
+    // initToolbar(viewer);
 
-// 오버레이 호출부가 남아 있어도 터지지 않게 하는 no-op
-const overlayNoop = { beginLoadFor() {}, setMessage() {}, finishFor() {} };
-// 전역 핸들(초기값은 no-op)
-let progressOverlay = overlayNoop;
+    // 4. 프로젝트 트리 초기화: 모델 선택 시 콜백
+    initTree("#tree", async (versionId) => {
+      destroyTaskPanel();
 
-// 전역 오류 로그(첫 에러 포착용, 선택)
-window.addEventListener('error', e => console.error('[WindowError]', e.error || e.message));
-window.addEventListener('unhandledrejection', e => console.error('[UnhandledRejection]', e.reason));
-// =============================================================================
+      const urn = window.btoa(versionId).replace(/=/g, "");
+      window.CURRENT_MODEL_URN = urn;
+      window.CURRENT_MODEL_SAFE_URN = safeUrn(urn);
 
+      taskData.length = 0;
+      setSavedTaskData([]);
+      await loadTaskDataIfExists();
+      taskData.forEach((t) => fillUrnRecursive(t, urn));
 
----
+      console.log("[main.js] 모델 선택!", versionId, urn);
+      await loadModel(viewer, urn);
 
-② viewer를 만들고 난 직후(initViewer 호출 바로 다음)에 두 블록 추가
+      // ✅ 뷰어 로딩 완료 + idle 보장
+      await waitViewerReady(viewer);
 
-뷰어 생성 코드(예: const viewer = await initViewer(...);) 바로 아래에 붙여넣기:
+      // 이제 WBS 생성
+      let wbsData = [];
+      try { wbsData = await buildWbsTreeData(viewer); }
+      catch (e) { console.warn("[main.js] WBS 데이터 생성 실패!", e); wbsData = []; }
 
-// === [SAFE PATCH 2/3] viewer 생성 직후에 넣기 ================================
+      initTaskListButtons();
+      initPanel2Content(taskData, wbsData);
+      bindPanel2Resizer();
 
-// 지오메트리 로드 시 카메라 자동 맞춤 (1회)
-viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
-  requestAnimationFrame(() => {
-    try { viewer.fitToView(true); } catch (e) { console.warn('fitToView failed', e); }
-  });
-}, { once: true });
+      window.dispatchEvent(new Event("panel2-ready"));
 
-// 로딩 오버레이 확장: 스위치가 켜진 경우에만 실제 로드
-if (USE_LOADING_OVERLAY) {
-  try {
-    // CSS/확장 경로는 기존 프로젝트의 경로를 사용하세요.
-    // 예) ensureCss('/css/05-hec-progress-overlay.css'); // 프로젝트에 있으면 유지
-    await import('./viewer/hec.ProgressOverlay.js');   // 현재 경로에 맞게
-    const ext = await viewer.loadExtension?.('hec.ProgressOverlay', {
-      startVisible: false,
-      autoHideOnGeometryLoaded: true,
-      autoHideDelayMs: 900,
-      clickToDismiss: true,
-      useToastOnDone: false,      // 완료 토스트 비활성
-      keepAlive: 'off',
+      // 간트 1회 렌더(부하 적게)
+      requestAnimationFrame(() => {
+        try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch (_) {}
+      });
+
+      // 🔶 초기 하이라이트: DOM 안정화 후 1회만
+      await waitIdle(60);
+      if (window.taskTree && window.wbsTree) {
+        try { window.taskTree.render(true, true); } catch{}
+        window.__ALLOW_WBS_UPDATE = true;
+        try { updateWBSHighlight(); } catch(e) { console.warn('[wbs] first HL failed', e); }
+      }
     });
-    if (ext) progressOverlay = ext;
-  } catch (e) {
-    console.warn('ProgressOverlay disabled, fallback to noop.', e);
-    progressOverlay = overlayNoop;
+
+  } catch (err) {
+    alert("Could not initialize the application. See console for more details.");
+    console.error(err);
+  }
+})();
+
+// ----- Task 데이터 (서버 or 샘플) 불러오는 함수 -----
+async function loadTaskDataIfExists() {
+  try {
+    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
+    const url = `/api/tasks?urn=${safeUrnVal}`;
+    const resp = await fetch(url, { credentials: "include" });
+    if (resp.ok) {
+      const data = await resp.json();
+      taskData.length = 0;
+      if (Array.isArray(data) && data.length > 0) {
+        data.forEach((item) => taskData.push(item));
+        setSavedTaskData(taskData);
+      } else {
+        SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+        setSavedTaskData(taskData);
+      }
+    } else {
+      taskData.length = 0;
+      SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+      setSavedTaskData(taskData);
+    }
+  } catch (err) {
+    taskData.length = 0;
+    SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+    setSavedTaskData(taskData);
+    console.warn("task 데이터를 불러오지 못했습니다. 샘플로 초기화:", err);
   }
 }
 
-// 디버그/전역 접근을 유지하고 싶다면 노출(노출이 불필요하면 제거)
-window.progressOverlay = progressOverlay;
-// =============================================================================
+// ----- Task/WBS 패널 전체 제거 및 DOM 재생성 -----
+function destroyTaskPanel() {
+  console.log("[destroy] panel2 destroy & 재생성");
+  try { $.ui.fancytree.getTree("#treegrid")?.destroy(); } catch (e) {}
+  window.taskTree = null;
+  window.wbsTree = null;
+  try { window.gantt?.drawFromRows?.([]); } catch(_) {}
 
-> 위 블록은 import 경로/파일명 안 건드립니다. 현재 프로젝트의 hec.ProgressOverlay.js 실제 위치가 다르면 그 상대경로만 맞춰주세요. (예: ../viewer/extensions/hec.ProgressOverlay.js 등)
-
-
-
-
----
-
-③ 기존 코드 중 세 군데 패턴만 “안전 호출”로 교체
-
-검색/치환으로 한 번에 끝납니다. (import는 그대로 두세요)
-
-(A) 시작 표시(있다면)
-
-- const ov = viewer.getExtension('hec.ProgressOverlay');
-- ov?.beginLoadFor(urn, '모델을 로드하는 중입니다…');
-+ const ov = progressOverlay; // 공용 핸들
-+ ov.beginLoadFor?.(urn, '모델을 로드하는 중입니다…');   // 안전 호출
-
-(B) 중간 메시지(있다면)
-
-- progressOverlay.setMessage('WBS 준비 중…');
-+ progressOverlay.setMessage?.('WBS 준비 중…');           // 안전 호출
-
-(C) 완료 처리(있다면)
-
-- progressOverlay.finishFor(urn, '모델 로딩이 완료되었습니다.');
-+ progressOverlay.finishFor?.(urn, '모델 로딩이 완료되었습니다.'); // 안전 호출
-
-> 팁: 파일 전체에서 getExtension('hec.ProgressOverlay')가 보이면 모두 progressOverlay로 통일하세요. 그러면 USE_LOADING_OVERLAY=false일 때도 절대 죽지 않습니다.
-
-
-
-
----
-
-④ “모델 선택 시” 콜백 안에 race 가드 2줄만 추가
-
-모델 버전을 빠르게 바꿔도 이전 콜백이 끼어들지 못하게 합니다.
-
-initTree("#tree", async (versionId) => {
-  const MY = ++__LOAD_TOKEN__;          // [추가] 이 선택 시퀀스의 토큰
-
-  // ... 기존 초기화/URN 계산/데이터 로딩 ...
-
-  await loadModel(viewer, urn);
-  if (MY !== __LOAD_TOKEN__) return;    // [추가] 더 최신 로드가 시작되면 중단
-
-  // ... OBJECT_TREE_CREATED_EVENT 이후 proceed() 실행 ...
-});
-
-> proceed() 같은 내부 비동기 함수가 있다면 그 안에서도 첫 줄에 if (MY !== __LOAD_TOKEN__) return; 한 번 더 넣어주면 완벽합니다.
-
-
-
-
----
-
-⑤ resize에 쓰던 _.throttle는 그대로 두고 래퍼만 적용
-
-기존 코드가 아래처럼 되어 있다면:
-
-window.addEventListener('resize', _.throttle(() => {
-  // ...
-}, 200));
-
-이걸 한 줄만 바꿔주세요:
-
-- window.addEventListener('resize', _.throttle(() => {
-+ window.addEventListener('resize', throttle(() => {
-    // ...
-- }, 200));
-+ }, 200));
-
-> 위에서 만든 throttle은 lodash가 있으면 그걸 쓰고, 없어도 자체 폴리필로 안전하게 동작합니다.
-
-
-
-
----
-
-⑥ (선택) 대량 색칠/가시성 갱신에 배치 적용
-
-dbId 많이 만질 때 아래처럼 감싸면 프레임 드랍/멈춤 체감이 확 줄어요.
-
-withViewerBatch(viewer, () => {
-  // viewer.setThemingColor(...), viewer.hide(...), show(...), isolate(...) 등
-  // 갱신을 모아서 실행 → 마지막에 한 번만 invalidate
-});
-
-
----
-
-요약
-
-import 라인 고정(현재 구조 유지)
-
-삽입 2곳: (1) import 아래 공통 유틸/스위치, (2) viewer 생성 직후 카메라/오버레이 조건부
-
-치환 3곳: overlay 호출부를 progressOverlay.*?.(...)로 안전화
-
-race 가드 2줄: 모델 선택 콜백 시작/완료 직전
-
-resize는 throttle 래퍼로 교체(폴리필 내장)
-
-
-이대로 반영하면 로딩창은 완전히 꺼진 상태로 유지되면서, 페이지 멈춤/응답없음 원인(로드 경쟁, invalidate 폭주, lodash 미존재)까지 같이 잡힙니다.
-적용 후 콘솔에 특정 에러가 뜨면 그 한 줄만 복사해서 보여줘—그 줄 기준으로 정확한 수정(diff)까지 바로 찍어줄게.
-
+  $("#wbs-group-content").empty();
+  $("#panel2").html(`
+    <div id="vertical-split-container">
+      <div id="task-list-panel">
+        <div class="panel-header">
+          <span class="title">Task List</span>
+          <div class="button-group">
+            <button id="btn-add">추가</button>
+            <button id="btn-delete">삭제</button>
+            <button id="btn-select">객체 선택</button>
+            <button id="btn-link">데이터 연결</button>
+            <button id="btn-unlink">연결 해제</button>
+            <button id="btn-date">공정현황</button>
+            <button id="btn-test">테스트</button>
+            <button id="btn-update">저장</button>
+          </div>
+        </div>
+        <table id="treegrid" style="width: 100%" class="fancytree-ext-table">
+          <colgroup>
+            <col width="40px" />
+            <col width="60px" />
+            <col width="260px" />
+            <col width="100px" />
+            <col width="100px" />
+            <col width="100px" />
+            <col width="60px" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>No.</th>
+              <th>구분</th>
+              <th>작업명</th>
+              <th>시작일</th>
+              <th>소요시간(Day)</th>
+              <th>완료일</th>
+              <th>객체개수</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="resizer"></div>
+      <div class="sidebar-panel" id="wbs-group-list-panel">
+        <div class="panel-header">
+          <span class="title">WBS Group List</span>
+        </div>
+        <div class="panel-content" id="wbs-group-content">
+          <div id="wbs-tree"></div>
+        </div>
+      </div>
+    </div>
+  `);
+}

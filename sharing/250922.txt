@@ -1,9 +1,17 @@
+좋아—요구한 5가지 조건에 맞춰 동일 파일(main.js) 을 깔끔히 손봤어.
+핵심은: 뷰어 로딩 대기 타임아웃 단축, WBS 준비 작업에 타임아웃(4s), 무거운 워밍업 제거, ProgressOverlay 전부 주석 처리, 추가 코드는 최소화(유틸 1개만 추가).
+
+아래 코드로 /wwwroot/js/main.js 통째로 교체하면 돼.
+
+
+---
+
 // /wwwroot/js/main.js
 
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
-import { buildWbsProviderLazy   } from "./sidebar/task-wbs/wbs/loader.js";
+import { buildWbsProviderLazy } from "./sidebar/task-wbs/wbs/loader.js";
 import { bindPanel2Resizer } from "./sidebar/task-wbs/layout/panel-resizer.js";
 
 // ✅ task-wbs 퍼사드(확정 구조)
@@ -40,8 +48,8 @@ async function waitObjectTree(viewer) {
   await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
 }
 
-async function waitGeometry(viewer, timeoutMs = 180000) {
-  // GEOMETRY_LOADED_EVENT를 확실히 기다리되, 아주 긴 안전 타임아웃만 둠
+// ⚠️ GEOMETRY_LOADED_EVENT 무한대기 방지: 1.2s 타임아웃
+async function waitGeometry(viewer, timeoutMs = 1200) {
   await new Promise((resolve) => {
     let done = false;
     const h = () => {
@@ -68,6 +76,19 @@ async function waitViewerReady(viewer) {
   await waitObjectTree(viewer);
   await waitGeometry(viewer);
   await waitIdle(60);
+}
+
+// ✅ (추가) 간단 타임아웃 래퍼 — 최소 추가 코드
+async function withTimeout(promise, ms, fallback = null){
+  let to;
+  try {
+    const timeout = new Promise((resolve) => { to = setTimeout(() => resolve({ __t: true }), ms); });
+    const res = await Promise.race([promise, timeout]);
+    if (res && res.__t) return fallback;
+    return res;
+  } finally {
+    clearTimeout(to);
+  }
 }
 
 function ensureCss(href) {
@@ -242,7 +263,7 @@ window.addEventListener(
     sidebarResizer.style.display = "";
     Preview.style.display = "";
     Header.style.display = "";
-    Loading.style.display = "none";
+    Loading.style.display = "none"; // ✅ 로딩(웰컴) 강제 종료
     login.style.visibility = "visible";
 
     // 인라인 폭/left 제거(전부 CSS 변수로 통일)
@@ -260,18 +281,18 @@ window.addEventListener(
     window.viewer = viewer;               // ✅ 전역 참조
     disableViewerEscReset(viewer);
 
-    // [추가] CSS 주입 + 확장 로드
-    ensureCss('/css/05-hec-progress-overlay.css');
-    await import('./viewer/hec.ProgressOverlay.js');
-    const progressOverlay = await viewer.loadExtension('hec.ProgressOverlay', {
-      startVisible: false,
-      autoHideOnGeometryLoaded: true,
-      autoHideDelayMs: 900,
-      clickToDismiss: true,
-      useToastOnDone: false,
-      keepAlive: 'off',   // ← 완전 끔 (문제 원인 절연)
-    });
-    window.progressOverlay = progressOverlay; // (디버그용)
+    // ⚠️ ProgressOverlay 관련(스타일/확장) 전부 비활성화 — freeze 원인 차단
+    // ensureCss('/css/05-hec-progress-overlay.css');
+    // await import('./viewer/hec.ProgressOverlay.js');
+    // const progressOverlay = await viewer.loadExtension('hec.ProgressOverlay', {
+    //   startVisible: false,
+    //   autoHideOnGeometryLoaded: true,
+    //   autoHideDelayMs: 900,
+    //   clickToDismiss: true,
+    //   useToastOnDone: false,
+    //   keepAlive: 'off',
+    // });
+    // window.progressOverlay = progressOverlay;
 
     // 리사이저 바인딩(반드시 viewer 전달)
     bindPanel2Resizer(viewer);
@@ -314,10 +335,10 @@ window.addEventListener(
 
       console.log("[main.js] 모델 선택!", versionId, urn);
 
-      // 모델 클릭 → 팝업 즉시 표시
+      // 모델 클릭 → 오버레이 사용 안 함
       // const ov = viewer.getExtension('hec.ProgressOverlay');
       // ov?.beginLoadFor(urn, '모델을 로드하는 중입니다…');
-            
+
       await loadModel(viewer, urn);
 
       // ✅ 뷰어 로딩 완료 + idle 보장
@@ -327,16 +348,22 @@ window.addEventListener(
       resetViewerInputAndCamera(viewer);
       viewer.resize();
 
-      // WBS 데이터
-      // let wbsData = [];
-      // try {
-      //   wbsData = await buildWbsTreeData(viewer);
+      // ✅ WBS Provider: 4초 넘으면 건너뜀(프리즈 방지)
       let wbsProvider;
-      try { const { provider } = await buildWbsProviderLazy(viewer, { bucketThreshold: 400, bucketSize: 200, source: 'all' }); 
-      wbsProvider = provider;
+      try {
+        const built = await withTimeout(
+          buildWbsProviderLazy(viewer, { bucketThreshold: 400, bucketSize: 200, source: 'all' }),
+          4000,
+          null
+        );
+        if (built && built.provider) {
+          wbsProvider = built.provider;
+        } else {
+          console.warn("[main.js] WBS provider 타임아웃 → 빈 provider로 대체");
+          wbsProvider = { __provider:true, roots: async()=>[], children: async()=>[], countAt: ()=>0 };
+        }
       } catch (e) {
         console.warn("[main.js] WBS 데이터 생성 실패!", e);
-        // wbsData = [];
         wbsProvider = { __provider:true, roots: async()=>[], children: async()=>[], countAt: ()=>0 };
       }
 
@@ -346,24 +373,17 @@ window.addEventListener(
 
       window.dispatchEvent(new Event("panel2-ready"));
 
-      // ▶ 로딩 종료 전, 루트~Level~Zone(=3단) 워밍업
-      async function warmup(provider, maxDepth=3, hardCap=1200){
-        const roots = await provider.roots();
-        let q = roots.map(r => ({ path: [r.text], depth: 1 }));
-        let c = 0;
-        while (q.length && c < hardCap) {
-          const { path, depth } = q.shift();
-          if (depth >= maxDepth) continue;
-          const kids = await provider.childrenByPath(path);
-          c += kids.length;
-          kids.forEach(k => q.push({ path: [...path, k.text], depth: depth+1 }));
-        }
-      }
-      // try { progressOverlay.setMessage('WBS 준비 중…'); } catch {}
-      try { await warmup(wbsProvider, 3, 1200); } catch {}
+      // ▶ 로딩 종료 전, 워밍업(사전 펼침)은 과감히 생략 — 프리즈 요인 제거
+      // async function warmup(provider, maxDepth=3, hardCap=1200){ ... }
+      // try { await warmup(wbsProvider, 3, 1200); } catch {}
 
-      // ✅ WBS 패널(Fancytree) 초기화
-      try { await initWbsPanelWithFancytree(wbsProvider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] }); } catch (e) {
+      // ✅ WBS 패널(Fancytree) 초기화 (에러 흡수)
+      try {
+        await initWbsPanelWithFancytree(
+          wbsProvider,
+          { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] }
+        );
+      } catch (e) {
         console.warn("[main.js] initWbsPanelWithFancytree 실패:", e);
       }
 
@@ -374,7 +394,7 @@ window.addEventListener(
         } catch {}
       });
 
-      // ▷ WBS 초기화/첫 렌더/하이라이트까지 끝난 뒤에 종료
+      // 오버레이 종료 사용 안 함
       // try { progressOverlay.finishFor(urn, '모델 로딩이 완료되었습니다.'); } catch (e) {}
     });
   } catch (err) {
@@ -423,3 +443,19 @@ function destroyTaskPanel() {
   $("#wbs-group-content").empty();
   $("#treegrid tbody").empty();
 }
+
+변경 핵심 요약
+
+ProgressOverlay 전부 주석 처리 → 로딩창/확장 때문에 대기 걸리지 않음.
+
+waitGeometry 타임아웃 1.2s → 이벤트 누락 시에도 진행.
+
+withTimeout(4s)로 buildWbsProviderLazy 감싸기 → WBS 준비가 길어지면 건너뛰고 계속 진행(프리즈 차단).
+
+WBS 사전 워밍업 제거 → 대량 I/O/계산으로 인한 초기 멈춤 제거.
+
+나머지는 기존 흐름 유지(추가 변경 최소화).
+
+
+이 상태로 돌려보고, 뷰어 동작이 정상(프리즈 X)인데 WBS가 비어있다면 그건 의도한 안전폴백이야. 그땐 WBS만 따로 재시도 버튼(또는 탭 진입 시 지연 초기화) 붙이면 돼.
+

@@ -1,20 +1,37 @@
-// /wwwroot/js/main.js
+// /wwwroot/js/main.js  (rollback + 경로/메서드 안전 매핑판)
 
+// ── Imports (경로/이름 변경 흡수용: namespace import 후 안전 별칭 매핑) ──
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
-import { initPanel2Content } from "./sidebar/panel2.js";
+import * as Panel2 from "./sidebar/task-wbs/panel2.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
 // import { initToolbar } from "./viewer/toolbar.js";
-import {
-  initTaskListButtons,
-  setSavedTaskData,
-} from "./sidebar/panel2-buttons.js";
-import { buildWbsTreeData } from "./sidebar/wbsloader.js";
-import { bindPanel2Resizer } from "./sidebar/panel2-resizer.js";
-import {
-  updateWBSHighlight,
-  disableViewerEscReset,
-} from "./sidebar/panel2-ui-helpers.js";
+import * as Panel2Buttons from "./sidebar/task-wbs/panel2-buttons.js";
+import * as WbsLoader from "./sidebar/task-wbs/wbs/loader.js";
+import * as Panel2Resizer from "./sidebar/task-wbs/layout/panel-resizer.js";
+import * as Panel2Helpers from "./sidebar/task-wbs/panel2-ui-helpers.js";
+
+// ── 메서드 이름 안전 별칭(실제 export 이름이 달라도 흡수) ──
+const initPanel2Content =
+  Panel2.initPanel2Content || Panel2.initPanel2 || Panel2.default;
+
+const initTaskListButtons =
+  Panel2Buttons.initTaskListButtons || Panel2Buttons.initButtons || Panel2Buttons.default;
+
+const setSavedTaskData =
+  Panel2Buttons.setSavedTaskData || Panel2Buttons.setTaskData || (() => {});
+
+const buildWbsTreeData =
+  WbsLoader.buildWbsTreeData || WbsLoader.buildWbsTree || WbsLoader.default;
+
+const bindPanel2Resizer =
+  Panel2Resizer.bindPanel2Resizer || Panel2Resizer.bindResizer || Panel2Resizer.default;
+
+const updateWBSHighlight =
+  Panel2Helpers.updateWBSHighlight || Panel2Helpers.refreshWBSHighlight || (() => {});
+
+const disableViewerEscReset =
+  Panel2Helpers.disableViewerEscReset || Panel2Helpers.disableEscReset || (() => {});
 
 // ===== Viewer 준비 상태 대기 유틸 =====
 function onceViewer(viewer, type) {

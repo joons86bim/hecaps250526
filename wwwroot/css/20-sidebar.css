@@ -2,7 +2,7 @@
 #sidebar{
   position: fixed;
   top: 3em; left: 0; bottom: 0;
-  width: var(--sidebar-width, 900px);
+  width: var(--sidebar-width);
   display: flex;
   flex-direction: column;
   overflow: hidden;

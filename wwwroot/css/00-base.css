@@ -27,8 +27,8 @@ html, body{
 @font-face {
   font-family: 'HDHarmony_M';
   src:
-    url("/fonts/현대하모니_M.woff2") format('woff2'),
-    url("/fonts/현대하모니_M.woff") format('woff'),
+    /* url("/fonts/현대하모니_M.woff2") format('woff2'),
+    url("/fonts/현대하모니_M.woff") format('woff'), */
     url("/fonts/현대하모니_M.ttf") format('truetype');
   font-weight: normal;
   font-style: normal;

@@ -85,7 +85,7 @@
 #wbs-tree td.text-center { text-align: center !important; }
 
 /* 눈알 버튼: 항목(첫 칼럼) 내 문서아이콘 자리에 렌더됨 */
-#wbs-tree .eye-toggle{
+/* #wbs-tree .eye-toggle{
   display:inline-flex;
   align-items:center;
   justify-content:center;
@@ -96,9 +96,5 @@
   border:1px solid transparent;
   user-select:none;
   margin-right: 2px;
-}
-#wbs-tree .eye-toggle:hover{ opacity:1; border-color:#e5e7eb; background:#f9fafb; }
-#wbs-tree .eye-toggle.hidden { opacity:1; }
-#wbs-tree .eye-toggle.mixed  { opacity:.5; }
-#wbs-tree .eye-toggle svg{ width:16px; height:16px; display:block; pointer-events:none; }
+} */
 

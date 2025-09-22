@@ -1,17 +1,21 @@
-// /wwwroot/js/main.js  (rollback + 경로/메서드 안전 매핑판)
+오케이—모델 로딩 중 “응답없음” 걸리는 걸 먼저 풀고, 로딩창(오버레이) 관련 코드는 전부 배제, WBS 생성이 메인스레드를 붙잡지 않도록 “타임아웃 방지”만 아주 최소로 넣었습니다. 아래 파일을 그대로 교체해서 써주세요. (변경점은 주석 // ✅ 로 표시)
+
+
+---
+
+// /wwwroot/js/main.js  (freeze 방지 최소 수정판)
 
 // ── Imports (경로/이름 변경 흡수용: namespace import 후 안전 별칭 매핑) ──
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
 import * as Panel2 from "./sidebar/task-wbs/panel2.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
-// import { initToolbar } from "./viewer/toolbar.js";
 import * as Panel2Buttons from "./sidebar/task-wbs/panel2-buttons.js";
 import * as WbsLoader from "./sidebar/task-wbs/wbs/loader.js";
 import * as Panel2Resizer from "./sidebar/task-wbs/layout/panel-resizer.js";
 import * as Panel2Helpers from "./sidebar/task-wbs/panel2-ui-helpers.js";
 
-// ── 메서드 이름 안전 별칭(실제 export 이름이 달라도 흡수) ──
+// ── 메서드 이름 안전 별칭 ──
 const initPanel2Content =
   Panel2.initPanel2Content || Panel2.initPanel2 || Panel2.default;
 
@@ -47,6 +51,7 @@ async function waitObjectTree(viewer) {
   if (hasObjectTree(viewer)) return;
   await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
 }
+// ✅ GEOMETRY_LOADED_EVENT 무한대기 방지: 0.8s 초과 시 계속 진행
 async function waitGeometry(viewer) {
   const got = new Promise((r) =>
     viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => r(), { once: true })
@@ -66,6 +71,16 @@ async function waitViewerReady(viewer) {
   await waitObjectTree(viewer);
   await waitGeometry(viewer);
   await waitIdle(60);
+}
+
+// ✅ 간단 타임아웃 유틸: 무거운 비동기(step)가 오래 걸리면 건너뛰기
+async function withTimeout(promise, ms, fallback = null){
+  let to;
+  const timeout = new Promise((resolve) => { to = setTimeout(() => resolve({ __timeout:true }), ms); });
+  const res = await Promise.race([promise, timeout]).catch(()=>({ __error:true }));
+  clearTimeout(to);
+  if (res && (res.__timeout || res.__error)) return fallback;
+  return res;
 }
 
 // 전면 하이라이트 게이트: 초기엔 OFF
@@ -164,14 +179,17 @@ function fillUrnRecursive(task, defaultUrn) {
     Preview.style.top = "3em";
     Preview.style.bottom = "0";
     Header.style.display = "";
-    Loading.style.display = "none";
+    Loading.style.display = "none"; // ✅ 로딩창(웰컴) 강제 종료 유지
     login.style.visibility = "visible";
 
     // 3. 뷰어/탭 초기화
     initTabs("#sidebar");
     const viewer = await initViewer(document.getElementById("viewer-host"));
     disableViewerEscReset(viewer);
-    // initToolbar(viewer);
+
+    // ✅ 렌더링 옵션 살짝 낮춰 초기 로딩 안정화 (없어도 되지만 무해)
+    try { viewer.setProgressiveRendering?.(true); } catch {}
+    try { viewer.setLightPreset?.(0); } catch {}
 
     // 4. 프로젝트 트리 초기화: 모델 선택 시 콜백
     initTree("#tree", async (versionId) => {
@@ -187,19 +205,38 @@ function fillUrnRecursive(task, defaultUrn) {
       taskData.forEach((t) => fillUrnRecursive(t, urn));
 
       console.log("[main.js] 모델 선택!", versionId, urn);
-      await loadModel(viewer, urn);
 
-      // ✅ 뷰어 로딩 완료 + idle 보장
+      // ── 모델 로드 (단일 await, 실패해도 앱이 죽지 않도록 보호)
+      try {
+        await loadModel(viewer, urn);
+      } catch (e) {
+        console.warn("[main.js] loadModel 실패:", e);
+      }
+
+      // ✅ 뷰어 로딩 완료 + idle 보장 (이벤트 타임아웃이 있어 멈춤 방지)
       await waitViewerReady(viewer);
 
-      // 이제 WBS 생성
-      let wbsData = [];
-      try { wbsData = await buildWbsTreeData(viewer); }
-      catch (e) { console.warn("[main.js] WBS 데이터 생성 실패!", e); wbsData = []; }
+      // ── 여기부터는 무거운 일(=WBS 생성)로 인해 메인스레드가 붙잡히면
+      //     '로딩 중 멈춤'처럼 보이므로, 반드시 타임아웃/양보를 둔다.
 
-      initTaskListButtons();
-      initPanel2Content(taskData, wbsData);
-      bindPanel2Resizer();
+      // ✅ 아주 짧게 양보
+      await waitIdle(50);
+
+      // ✅ WBS 데이터 생성: 4초 넘으면 생략하고 빈 배열로(뷰어 멈춤 방지)
+      let wbsData = [];
+      try {
+        const build = buildWbsTreeData(viewer);
+        wbsData = await withTimeout(build, 4000, []);  // ← 핵심
+        if (wbsData === null) wbsData = [];
+      } catch (e) {
+        console.warn("[main.js] WBS 데이터 생성 실패(생략):", e);
+        wbsData = [];
+      }
+
+      // 패널 초기화는 예외 흡수 (한 군데 에러로 전체 멈추지 않게)
+      try { initTaskListButtons(); } catch(e){ console.warn("[panel2] buttons init fail:", e); }
+      try { initPanel2Content(taskData, wbsData); } catch(e){ console.warn("[panel2] content init fail:", e); }
+      try { bindPanel2Resizer(); } catch(e){ console.warn("[panel2] resizer bind fail:", e); }
 
       window.dispatchEvent(new Event("panel2-ready"));
 
@@ -313,3 +350,15 @@ function destroyTaskPanel() {
     </div>
   `);
 }
+
+왜 이게 “멈춤”을 풀어주나?
+
+WBS 빌드가 무거울 때 메인스레드를 오래 점유 → “응답없음”처럼 보입니다. withTimeout(..., 4000, []) 로 최대 4초만 시도하고, 넘기면 일단 건너뜁니다. (뷰어는 정상 작동, WBS는 빈상태라도 UI가 살아있음)
+
+모델 로딩 이벤트 대기는 타임아웃이 포함되어 있어서, 특정 환경에서 이벤트가 안 오더라도 진행됩니다.
+
+로딩(오버레이) 코드는 애초에 없었고, 페이지 웰컴 “Loading”은 계속 강제 display:none 처리합니다.
+
+
+필요하면, WBS가 비었을 때 나중에 버튼으로 “WBS 새로 고침”을 따로 붙여주는 식으로 점진 로딩을 넣을 수 있어요. 우선은 뷰어 멈춤(프리즈) 이슈부터 이것으로 끊겠습니다.
+

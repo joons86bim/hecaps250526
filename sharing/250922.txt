@@ -1,5 +1,6 @@
-// /wwwroot/js/main.js
+// /wwwroot/js/main.js  (안정화 패치 적용판)
 
+// ===== Imports =====
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
 import { initPanel2Content } from "./sidebar/panel2.js";
@@ -13,8 +14,38 @@ import { buildWbsTreeData } from "./sidebar/wbsloader.js";
 import { bindPanel2Resizer } from "./sidebar/panel2-resizer.js";
 import { updateWBSHighlight } from "./sidebar/panel2-ui-helpers.js";
 
-// --- Repaint Gantt on window resize (throttled) ---
-window.addEventListener('resize', _.throttle(() => {
+// ===== [NEW] 안전 유틸: throttle 폴리필, 배치 invalidation, 로드 토큰 =====
+const throttle = (window._?.throttle)
+  ? window._.throttle
+  : (fn, wait = 200) => {
+      let last = 0, t = null, lastArgs;
+      return (...args) => {
+        const now = Date.now();
+        lastArgs = args;
+        if (now - last >= wait) { last = now; fn(...lastArgs); }
+        else {
+          clearTimeout(t);
+          t = setTimeout(() => { last = Date.now(); fn(...lastArgs); }, wait - (now - last));
+        }
+      };
+    };
+
+function withViewerBatch(viewer, work) {
+  let invalid = false;
+  const orig = viewer.impl.invalidate.bind(viewer.impl);
+  viewer.impl.invalidate = () => { invalid = true; };
+  try { work(); }
+  finally {
+    viewer.impl.invalidate = orig;
+    if (invalid) requestAnimationFrame(() => orig(true, true, true));
+  }
+}
+
+// 동시 다중 로드 시, 오래된 콜백 무시용 토큰
+let loadToken = 0;
+
+// ===== Repaint Gantt on window resize (throttled & safe) =====
+window.addEventListener('resize', throttle(() => {
   try {
     if (window.gantt && window.taskTree) {
       window.gantt.renderFromTrees(window.taskTree, window.wbsTree);
@@ -25,11 +56,11 @@ window.addEventListener('resize', _.throttle(() => {
   }
 }, 200));
 
+// ===== DOM refs & globals =====
 const login = document.getElementById("login");
 let taskData = []; // 현재 모델의 Task 데이터 (트리용, 갱신됨)
 
 // 샘플 데이터 (서버에 데이터 없을 때 사용)
-// 샘플 데이터 (urn 예시 포함)
 const SAMPLE_TASK_DATA = [
   {
     no: "1",
@@ -38,9 +69,7 @@ const SAMPLE_TASK_DATA = [
     title: "Task A",
     start: "2024-06-25",
     end: "2024-07-01",
-    linkedObjects: [
-      { urn: "SAMPLE_URN", dbId: 1001, text: "벽체1" }
-    ],
+    linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1001, text: "벽체1" }],
     children: [
       {
         no: "1.1",
@@ -49,9 +78,7 @@ const SAMPLE_TASK_DATA = [
         title: "Subtask A1",
         start: "2024-06-26",
         end: "2024-06-30",
-        linkedObjects: [
-          { urn: "SAMPLE_URN", dbId: 1002, text: "벽체2" }
-        ]
+        linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1002, text: "벽체2" }]
       }
     ],
   },
@@ -63,97 +90,100 @@ function safeUrn(urn) {
   return urn.replace(/[^a-zA-Z0-9]/g, "_");
 }
 
-// taskData의 모든 linkedObjects에 urn이 없으면 자동입력
-// function fillUrnRecursive(task) {
+// linkedObjects의 누락 urn 채우기
 function fillUrnRecursive(task, defaultUrn) {
   if (Array.isArray(task.linkedObjects)) {
     task.linkedObjects.forEach(obj => {
-      // if (!obj.urn) obj.urn = window.CURRENT_MODEL_URN;
       if (!obj.urn) obj.urn = defaultUrn || window.CURRENT_MODEL_URN;
     });
   }
   if (Array.isArray(task.children)) {
-    // task.children.forEach(fillUrnRecursive);
     task.children.forEach(child => fillUrnRecursive(child, defaultUrn));
   }
 }
 
-
-
-
 // -------- 앱 전체 초기화 IIFE ---------
 (async function () {
   try {
-    // 1. 로그인 여부 확인 및 UI 갱신
+    // 1) 로그인 여부 확인
     const resp = await fetch("/api/auth/profile", { credentials: "include" });
     if (resp.ok) {
       const user = await resp.json();
-      login.innerText = `Logout (${user.name})`;
-      login.onclick = () => {
-        // Autodesk 로그아웃 (iframe 통한 세션 삭제)
-        const iframe = document.createElement("iframe");
-        iframe.style.visibility = "hidden";
-        iframe.src = "https://accounts.autodesk.com/Authentication/LogOut";
-        document.body.appendChild(iframe);
-        iframe.onload = () => {
-          window.location.replace("/api/auth/logout");
-          document.body.removeChild(iframe);
-        };
-      };
 
-      // 로그인 상태면 UI 초기화
+      if (login) {
+        login.innerText = `Logout (${user.name})`;
+        login.onclick = () => {
+          // Autodesk 로그아웃 (iframe 통한 세션 삭제)
+          const iframe = document.createElement("iframe");
+          iframe.style.visibility = "hidden";
+          iframe.src = "https://accounts.autodesk.com/Authentication/LogOut";
+          document.body.appendChild(iframe);
+          iframe.onload = () => {
+            window.location.replace("/api/auth/logout");
+            document.body.removeChild(iframe);
+          };
+        };
+      }
+
+      // 2) 레이아웃 표시 요소 준비 (존재 체크)
       const Sidebar = document.getElementById("sidebar");
       const Header = document.getElementById("header");
       const Preview = document.getElementById("preview");
       const sidebarResizer = document.getElementById("sidebar-resizer");
       const Loading = document.getElementById("loading");
 
-      Sidebar.style.display = "";
-      Sidebar.style.width = "500px";  // 원하는 값
+      if (Sidebar) { Sidebar.style.display = ""; Sidebar.style.width = "500px"; }
+      if (sidebarResizer) { sidebarResizer.style.display = ""; sidebarResizer.style.left = "500px"; }
+      if (Preview) {
+        Preview.style.display = "";
+        Preview.style.left = Sidebar?.style.width || "500px";
+        Preview.style.right = "0";
+        Preview.style.top = "3em";
+        Preview.style.bottom = "0";
+      }
+      if (Header) Header.style.display = "";
+      if (Loading) Loading.style.display = "none";
 
-      sidebarResizer.style.display = "";
-      sidebarResizer.style.left = "500px";
-
-      Preview.style.display = "";
-      Preview.style.left = Sidebar.style.width;   // "500px"
-      Preview.style.right = "0";
-      Preview.style.top = "3em";
-      Preview.style.bottom = "0";
-
-      Header.style.display = "";
-      
-      Loading.style.display = "none"; // 로딩 화면 숨김
-
-      // 2. 각 영역별 초기화
-      initTabs("#sidebar"); // 좌측 탭 (프로젝트/Task 등)
-      const viewer = await initViewer(document.getElementById("viewer-host")); // 3D 뷰어
+      // 3) 각 영역 초기화
+      initTabs("#sidebar");
+      const viewer = await initViewer(document.getElementById("viewer-host"));
       // initToolbar(viewer);
 
-      // 3. 트리 영역(프로젝트) 초기화: 모델 선택 시 콜백 등록
+      // [NEW] 지오메트리 로드시 카메라 fitToView 1회 보장 (UI와 무관하게 안정)
+      viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
+        requestAnimationFrame(() => {
+          try { viewer.fitToView(true); } catch(e) { console.warn('fitToView failed', e); }
+        });
+      }, { once: true });
+
+      // 4) 트리(프로젝트/모델) 선택 콜백
       initTree("#tree", async (versionId) => {
+        const my = ++loadToken; // [NEW] 최신 로드 토큰
+
         destroyTaskPanel(); // 이전 패널 완전 초기화
 
         // 선택 모델의 URN 저장 (global)
-        const urn = window.btoa(versionId).replace(/=/g, "");
+        const urn = window.btoa(String(versionId)).replace(/=/g, "");
         window.CURRENT_MODEL_URN = urn;
         const safeUrnVal = safeUrn(urn);
         window.CURRENT_MODEL_SAFE_URN = safeUrnVal;
 
-        // taskData 갱신 (초기화 후, 서버 또는 샘플 데이터 불러오기)
+        // taskData 갱신
         taskData.length = 0;
         setSavedTaskData([]);
         await loadTaskDataIfExists();
 
-        // [**변경**] 모든 taskData에 urn이 누락된 linkedObject 자동 보정!
-        // taskData.forEach(task => fillUrnRecursive(task, urn));
+        // 모든 taskData에 urn 자동 보정
         taskData.forEach(task => fillUrnRecursive(task, urn));
 
-        // 뷰어에 모델 로드 (OBJECT_TREE_CREATED_EVENT까지 기다림)
+        // 뷰어에 모델 로드
         console.log("[main.js] 모델 선택! versionId:", versionId, "urn:", urn);
         await loadModel(viewer, urn);
-        
-        // OBJECT_TREE_CREATED_EVENT 이벤트 핸들러 내에서 Task/WBS 패널 구성
+        if (my !== loadToken) return; // [NEW] 더 최신 로드가 시작됐다면 중단
+
+        // OBJECT_TREE_CREATED_EVENT 이후 패널 구성
         const proceed = async () => {
+          if (my !== loadToken) return; // [NEW] race 방지
           let wbsData = [];
           try { wbsData = await buildWbsTreeData(viewer); }
           catch (e) { wbsData = []; console.warn("[main.js] WBS 데이터 생성 실패!", e); }
@@ -162,20 +192,24 @@ function fillUrnRecursive(task, defaultUrn) {
           initPanel2Content(taskData, wbsData);
           bindPanel2Resizer();
 
-          // 1) panel2-ready 먼저: index.html에서 이 이벤트를 받아
-          //    initGanttView → window.gantt 생성 + 최초 렌더를 수행함
+          // panel2-ready 이벤트로 간트 초기화 트리거
           window.dispatchEvent(new Event('panel2-ready'));
-          // 2) 혹시 이미 window.gantt가 살아있는(핫리로드 등) 케이스를 위해 한 번 더 시도
+
+          // 간트 redraw
           setTimeout(() => {
             try {
+              // 배치 invalidate로 렌더 부하 완화
+              withViewerBatch(viewer, () => {
+                window.gantt?.renderFromTrees(window.taskTree, window.wbsTree);
+              });
               console.log('[gantt] redraw after panel2-ready');
-              window.gantt?.renderFromTrees(window.taskTree, window.wbsTree);
             } catch(e) { console.warn('[gantt] draw failed', e); }
           }, 0);
 
+          // 트리/연결 하이라이트 최종 1회
           setTimeout(() => {
             if (window.taskTree && window.wbsTree) {
-              window.taskTree.render(true, true);
+              try { window.taskTree.render(true, true); } catch(_) {}
               setTimeout(updateWBSHighlight, 0);
             }
           }, 0);
@@ -184,62 +218,23 @@ function fillUrnRecursive(task, defaultUrn) {
         if (viewer.model?.getData?.()?.instanceTree) {
           await proceed();
         } else {
-          viewer.addEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, async function handler() {
+          const handler = async () => {
             viewer.removeEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, handler);
             await proceed();
-          });
+          };
+          viewer.addEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, handler);
         }
       });
 
-
-        // // 3D모델 구조(오브젝트 트리) 완성 시점에 Task/WBS UI 구성
-        // viewer.addEventListener(
-        //   Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT,
-        //   async function handler() {
-        //     viewer.removeEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, handler);
-      
-        //     // WBS(공정 분류) 데이터 빌드
-        //     let wbsData = [];
-        //     try {
-        //       wbsData = await buildWbsTreeData(viewer);
-        //     } catch (e) {
-        //       wbsData = [];
-        //       console.warn("[main.js] WBS 데이터 생성 실패!", e);
-        //     }
-
-        //     // panel2 (Task + WBS) 및 버튼, 리사이저, 이벤트 등 UI 재구성
-        //     initTaskListButtons();
-        //     initPanel2Content(taskData, wbsData);
-        //     bindPanel2Resizer();
-            
-        //     //간트차트 동기화
-        //     try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_) {}
-        //     window.dispatchEvent(new Event('panel2-ready'));
-
-        //     // 강조(연결 표시)는 완전히 트리/DOM이 다 생성된 후 실행 (최종 1회)
-        //     setTimeout(() => {
-        //       if (window.taskTree && window.wbsTree) {
-        //         window.taskTree.render(true, true); // 이미 렌더돼 있다면 생략 가능
-        //         setTimeout(updateWBSHighlight, 0);  // <- import로 온 함수
-        //       }
-        //     }, 0);
-        //   }
-        // );
-      // });
-      
     } else {
-      // 미로그인 상태면 Login 버튼만
-      // login.innerText = "Login";
-      // login.onclick = () => window.location.replace("/api/auth/login");
+      // 미로그인: 로그인 페이지로
       window.location.replace("/api/auth/login");
       return;
     }
 
-    login.style.visibility = "visible";
+    if (login) login.style.visibility = "visible";
   } catch (err) {
-    alert(
-      "Could not initialize the application. See console for more details."
-    );
+    alert("Could not initialize the application. See console for more details.");
     console.error(err);
   }
 })();
@@ -250,22 +245,18 @@ async function loadTaskDataIfExists() {
     const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
     const url = `/api/tasks?urn=${safeUrnVal}`;
     const resp = await fetch(url, { credentials: "include" });
+    taskData.length = 0;
     if (resp.ok) {
       const data = await resp.json();
-      taskData.length = 0;
       if (Array.isArray(data) && data.length > 0) {
         data.forEach((item) => taskData.push(item)); // 서버 데이터 복사
         setSavedTaskData(taskData);
-      } else {
-        SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-        setSavedTaskData(taskData);
+        return;
       }
-    } else {
-      taskData.length = 0;
-      SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-      setSavedTaskData(taskData);
     }
-
+    // 서버 데이터 없음 → 샘플
+    SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+    setSavedTaskData(taskData);
   } catch (err) {
     taskData.length = 0;
     SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
@@ -277,15 +268,16 @@ async function loadTaskDataIfExists() {
 // ----- Task/WBS 패널 전체 제거 및 DOM 재생성 -----
 function destroyTaskPanel() {
   console.log("[destroy] panel2 destroy & 재생성");
-  try { $.ui.fancytree.getTree("#treegrid")?.destroy(); } catch (e) {}
-  window.taskTree = null;
-  window.wbsTree = null;
-  // 간트 쪽은 DOM만 지워도 되지만, 확실히 초기화하고 싶다면:
-  try { window.gantt?.drawFromRows?.([]); } catch(_) {}
-  $("#wbs-group-content").empty(); // ← 기존 DOM, 이벤트도 전부 날려줌
-  $("#panel2").html(`
-    <div id="vertical-split-container">
+  try { $.ui?.fancytree?.getTree("#treegrid")?.destroy(); } catch (e) {}
 
+  window.taskTree = null;
+  window.wbsTree  = null;
+
+  try { window.gantt?.drawFromRows?.([]); } catch(_) {}
+
+  // jQuery 유무에 따른 안전 처리
+  const tpl = `
+    <div id="vertical-split-container">
       <div id="task-list-panel">
         <div class="panel-header">
           <span class="title">Task List</span>
@@ -334,5 +326,15 @@ function destroyTaskPanel() {
         </div>
       </div>
     </div>
-  `);
+  `;
+
+  if (window.$) {
+    try { $("#wbs-group-content").empty(); } catch(_) {}
+    try { $("#panel2").html(tpl); } catch(_) {}
+  } else {
+    const wgc = document.getElementById("wbs-group-content");
+    if (wgc) wgc.replaceChildren();
+    const p2 = document.getElementById("panel2");
+    if (p2) p2.innerHTML = tpl;
+  }
 }

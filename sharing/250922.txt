@@ -1,19 +1,4 @@
-오케이. “Tasks 탭 전환 시 멈춤”을 WBS 초기화 타이밍 분리 + 유휴 시간 예약으로 풀었습니다.
-아래 main.js만 교체하면 됩니다. (오버레이는 계속 꺼둠, 코드 추가는 최소화)
-
-무엇이 달라졌나 (핵심 3줄 요약)
-
-WBS 프로바이더 빌드를 모델 로드 직후 requestIdleCallback으로 미리 시작(백그라운드 느낌).
-
-Tasks 탭 클릭 시 WBS UI만 초기화(프로바이더가 준비돼 있으면 즉시, 아니면 준비되는 즉시).
-
-warmup/오버레이/불필요 대기 제거로 프리즈 요인 최소화.
-
-
-
----
-
-// /wwwroot/js/main.js
+// /wwwroot/js/main.js  — "Tasks 탭 클릭 시 멈춤" 완화용 경량/안정판
 
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
@@ -21,13 +6,13 @@ import { initViewer, loadModel } from "./viewer/init-viewer.js";
 import { buildWbsProviderLazy } from "./sidebar/task-wbs/wbs/loader.js";
 import { bindPanel2Resizer } from "./sidebar/task-wbs/layout/panel-resizer.js";
 
-// ✅ task-wbs 퍼사드
+// 퍼사드
 import {
   initTaskPanel,
   initTaskListButtons,
   setSavedTaskData,
   disableViewerEscReset,
-  initWbsPanelWithFancytree,   // ← WBS 초기화(지연 호출)
+  initWbsPanelWithFancytree, // WBS 초기화(지연 실행)
 } from "./sidebar/index.js";
 
 /* ==============================
@@ -39,7 +24,7 @@ const PREVIEW_MIN = 520;
 
 function onceViewer(viewer, type) {
   return new Promise((resolve) => {
-    const h = () => { viewer.removeEventListener(type, h); resolve(); };
+    const h = () => { try { viewer.removeEventListener(type, h); } catch {} ; resolve(); };
     viewer.addEventListener(type, h);
   });
 }
@@ -51,18 +36,12 @@ async function waitObjectTree(viewer) {
   await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
 }
 
-// ⏱ GEOMETRY 로딩: 2초 타임아웃(신호 누락시 진행)
-async function waitGeometry(viewer, timeoutMs = 2000) {
-  await new Promise((resolve) => {
-    let done = false;
-    const h = () => { if (done) return; done = true;
-      try { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h); } catch {}
-      resolve();
-    };
-    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h, { once: true });
-    setTimeout(h, timeoutMs);
-  });
+// ✅ 과도한 대기 제거: GEOMETRY_LOADED_EVENT까지 강대기하지 않음
+async function waitViewerReady(viewer) {
+  await waitObjectTree(viewer);
+  await waitIdle(30);
 }
+
 function waitIdle(timeout = 60) {
   return new Promise((resolve) => {
     if (typeof window.requestIdleCallback === "function") {
@@ -72,12 +51,17 @@ function waitIdle(timeout = 60) {
     }
   });
 }
-async function waitViewerReady(viewer) {
-  await waitObjectTree(viewer);
-  await waitGeometry(viewer);
-  await waitIdle(60);
+
+function ensureCss(href) {
+  if (![...document.querySelectorAll('link[rel="stylesheet"]')].some(l => l.href.includes(href))) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    document.head.appendChild(link);
+  }
 }
 
+/** 초기 사이드바 폭을 1곳에서만 결정 & 반영 */
 function initSidebarWidth() {
   const root = document.documentElement;
   const stored = parseInt(localStorage.getItem("sidebarWidthPx") || "0", 10);
@@ -89,25 +73,30 @@ function initSidebarWidth() {
   return initial;
 }
 
+/** 뷰어 입력/카메라/툴 기본 상태 강제 초기화 */
 function resetViewerInputAndCamera(viewer) {
   try {
     const tc = viewer.toolController;
     if (tc?.isToolActivated?.("BoxSelectionTool")) tc.deactivateTool("BoxSelectionTool");
     viewer.setNavigationLock(false);
-    viewer.setActiveNavigationTool?.(viewer.impl?.is2d ? "pan" : "orbit");
+    const fallbackNav = viewer.impl?.is2d ? "pan" : "orbit";
+    viewer.setActiveNavigationTool?.(fallbackNav);
     viewer.setSelectionMode(Autodesk.Viewing.SelectionMode.MIXED);
     viewer.clearSelection?.();
+
     if (!viewer.impl?.is2d) {
       viewer.navigation.setWorldUpVector(new THREE.Vector3(0, 0, 1), true);
       const bb = viewer.model?.getBoundingBox?.();
       if (bb) {
-        const c = bb.getCenter(new THREE.Vector3());
-        viewer.navigation.setPivotPoint(c);
-        viewer.navigation.setTarget(c);
+        const center = bb.getCenter(new THREE.Vector3());
+        viewer.navigation.setPivotPoint(center);
+        viewer.navigation.setTarget(center);
       }
     }
     viewer.fitToView?.();
-  } catch (e) { console.warn("[init] resetViewerInputAndCamera failed:", e); }
+  } catch (e) {
+    console.warn("[init] resetViewerInputAndCamera failed:", e);
+  }
 }
 
 /* ==============================
@@ -117,7 +106,6 @@ window.__ALLOW_WBS_UPDATE = false;
 
 const login = document.getElementById("login");
 let taskData = [];
-let wbsProviderPromise = null;   // 🔸 지연 준비용: 프로바이더 Promise (전역 1개)
 
 const SAMPLE_TASK_DATA = [
   {
@@ -146,9 +134,9 @@ const SAMPLE_TASK_DATA = [
 function safeUrn(urn) { return urn.replace(/[^a-zA-Z0-9]/g, "_"); }
 function fillUrnRecursive(task, defaultUrn) {
   if (Array.isArray(task.linkedObjects)) {
-    task.linkedObjects.forEach((o) => { if (!o.urn) o.urn = defaultUrn || window.CURRENT_MODEL_URN; });
+    task.linkedObjects.forEach((obj) => { if (!obj.urn) obj.urn = defaultUrn || window.CURRENT_MODEL_URN; });
   }
-  if (Array.isArray(task.children)) task.children.forEach((ch) => fillUrnRecursive(ch, defaultUrn));
+  if (Array.isArray(task.children)) task.children.forEach((child) => fillUrnRecursive(child, defaultUrn));
 }
 
 /* ==============================
@@ -159,10 +147,10 @@ window.addEventListener("resize", _.throttle(() => {
     initSidebarWidth();
     window.viewer?.resize?.();
     window.viewer?.impl?.invalidate?.(true, true, true);
-    if (window.gantt && window.taskTree) {
-      window.gantt.renderFromTrees(window.taskTree, window.wbsTree);
-    }
-  } catch (e) { console.warn("[resize] redraw failed", e); }
+    if (window.gantt && window.taskTree) window.gantt.renderFromTrees(window.taskTree, window.wbsTree);
+  } catch (e) {
+    console.warn("[resize] redraw failed", e);
+  }
 }, 120));
 
 /* ==============================
@@ -186,7 +174,7 @@ window.addEventListener("resize", _.throttle(() => {
       };
     };
 
-    // 2) 레이아웃 표시 & 사이드바 초기폭 반영
+    // 2) 레이아웃 표시 & 사이드바 초기폭 1회 반영
     const Sidebar = document.getElementById("sidebar");
     const Header  = document.getElementById("header");
     const Preview = document.getElementById("preview");
@@ -197,7 +185,7 @@ window.addEventListener("resize", _.throttle(() => {
     sidebarResizer.style.display = "";
     Preview.style.display = "";
     Header.style.display = "";
-    Loading.style.display = "none"; // ⛔️ 로딩창 강제 숨김
+    Loading.style.display = "none"; // ✅ 로딩창 비활성(요청사항)
     login.style.visibility = "visible";
 
     Sidebar.style.removeProperty("width");
@@ -213,13 +201,21 @@ window.addEventListener("resize", _.throttle(() => {
     window.viewer = viewer;
     disableViewerEscReset(viewer);
 
-    // ⛔️ ProgressOverlay 관련 전부 비활성화(주석 유지)
+    // ▷ ProgressOverlay 연동 완전 비활성 (요청사항: 로딩 관련 주석 처리)
+    // ensureCss('/css/05-hec-progress-overlay.css');
+    // await import('./viewer/hec.ProgressOverlay.js');
+    // const progressOverlay = await viewer.loadExtension('hec.ProgressOverlay', { keepAlive: 'off' });
+    // window.progressOverlay = progressOverlay;
 
+    // 리사이저 바인딩(반드시 viewer 전달)
     bindPanel2Resizer(viewer);
 
+    // 초기 좌표 보정 + invalidate
     viewer.resize();
     viewer.impl?.invalidate?.(true, true, true);
-    requestAnimationFrame(() => { try { viewer.resize(); viewer.impl?.invalidate?.(true, true, true); } catch {} });
+    requestAnimationFrame(() => {
+      try { viewer.resize(); viewer.impl?.invalidate?.(true, true, true); } catch {}
+    });
 
     resetViewerInputAndCamera(viewer);
 
@@ -247,77 +243,60 @@ window.addEventListener("resize", _.throttle(() => {
 
       console.log("[main.js] 모델 선택!", versionId, urn);
 
-      // ⛔️ ProgressOverlay 시작 호출 안함
+      // ▷ ProgressOverlay 사용 중지
+      // const ov = viewer.getExtension('hec.ProgressOverlay');
+      // ov?.beginLoadFor(urn, '모델을 로드하는 중입니다…');
+
       await loadModel(viewer, urn);
 
-      // 뷰어 준비 대기(짧게)
+      // ✅ 과도 대기 제거판
       await waitViewerReady(viewer);
 
-      // 카메라/입력 보정
       resetViewerInputAndCamera(viewer);
       viewer.resize();
 
-      // ─ Task 패널 먼저
+      // ── Task 패널: 먼저 가볍게 렌더(멈춤 방지: UI 선표시)
       initTaskPanel(taskData);
       initTaskListButtons();
       window.dispatchEvent(new Event("panel2-ready"));
 
-      // ─────────────────────────────────────────────
-      // 🔹 WBS 프로바이더 '미리' 준비(유휴 시간 예약)
-      //    → 클릭 시 바로 쓰거나, 아직이면 준비되는 즉시 이어서 UI 초기화
-      // ─────────────────────────────────────────────
-      const buildProvider = async () => {
+      // ── WBS Provider 준비 (지연 호출)
+      let wbsProvider;
+      try {
+        const { provider } = await buildWbsProviderLazy(viewer, {
+          // 과도한 워밍업/대량 버킷은 당분간 축소
+          bucketThreshold: 400,
+          bucketSize: 200,
+          source: "all",
+        });
+        wbsProvider = provider;
+      } catch (e) {
+        console.warn("[main.js] WBS 데이터 생성 실패! (임시 빈 프로바이더로 대체)", e);
+        wbsProvider = { __provider:true, roots: async()=>[], childrenByPath: async()=>[], countAt: ()=>0 };
+      }
+
+      // ❗ 워밍업은 잠시 중단 (freeze 유발 가능성 제거)
+      // await warmup(wbsProvider, 3, 1200);
+
+      // ✅ WBS 초기화는 다음 프레임 + idle 후로 미룸 (탭 전환 멈춤 완화 핵심)
+      requestAnimationFrame(async () => {
+        await waitIdle(60);
         try {
-          const { provider } = await buildWbsProviderLazy(viewer, {
-            bucketThreshold: 400, bucketSize: 200, source: "all"
-          });
-          return provider;
+          await initWbsPanelWithFancytree(wbsProvider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
         } catch (e) {
-          console.warn("[main.js] WBS provider build 실패:", e);
-          return { __provider:true, roots: async()=>[], childrenByPath: async()=>[], countAt: ()=>0 };
-        }
-      };
-      wbsProviderPromise = new Promise((resolve) => {
-        const kickoff = () => { buildProvider().then(resolve); };
-        if ("requestIdleCallback" in window) {
-          requestIdleCallback(() => setTimeout(kickoff, 0), { timeout: 1200 });
-        } else {
-          setTimeout(kickoff, 200);
+          console.warn("[main.js] initWbsPanelWithFancytree 실패:", e);
         }
       });
 
-      // ─ Tasks 탭 클릭 시: WBS UI 1회만 초기화
-      let wbsInitOnce = false;
-      const tabBtnPanel2 = document.querySelector('.tab-button[data-target="panel2"]');
-      const lazyInitWbs = () => {
-        if (wbsInitOnce) return;
-        wbsInitOnce = true;
-
-        const host = document.getElementById("wbs-group-content");
-        if (host) host.innerHTML = `<div style="padding:8px;color:#666">WBS 로딩 중…</div>`;
-
-        // 프로바이더 준비 완료를 기다렸다가, 다음 프레임에 UI만 초기화
-        (async () => {
-          const provider = await (wbsProviderPromise || buildProvider());
-          requestAnimationFrame(async () => {
-            try {
-              await initWbsPanelWithFancytree(provider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
-            } catch (e) {
-              console.warn("[main.js] initWbsPanelWithFancytree 실패:", e);
-              if (host) host.innerHTML = `<div style="padding:8px;color:#b55">WBS 초기화 실패</div>`;
-            }
-          });
-        })();
-      };
-      tabBtnPanel2?.addEventListener("click", lazyInitWbs, { once: true });
-
-      // 간트 1회 렌더(가볍게)
+      // 간트: 가볍게 1회
       requestAnimationFrame(() => {
         try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch {}
       });
 
-      // ⛔️ ProgressOverlay finish 없음
+      // ▷ ProgressOverlay 종료도 사용 안 함
+      // try { progressOverlay.finishFor(urn, '모델 로딩이 완료되었습니다.'); } catch (e) {}
     });
+
   } catch (err) {
     alert("Could not initialize the application. See console for more details.");
     console.error(err);
@@ -356,7 +335,6 @@ async function loadTaskDataIfExists() {
 }
 
 function destroyTaskPanel() {
-  console.log("[destroy] panel2 destroy & 재생성");
   try { $.ui.fancytree.getTree("#treegrid")?.destroy(); } catch {}
   window.taskTree = null;
   window.wbsTree = null;
@@ -365,12 +343,16 @@ function destroyTaskPanel() {
   $("#treegrid tbody").empty();
 }
 
-이렇게 하면:
-
-모델 로딩 직후엔 Task만 즉시 표시 → 프리즈 해소
-
-Tasks 탭 클릭 시에도, 프로바이더가 이미 준비돼 있으면 빠르게 WBS가 뜨고, 아니면 “로딩 중…” 표시 후 준비되는 즉시 초기화
-
-오버레이/워밍업/긴 대기 제거로 전체 흐름이 가뿐해집니다.
-
-
+// (참고) warmup은 현재 미사용
+// async function warmup(provider, maxDepth=3, hardCap=1200){
+//   const roots = await provider.roots();
+//   let q = roots.map(r => ({ path: [r.text], depth: 1 }));
+//   let c = 0;
+//   while (q.length && c < hardCap) {
+//     const { path, depth } = q.shift();
+//     if (depth >= maxDepth) continue;
+//     const kids = await provider.childrenByPath(path);
+//     c += kids.length;
+//     kids.forEach(k => q.push({ path: [...path, k.text], depth: depth+1 }));
+//   }
+// }

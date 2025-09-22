@@ -4,14 +4,19 @@ on:
   push:
     paths:
       - 'wwwroot/**'
-      - 'github/forkflows/bundle-wwwroot.yml'
+      - '.github/workflows/bundle-wwwroot.yml'
+
+permissions:
+  contents: write
+
 jobs:
   bundle:
     runs-on: ubuntu-latest
     steps:
-      - uses : ubuntu-latest
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Generate bundle markdown
         run: |
           out=review/wwwroot-bundle.md
@@ -19,21 +24,29 @@ jobs:
           echo "# wwwroot review bundle" > "$out"
           echo "" >> "$out"
           find wwwroot -type f \( -name "*.js" -o -name "*.css" -o -name "*.html" \) \
-          -not -path "/node_modules/*" -not -path "*./dist/*" -not -path "*/vendor/*" \
-          -size -200k | sort | while read f; do
-            echo -e "\n---\n\n## \'$f\ '\n" >> "$out"
-            lang="text"
-            case "$f" in
-              *.js) lang="javascript" ;;
-              *.css) lang="css" ;;
-              *.html) lang="html" ;;
-            esac
-            echo '```'"$lang" >> "$out"
-            sed 's/\t/  /g' "$f" | sed 's/\x0//g' >> "$out"
-            echo '```' >> "$out"
-          done
-      - name: Commit bundle
+            -not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "*/vendor/*" \
+            -size -200k | sort | while read f; do
+              echo -e "\n---\n\n## \`$f\`\n" >> "$out"
+              case "$f" in
+                *.js)   lang="javascript" ;;
+                *.css)  lang="css" ;;
+                *.html) lang="html" ;;
+                *)      lang="text" ;;
+              esac
+              echo '```'"$lang" >> "$out"
+              sed 's/\t/    /g' "$f" | sed 's/\x0//g' >> "$out"
+              echo '```' >> "$out"
+            done
+
+      # 결과물을 커밋 + 아티팩트 두 군데에 남겨, 어떤 경우에도 확인 가능하도록
+      - name: Commit bundle into repo
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Chore(review) : update wwwroot-bundle.md"
+          commit_message: "chore(review): update wwwroot-bundle.md"
           file_pattern: "review/wwwroot-bundle.md"
+
+      - name: Upload bundle as artifact (fallback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wwwroot-bundle
+          path: review/wwwroot-bundle.md

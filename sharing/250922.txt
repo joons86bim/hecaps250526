@@ -1,16 +1,17 @@
-좋아. “모델 로드 직후 멈춤”을 WBS 초기화 지연으로 끊어냈어.
-핵심 변경은 단 2개:
+오케이. “Tasks 탭 전환 시 멈춤”을 WBS 초기화 타이밍 분리 + 유휴 시간 예약으로 풀었습니다.
+아래 main.js만 교체하면 됩니다. (오버레이는 계속 꺼둠, 코드 추가는 최소화)
 
-1. 모델 선택 콜백에서 WBS 빌드/초기화 전부 제거
+무엇이 달라졌나 (핵심 3줄 요약)
+
+WBS 프로바이더 빌드를 모델 로드 직후 requestIdleCallback으로 미리 시작(백그라운드 느낌).
+
+Tasks 탭 클릭 시 WBS UI만 초기화(프로바이더가 준비돼 있으면 즉시, 아니면 준비되는 즉시).
+
+warmup/오버레이/불필요 대기 제거로 프리즈 요인 최소화.
 
 
-2. Tasks 탭 클릭 시 1회만 WBS를 늦게 초기화(once + setTimeout)
 
-
-
-ProgressOverlay는 계속 비활성화(주석), geometry 대기는 짧게(2초). 나머지 흐름/코드 추가는 최소화했어.
-
-아래로 /wwwroot/js/main.js 통째로 교체:
+---
 
 // /wwwroot/js/main.js
 
@@ -50,7 +51,7 @@ async function waitObjectTree(viewer) {
   await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
 }
 
-// ⏱ GEOMETRY 로딩: 2초 타임아웃(이벤트 누락시 진행)
+// ⏱ GEOMETRY 로딩: 2초 타임아웃(신호 누락시 진행)
 async function waitGeometry(viewer, timeoutMs = 2000) {
   await new Promise((resolve) => {
     let done = false;
@@ -62,7 +63,6 @@ async function waitGeometry(viewer, timeoutMs = 2000) {
     setTimeout(h, timeoutMs);
   });
 }
-
 function waitIdle(timeout = 60) {
   return new Promise((resolve) => {
     if (typeof window.requestIdleCallback === "function") {
@@ -76,15 +76,6 @@ async function waitViewerReady(viewer) {
   await waitObjectTree(viewer);
   await waitGeometry(viewer);
   await waitIdle(60);
-}
-
-function ensureCss(href) {
-  if (![...document.querySelectorAll('link[rel="stylesheet"]')].some(l => l.href.includes(href))) {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = href;
-    document.head.appendChild(link);
-  }
 }
 
 function initSidebarWidth() {
@@ -126,6 +117,7 @@ window.__ALLOW_WBS_UPDATE = false;
 
 const login = document.getElementById("login");
 let taskData = [];
+let wbsProviderPromise = null;   // 🔸 지연 준비용: 프로바이더 Promise (전역 1개)
 
 const SAMPLE_TASK_DATA = [
   {
@@ -221,10 +213,7 @@ window.addEventListener("resize", _.throttle(() => {
     window.viewer = viewer;
     disableViewerEscReset(viewer);
 
-    // ⛔️ ProgressOverlay 전부 비활성화 (주석)
-    // ensureCss('/css/05-hec-progress-overlay.css');
-    // await import('./viewer/hec.ProgressOverlay.js');
-    // const progressOverlay = await viewer.loadExtension('hec.ProgressOverlay', { ... });
+    // ⛔️ ProgressOverlay 관련 전부 비활성화(주석 유지)
 
     bindPanel2Resizer(viewer);
 
@@ -268,29 +257,57 @@ window.addEventListener("resize", _.throttle(() => {
       resetViewerInputAndCamera(viewer);
       viewer.resize();
 
-      // ─ Task 패널만 먼저 (가벼움)
+      // ─ Task 패널 먼저
       initTaskPanel(taskData);
       initTaskListButtons();
       window.dispatchEvent(new Event("panel2-ready"));
 
-      // ─ WBS는 'Tasks' 탭 클릭 시 1회 지연 초기화(프리즈 차단)
+      // ─────────────────────────────────────────────
+      // 🔹 WBS 프로바이더 '미리' 준비(유휴 시간 예약)
+      //    → 클릭 시 바로 쓰거나, 아직이면 준비되는 즉시 이어서 UI 초기화
+      // ─────────────────────────────────────────────
+      const buildProvider = async () => {
+        try {
+          const { provider } = await buildWbsProviderLazy(viewer, {
+            bucketThreshold: 400, bucketSize: 200, source: "all"
+          });
+          return provider;
+        } catch (e) {
+          console.warn("[main.js] WBS provider build 실패:", e);
+          return { __provider:true, roots: async()=>[], childrenByPath: async()=>[], countAt: ()=>0 };
+        }
+      };
+      wbsProviderPromise = new Promise((resolve) => {
+        const kickoff = () => { buildProvider().then(resolve); };
+        if ("requestIdleCallback" in window) {
+          requestIdleCallback(() => setTimeout(kickoff, 0), { timeout: 1200 });
+        } else {
+          setTimeout(kickoff, 200);
+        }
+      });
+
+      // ─ Tasks 탭 클릭 시: WBS UI 1회만 초기화
       let wbsInitOnce = false;
       const tabBtnPanel2 = document.querySelector('.tab-button[data-target="panel2"]');
-      const lazyInitWbs = async () => {
+      const lazyInitWbs = () => {
         if (wbsInitOnce) return;
         wbsInitOnce = true;
-        setTimeout(async () => {
-          try {
-            const { provider } = await buildWbsProviderLazy(viewer, {
-              bucketThreshold: 400, bucketSize: 200, source: "all"
-            });
-            await initWbsPanelWithFancytree(provider, {
-              primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"]
-            });
-          } catch (e) {
-            console.warn("[main.js] WBS 지연 초기화 실패:", e);
-          }
-        }, 0);
+
+        const host = document.getElementById("wbs-group-content");
+        if (host) host.innerHTML = `<div style="padding:8px;color:#666">WBS 로딩 중…</div>`;
+
+        // 프로바이더 준비 완료를 기다렸다가, 다음 프레임에 UI만 초기화
+        (async () => {
+          const provider = await (wbsProviderPromise || buildProvider());
+          requestAnimationFrame(async () => {
+            try {
+              await initWbsPanelWithFancytree(provider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
+            } catch (e) {
+              console.warn("[main.js] initWbsPanelWithFancytree 실패:", e);
+              if (host) host.innerHTML = `<div style="padding:8px;color:#b55">WBS 초기화 실패</div>`;
+            }
+          });
+        })();
       };
       tabBtnPanel2?.addEventListener("click", lazyInitWbs, { once: true });
 
@@ -348,17 +365,12 @@ function destroyTaskPanel() {
   $("#treegrid tbody").empty();
 }
 
-왜 이게 “멈춤”을 풀어주나?
+이렇게 하면:
 
-WBS 프로바이더/트리 초기화가 가장 무거웠고, 모델 로드 직후에 바로 실행되면서 메인 스레드를 오래 잡았습니다.
+모델 로딩 직후엔 Task만 즉시 표시 → 프리즈 해소
 
-이제는 모델 로딩 → 뷰어 준비 → Task만 즉시 표시까지만 하고,
-WBS는 Tasks 탭을 눌렀을 때 한 번만 늦게 시작합니다(setTimeout 0).
+Tasks 탭 클릭 시에도, 프로바이더가 이미 준비돼 있으면 빠르게 WBS가 뜨고, 아니면 “로딩 중…” 표시 후 준비되는 즉시 초기화
 
-ProgressOverlay도 완전 비활성화해서 이벤트 대기 루프에 끼어들지 않습니다.
+오버레이/워밍업/긴 대기 제거로 전체 흐름이 가뿐해집니다.
 
-Geometry 이벤트 대기도 2초 타임아웃을 둬서 ‘신호 누락’ 케이스에서 더 이상 멈추지 않습니다.
-
-
-이 상태로 먼저 돌려보고, 모델 로드가 매끄러워지면 다음 단계로 WBS 쪽 성능(지연 로딩/버킷 크기)만 조절해 주면 돼.
 

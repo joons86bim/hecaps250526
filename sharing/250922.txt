@@ -1,17 +1,18 @@
-// /wwwroot/js/main.js  — freeze 방지 최소 변경판
+// /wwwroot/js/main.js  — SAFE MODE: Tasks/WBS/Gantt 모두 차단하여 프리즈 원인 격리
 
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
-import { buildWbsProviderLazy } from "./sidebar/task-wbs/wbs/loader.js";
-import { bindPanel2Resizer } from "./sidebar/task-wbs/layout/panel-resizer.js";
-import {
-  initTaskPanel,
-  initTaskListButtons,
-  setSavedTaskData,
-  disableViewerEscReset,
-  initWbsPanelWithFancytree,
-} from "./sidebar/index.js";
+// import { buildWbsProviderLazy } from "./sidebar/task-wbs/wbs/loader.js";
+// import { bindPanel2Resizer } from "./sidebar/task-wbs/layout/panel-resizer.js";
+// import { initTaskPanel, initTaskListButtons, setSavedTaskData, disableViewerEscReset, initWbsPanelWithFancytree } from "./sidebar/index.js";
+
+import { disableViewerEscReset } from "./sidebar/index.js";
+// NOTE: setSavedTaskData만 필요 → 안전 호출용
+import { setSavedTaskData } from "./sidebar/index.js";
+
+// ✅ SAFE MODE: 패널2(Tasks/WBS/간트) 관련 초기화 전부 막기
+const SAFE_MODE = true;
 
 /* ============================== */
 const SIDEBAR_MIN = 360;
@@ -124,9 +125,7 @@ const SAMPLE_TASK_DATA = [
   { no: "2", selectOptions: ["시공", "가설", "철거"], selectedOption: "시공", title: "Task B", start: "", end: "", linkedObjects: [] },
 ];
 
-function safeUrn(urn) {
-  return urn.replace(/[^a-zA-Z0-9]/g, "_");
-}
+function safeUrn(urn) { return urn.replace(/[^a-zA-Z0-9]/g, "_"); }
 function fillUrnRecursive(task, defaultUrn) {
   if (Array.isArray(task.linkedObjects)) {
     task.linkedObjects.forEach((obj) => { if (!obj.urn) obj.urn = defaultUrn || window.CURRENT_MODEL_URN; });
@@ -142,9 +141,7 @@ window.addEventListener("resize", _.throttle(() => {
     initSidebarWidth();
     window.viewer?.resize?.();
     window.viewer?.impl?.invalidate?.(true, true, true);
-    if (window.gantt && window.taskTree) {
-      window.gantt.renderFromTrees(window.taskTree, window.wbsTree);
-    }
+    // SAFE_MODE: 간트/WBS 렌더링 호출 없음
   } catch (e) {
     console.warn("[resize] redraw failed", e);
   }
@@ -153,7 +150,7 @@ window.addEventListener("resize", _.throttle(() => {
 /* ============================== */
 (async function () {
   try {
-    // 로그인
+    // 1) 로그인
     const resp = await fetch("/api/auth/profile", { credentials: "include" });
     if (!resp.ok) { window.location.replace("/api/auth/login"); return; }
     const user = await resp.json();
@@ -169,7 +166,7 @@ window.addEventListener("resize", _.throttle(() => {
       };
     };
 
-    // 레이아웃
+    // 2) 레이아웃
     const Sidebar = document.getElementById("sidebar");
     const Header  = document.getElementById("header");
     const Preview = document.getElementById("preview");
@@ -186,22 +183,20 @@ window.addEventListener("resize", _.throttle(() => {
     sidebarResizer.style.removeProperty("left");
     initSidebarWidth();
 
-    // 탭/뷰어
+    // 3) 탭/뷰어
     initTabs("#sidebar");
     const viewerHost = document.getElementById("viewer-host");
     const viewer = await initViewer(viewerHost);
     window.viewer = viewer;
     disableViewerEscReset(viewer);
 
-    // (ProgressOverlay 전부 제거)
-    // ensureCss('/css/05-hec-progress-overlay.css');
-    // await import('./viewer/hec.ProgressOverlay.js');
-    // const progressOverlay = await viewer.loadExtension('hec.ProgressOverlay', {...});
-    // window.progressOverlay = progressOverlay;
+    // ProgressOverlay 관련은 모두 제외(주석)
+    // ensureCss('/css/05-hec-progress-overlay.css'); await import('./viewer/hec.ProgressOverlay.js'); ...
 
-    bindPanel2Resizer(viewer);
+    // panel2 리사이저도 잠시 제외 (레이아웃 루프 가능성 차단)
+    // bindPanel2Resizer(viewer);
 
-    // 카메라/입력 보정
+    // 입력/카메라 보정
     viewer.resize();
     viewer.impl?.invalidate?.(true, true, true);
     requestAnimationFrame(() => {
@@ -218,92 +213,34 @@ window.addEventListener("resize", _.throttle(() => {
       }
     });
 
-    // 모델 선택
-    let modelSessionId = 0;
+    // 4) 모델 선택
     initTree("#tree", async (versionId) => {
-      const mySession = ++modelSessionId; // 취소 플래그
-      destroyTaskPanel();
-
+      // destroyTaskPanel() 호출도 생략: 패널2 건드리지 않음
       const urn = window.btoa(versionId).replace(/=/g, "");
       window.CURRENT_MODEL_URN = urn;
       window.CURRENT_MODEL_SAFE_URN = safeUrn(urn);
 
+      // Task 데이터 로딩은 하되, 패널은 만들지 않음
       taskData.length = 0;
       setSavedTaskData([]);
       await loadTaskDataIfExists();
       taskData.forEach((t) => fillUrnRecursive(t, urn));
 
-      console.log("[main.js] 모델 선택!", versionId, urn);
       await loadModel(viewer, urn);
       await waitViewerReady(viewer);
 
       resetViewerInputAndCamera(viewer);
       viewer.resize();
 
-      // Task 패널 선 초기화 (가벼움)
-      initTaskPanel(taskData);
-      initTaskListButtons();
-      window.dispatchEvent(new Event("panel2-ready"));
+      // SAFE_MODE: 패널2 초기화 전부 미실행
+      // initTaskPanel(taskData); initTaskListButtons();
+      // window.dispatchEvent(new Event("panel2-ready"));
+      // buildWbsProviderLazy / warmup / initWbsPanelWithFancytree 모두 미실행
+      // 간트 렌더도 미실행
 
-      // ✅ WBS는 백그라운드로만 초기화(절대 await X)
-      const startWbs = () => {
-        if (mySession !== modelSessionId) return; // 다른 모델로 교체되면 취소
-        (async () => {
-          let provider = null;
-          try {
-            const built = await buildWbsProviderLazy(viewer, {
-              bucketThreshold: 400,
-              bucketSize: 200,
-              source: "all"
-            });
-            if (mySession !== modelSessionId) return;
-            provider = built?.provider;
-          } catch (e) {
-            console.warn("[main.js] WBS provider 실패:", e);
-          }
-
-          if (!provider) {
-            provider = { __provider:true, roots: async()=>[], children: async()=>[], countAt: ()=>0 };
-          }
-
-          // warmup은 절대 대기하지 않음
-          (async () => {
-            try {
-              const roots = await provider.roots();
-              let q = roots.map(r => ({ path: [r.text], depth: 1 }));
-              let c = 0, maxDepth = 3, hardCap = 800;
-              while (q.length && c < hardCap && mySession === modelSessionId) {
-                const { path, depth } = q.shift();
-                if (depth >= maxDepth) continue;
-                const kids = await provider.childrenByPath(path);
-                c += kids.length;
-                kids.forEach(k => q.push({ path: [...path, k.text], depth: depth+1 }));
-              }
-            } catch {}
-          })();
-
-          // 실제 패널 구축(가벼움)
-          try {
-            if (mySession !== modelSessionId) return;
-            await initWbsPanelWithFancytree(provider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
-          } catch (e) {
-            console.warn("[main.js] initWbsPanelWithFancytree 실패:", e);
-          }
-
-          // 가벼운 간트 1회
-          requestAnimationFrame(() => {
-            try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch {}
-          });
-        })();
-      };
-
-      // 아주 짧게 지연해 탭 전환/레이아웃 안정 후 실행
-      if (typeof window.requestIdleCallback === "function") {
-        requestIdleCallback(startWbs, { timeout: 200 });
-      } else {
-        setTimeout(startWbs, 50);
-      }
+      console.log("[SAFE_MODE] 모델만 로드 완료. Tasks/WBS/Gantt 초기화는 전부 차단됨.");
     });
+
   } catch (err) {
     alert("Could not initialize the application. See console for more details.");
     console.error(err);
@@ -337,13 +274,4 @@ async function loadTaskDataIfExists() {
     setSavedTaskData(taskData);
     console.warn("task 데이터를 불러오지 못했습니다. 샘플로 초기화:", err);
   }
-}
-
-function destroyTaskPanel() {
-  try { $.ui.fancytree.getTree("#treegrid")?.destroy(); } catch {}
-  window.taskTree = null;
-  window.wbsTree = null;
-  try { window.gantt?.drawFromRows?.([]); } catch {}
-  $("#wbs-group-content").empty();
-  $("#treegrid tbody").empty();
 }

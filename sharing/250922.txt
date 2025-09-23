@@ -189,3 +189,311 @@ Task만 → 간트만 → Provider만 → 워밍업만 → 트리 → 리사이�
 
 필요하면 해당 단계에서 딱 그 파일(예: fancy-tree-init.js)만 붙여줘도 돼.
 
+
+import { toKey } from "../core/path-key.js";
+import {
+  initMatrix, bulkEnsureForVisible,
+  computePathState, getPathState, getCounts,
+  markTasksChanged
+} from "../core/matrix-index.js";
+import { formatObjectLabel } from "../core/element-id.js";
+
+const HIDDEN_KEYS = new Set();
+
+function buildPathFromNode(node){
+  const out = [];
+  let cur = node;
+  while (cur && !cur.isRoot()) { out.unshift(cur.title); cur = cur.parent; }
+  return out;
+}
+function stateToClass(st){
+  if (st === "C") return "wbs-c";
+  if (st === "TD") return "wbs-td";
+  return "";
+}
+
+// 눈알 SVG
+const Eye = `
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"/>
+</svg>`;
+const EyeOff = `
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M3 3l18 18M10.58 10.58A4 4 0 0012 16a4 4 0 002.83-6.83M12 5c5 0 9 4 10 7-.43 1.28-1.33 2.7-2.6 3.98M6.62 6.62C4.62 8.05 3.28 9.94 2 12c1 3 5 7 10 7 1.28 0 2.5-.22 3.62-.62"/>
+</svg>`;
+
+// 경로→dbId 수집 (click/dblclick 때만 호출: 초기 렌더에는 안 돌게)
+async function getAllDbIdsForPath(provider, path){
+  let ids = provider.getDbIdsForPath(path, { includeDescendants:true, allowUnbuilt:true });
+  if (ids != null) return ids;
+  try { await provider.childrenByPath(path); } catch {}
+  ids = provider.getDbIdsForPath(path, { includeDescendants:true, allowUnbuilt:true });
+  if (ids != null) return ids;
+  return provider.getDbIdsForPath(path, { includeDescendants:true, allowUnbuilt:false }) || [];
+}
+
+function calcEyeStateForNode(node){
+  const key = node.data?.pathKey;
+  if (!key) return "none";
+  let anyHidden = false;
+  let allHidden = true;
+  node.visit(n => {
+    const k = n.data?.pathKey;
+    if (!k) return;
+    const hid = HIDDEN_KEYS.has(k);
+    anyHidden = anyHidden || hid;
+    allHidden = allHidden && hid;
+  });
+  if (!anyHidden) return "none";
+  return allHidden ? "hidden" : "mixed";
+}
+
+export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
+  await initMatrix({ primaryOrder, provider });
+
+  // 테이블 뼈대(개수 가운데 정렬: th에 text-center)
+  const host = document.getElementById("wbs-group-content");
+  host.innerHTML = `
+    <table id="wbs-tree" class="table table-sm wbs-table">
+      <colgroup>
+        <col class="col-title" />
+        <col class="col-count" />
+        <col class="col-status" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>항목</th>
+          <th class="text-center">개수</th>
+          <th>현황</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  `;
+
+  $("#wbs-tree").fancytree({
+    extensions: ["table", "gridnav"],   // ❗ checkbox 확장 넣지 마세요
+    checkbox: true,                     // 체크박스는 옵션으로만
+    selectMode: 3,
+
+    // ✅ source: jQuery Deferred로 안전하게
+    source: function(event, data){
+      const d = new $.Deferred();
+      provider.roots()
+        .then(nodes => {
+          d.resolve(nodes.map(ch => ({
+            title: ch.text,
+            lazy: ch.children === true,
+            data: {
+              __path: ch.__path || [ch.text],
+              pathKey: toKey(ch.__path || [ch.text]),
+              leafCount: ch.leafCount || 0,
+              dbId: ch.dbId,
+              elementId: ch.elementId
+            }
+          })));
+        })
+        .catch(() => d.resolve([]));
+      data.result = d.promise();
+    },
+
+    // ✅ lazyLoad: 역시 Deferred로
+    lazyLoad: function(event, data){
+      const node = data.node;
+      const path = node.data?.__path || buildPathFromNode(node);
+      const d = new $.Deferred();
+      provider.childrenByPath(path)
+        .then(children => {
+          const rows = children.map(ch => {
+            const __path = ch.__path || [...path, ch.text];
+            return {
+              title: ch.text,
+              lazy: ch.children === true,
+              data: {
+                __path,
+                pathKey: toKey(__path),
+                leafCount: ch.leafCount || 0,
+                dbId: ch.dbId,
+                elementId: ch.elementId
+              }
+            };
+          });
+          d.resolve(rows);
+        })
+        .catch(() => d.resolve([]));
+      data.result = d.promise();
+    },
+
+    table: { indentation: 14, nodeColumnIdx: 0 },
+
+    // ❗ 초기 렌더에서는 '계산'을 유발하지 않는다 (프리즈 방지)
+    renderColumns: function(event, data) {
+      const node  = data.node;
+      const $tds  = $(node.tr).find(">td");
+
+      // 0) 타이틀 칼럼: 문서 아이콘 자리에 눈알
+      const $titleCell = $tds.eq(0);
+      const $nodeSpan  = $titleCell.find("> .fancytree-node");
+      const $iconSpan  = $nodeSpan.find("> .fancytree-icon");
+      const eyeState   = calcEyeStateForNode(node);
+      $iconSpan.replaceWith(
+        $(`<span class="eye-toggle ${eyeState}" title="가시성 토글">${
+          eyeState === "hidden" ? EyeOff : Eye
+        }</span>`)
+      );
+
+      // 1) 개수 칼럼: 항상 가운데 정렬
+      const $cntCell = $tds.eq(1).removeClass("text-end").addClass("text-center");
+      if (node.data?.dbId != null) {
+        $cntCell.text("");
+      } else {
+        const cnt = node.data?.leafCount;
+        $cntCell.text((typeof cnt === "number") ? String(cnt) : "…");
+      }
+
+      // 2) 현황 칼럼: 값만 표시, 계산은 expand/초기 배치에서
+      const $statusCell = $tds.eq(2);
+      if (node.data?.dbId != null) {
+        $statusCell.text(
+          formatObjectLabel({ elementId: node.data.elementId, dbId: node.data.dbId })
+        );
+      } else {
+        // 현재 계산된 값이 있으면 클래스/숫자 적용
+        const st   = getPathState(node.data?.pathKey);
+        const cls  = stateToClass(st);
+        $(node.tr).removeClass("wbs-c wbs-td");
+        if (cls) $(node.tr).addClass(cls);
+
+        const counts = getCounts(node.data?.pathKey);
+        if (counts) {
+          $statusCell.html(`
+            <div class="wbs-status">
+              <div class="nums">
+                <span class="b c" title="시공">${counts.c ?? 0}</span>
+                <span class="b t" title="가설">${counts.t ?? 0}</span>
+                <span class="b d" title="철거">${counts.d ?? 0}</span>
+                <span class="b td" title="혼합">${counts.td ?? 0}</span>
+                <span class="b total" title="총계">${counts.total ?? 0}</span>
+              </div>
+            </div>
+          `);
+        } else {
+          $statusCell.text("…");
+        }
+      }
+    },
+
+    // 확장할 때만: 보이는 경로들 계산 → 테이블 전체 1회 리렌더
+    expand: async function(event, data) {
+      try {
+        const keys = [];
+        data.node.visit(n => { if (n.data?.pathKey && n.lazy !== false) keys.push(n.data.pathKey); });
+        await bulkEnsureForVisible(keys);
+        keys.forEach(k => computePathState(k));
+      } catch(e) {
+        console.warn("[WBS] expand compute failed:", e);
+      } finally {
+        data.tree.render(true, true);
+      }
+    },
+
+    // 더블클릭: 해당 경로 선택/해제 (기존 동작 유지)
+    dblclick: function(event, data){
+      const node = data.node;
+      (async ()=>{
+        const viewer = window.viewer;
+        if (!viewer) return;
+        let ids = [];
+        if (node.data?.dbId != null) {
+          ids = [node.data.dbId];
+        } else {
+          const path = node.data?.__path || buildPathFromNode(node);
+          ids = await getAllDbIdsForPath(provider, path);
+        }
+        try {
+          const cur = viewer.getSelection();
+          const same = (cur?.length === ids.length) && cur.every((v,i)=>v===ids[i]);
+          viewer.clearSelection();
+          if (!same && ids?.length) viewer.select(ids);
+        } catch {}
+      })();
+    },
+
+    // 클릭: 확장/체크 외엔 기본 무시 (expander로만 펼치기)
+    click: function(event, data){
+      const t = data.targetType; // expander | title | icon | checkbox
+      if (t === "expander" || t === "checkbox") return; // 기본 동작 허용
+      event.preventDefault();
+      return false;
+    },
+
+    // 초기 데이터가 로드되고 DOM이 안정된 뒤, 보이는 루트만 ‘한 번’ 계산
+    init: function(event, data){
+      setTimeout(async () => {
+        try {
+          const tree = data.tree;
+          const keys = [];
+          tree.getRootNode().children?.forEach(n => { if (n.data?.pathKey) keys.push(n.data.pathKey); });
+          if (keys.length) {
+            await bulkEnsureForVisible(keys);
+            keys.forEach(k => computePathState(k));
+            tree.render(true, true);
+          }
+        } catch(e) {
+          console.warn("[WBS] initial compute failed:", e);
+        }
+      }, 0);
+    }
+  });
+
+  // 눈알 토글: 위임
+  $("#wbs-tree").on("click", ".eye-toggle", async (e) => {
+    e.stopPropagation();
+    const el = e.currentTarget;
+    const node = $.ui.fancytree.getNode(el);
+    if (!node) return;
+
+    const viewer = window.viewer;
+    if (!viewer) return;
+
+    const path = node.data?.__path || buildPathFromNode(node);
+    const key  = node.data?.pathKey;
+    if (!key) return;
+
+    const isHidden = HIDDEN_KEYS.has(key);
+    const ids = await getAllDbIdsForPath(provider, path);
+    if (!ids || !ids.length) return;
+
+    try {
+      if (isHidden) {
+        viewer.show(ids);
+        HIDDEN_KEYS.delete(key);
+      } else {
+        viewer.hide(ids);
+        HIDDEN_KEYS.add(key);
+      }
+    } finally {
+      // 자신/부모/자식 아이콘 상태 갱신
+      node.visit(n => n.render(true));
+      node.getParentList(false, true).forEach(p => p.render(true));
+      const tree = $.ui.fancytree.getTree("#wbs-tree");
+      tree.render(true, true);
+    }
+  });
+
+  // Task 갱신 → 현황 반영(배치 1회)
+  window.__WBS_MARK_TASKS_CHANGED = function(){
+    try {
+      markTasksChanged();
+      const tree = $.ui.fancytree.getTree("#wbs-tree");
+      const keys = [];
+      tree.getRootNode().visit(n => { if (n.data?.pathKey) keys.push(n.data.pathKey); });
+      bulkEnsureForVisible(keys).then(() => {
+        keys.forEach(k => computePathState(k));
+        tree.render(true, true);
+      });
+    } catch(e) {
+      console.warn("[WBS] tasks changed failed:", e);
+    }
+  };
+}

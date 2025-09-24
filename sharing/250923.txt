@@ -10,3 +10,227 @@
               </div>
             </div>
           </td></tr>
+
+highlight.js:4 [hec] wbs/highlight.js loaded
+endpoints.js:236  getCdnRedirectUrl is deprecated and will be removed soon
+endp.getCdnRedirectUrl @ endpoints.js:236
+initializeCDN @ envinit.js:640
+Initializer @ envinit.js:759
+(anonymous) @ init-viewer.js:18
+initViewer @ init-viewer.js:17
+(anonymous) @ main.js:191
+await in (anonymous)
+(anonymous) @ main.js:325
+WebGLRenderer.js:29 THREE.WebGLRenderer 71
+WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
+CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
+CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
+CustomViewerExtension.js:207 툴바 커스터마이징 완료.
+WebGLRenderer.js:29 THREE.WebGLRenderer 71
+WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
+(index):1 Autofocus processing was blocked because a document already has a focused element.
+GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
+GeometryList.js:345 Number of meshes: 23
+GeometryList.js:346 Num Meshes on GPU: 26
+GeometryList.js:347 Net GPU geom memory used: 53208
+main.js:257 [WBS] roots: 3
+main.js:279 [STEP 4] WBS warmup OK (depth<=2, cap<=200)
+main.js:290 [STEP 5] WBS fancytree init OK
+main.js:298 [STEP 6] panel2 resizer bound
+main.js:308 [STEP 1] Task panel OK
+main.js:315 [STEP 2] panel2-ready dispatched
+jquery-3.7.1.min.js:2  jQuery.Deferred exception: n is not defined ReferenceError: n is not defined
+    at I.renderColumns (http://10.177.129.188:8080/js/sidebar/task-wbs/ui/fancy-tree-init.js:259:22)
+    at I.nodeRenderTitle (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:124807)
+    at I.nodeRenderTitle (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:123616)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:123905)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I._callHook (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:34387)
+    at j.render (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:28059)
+    at I.render (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:41786) undefined
+ce.Deferred.exceptionHook @ jquery-3.7.1.min.js:2
+t @ jquery-3.7.1.min.js:2
+setTimeout
+(anonymous) @ jquery-3.7.1.min.js:2
+c @ jquery-3.7.1.min.js:2
+fireWith @ jquery-3.7.1.min.js:2
+fire @ jquery-3.7.1.min.js:2
+c @ jquery-3.7.1.min.js:2
+fireWith @ jquery-3.7.1.min.js:2
+s.<computed> @ jquery-3.7.1.min.js:2
+(anonymous) @ fancy-tree-init.js:187
+Promise.then
+source @ fancy-tree-init.js:185
+nodeLoadChildren @ jquery.fancytree-all-deps.js:5733
+treeLoad @ jquery.fancytree-all-deps.js:7544
+treeInit @ jquery.fancytree-all-deps.js:7451
+d @ jquery.fancytree-all-deps.js:1778
+treeInit @ jquery.fancytree-all-deps.js:13106
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+d @ jquery.fancytree-all-deps.js:1778
+treeInit @ jquery.fancytree-all-deps.js:12176
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+_init @ jquery.fancytree-all-deps.js:7917
+a.<computed> @ jquery.fancytree-all-deps.js:141
+_createWidget @ jquery.fancytree-all-deps.js:346
+_.<computed>.<computed> @ jquery.fancytree-all-deps.js:96
+(anonymous) @ jquery.fancytree-all-deps.js:279
+each @ jquery-3.7.1.min.js:2
+each @ jquery-3.7.1.min.js:2
+_.fn.<computed> @ jquery.fancytree-all-deps.js:271
+initWbsWithFancytree @ fancy-tree-init.js:176
+await in initWbsWithFancytree
+initWbsPanelWithFancytree @ wbs-panel-init.js:9
+(anonymous) @ main.js:287
+await in (anonymous)
+(anonymous) @ init-tree.js:98
+EventEmitter.emit @ inspire-tree.js:4919
+InspireTree.tree.emit @ inspire-tree.js:5507
+value @ inspire-tree-dom.min.js:8
+(anonymous) @ inspire-tree-dom.min.js:8
+o @ inspire-tree-dom.min.js:8
+gantt-view.js:171 [gantt-view] google loaded
+GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
+GeometryList.js:345 Number of meshes: 23
+GeometryList.js:346 Num Meshes on GPU: 26
+GeometryList.js:347 Net GPU geom memory used: 53208
+main.js:257 [WBS] roots: 3
+main.js:279 [STEP 4] WBS warmup OK (depth<=2, cap<=200)
+main.js:290 [STEP 5] WBS fancytree init OK
+main.js:298 [STEP 6] panel2 resizer bound
+main.js:308 [STEP 1] Task panel OK
+main.js:315 [STEP 2] panel2-ready dispatched
+jquery-3.7.1.min.js:2  jQuery.Deferred exception: n is not defined ReferenceError: n is not defined
+    at I.renderColumns (http://10.177.129.188:8080/js/sidebar/task-wbs/ui/fancy-tree-init.js:259:22)
+    at I.nodeRenderTitle (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:124807)
+    at I.nodeRenderTitle (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:123616)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:123905)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I._callHook (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:34387)
+    at j.render (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:28059)
+    at I.render (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:41786) undefined
+ce.Deferred.exceptionHook @ jquery-3.7.1.min.js:2
+t @ jquery-3.7.1.min.js:2
+setTimeout
+(anonymous) @ jquery-3.7.1.min.js:2
+c @ jquery-3.7.1.min.js:2
+fireWith @ jquery-3.7.1.min.js:2
+fire @ jquery-3.7.1.min.js:2
+c @ jquery-3.7.1.min.js:2
+fireWith @ jquery-3.7.1.min.js:2
+s.<computed> @ jquery-3.7.1.min.js:2
+(anonymous) @ fancy-tree-init.js:187
+Promise.then
+source @ fancy-tree-init.js:185
+nodeLoadChildren @ jquery.fancytree-all-deps.js:5733
+treeLoad @ jquery.fancytree-all-deps.js:7544
+treeInit @ jquery.fancytree-all-deps.js:7451
+d @ jquery.fancytree-all-deps.js:1778
+treeInit @ jquery.fancytree-all-deps.js:13106
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+d @ jquery.fancytree-all-deps.js:1778
+treeInit @ jquery.fancytree-all-deps.js:12176
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+_init @ jquery.fancytree-all-deps.js:7917
+a.<computed> @ jquery.fancytree-all-deps.js:141
+_createWidget @ jquery.fancytree-all-deps.js:346
+_.<computed>.<computed> @ jquery.fancytree-all-deps.js:96
+(anonymous) @ jquery.fancytree-all-deps.js:279
+each @ jquery-3.7.1.min.js:2
+each @ jquery-3.7.1.min.js:2
+_.fn.<computed> @ jquery.fancytree-all-deps.js:271
+initWbsWithFancytree @ fancy-tree-init.js:176
+await in initWbsWithFancytree
+initWbsPanelWithFancytree @ wbs-panel-init.js:9
+(anonymous) @ main.js:287
+await in (anonymous)
+(anonymous) @ init-tree.js:98
+EventEmitter.emit @ inspire-tree.js:4919
+InspireTree.tree.emit @ inspire-tree.js:5507
+value @ inspire-tree-dom.min.js:8
+(anonymous) @ inspire-tree-dom.min.js:8
+o @ inspire-tree-dom.min.js:8
+jquery-3.7.1.min.js:2  jQuery.Deferred exception: n is not defined ReferenceError: n is not defined
+    at I.renderColumns (http://10.177.129.188:8080/js/sidebar/task-wbs/ui/fancy-tree-init.js:259:22)
+    at I.nodeRenderTitle (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:124807)
+    at I.nodeRenderTitle (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:123616)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:123905)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I._callHook (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:34387)
+    at t (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:57123)
+    at https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:57836 undefined
+ce.Deferred.exceptionHook @ jquery-3.7.1.min.js:2
+t @ jquery-3.7.1.min.js:2
+setTimeout
+(anonymous) @ jquery-3.7.1.min.js:2
+c @ jquery-3.7.1.min.js:2
+fireWith @ jquery-3.7.1.min.js:2
+fire @ jquery-3.7.1.min.js:2
+c @ jquery-3.7.1.min.js:2
+fireWith @ jquery-3.7.1.min.js:2
+s.<computed> @ jquery-3.7.1.min.js:2
+(anonymous) @ fancy-tree-init.js:213
+Promise.then
+lazyLoad @ fancy-tree-init.js:211
+_trigger @ jquery.fancytree-all-deps.js:715
+_triggerNodeEvent @ jquery.fancytree-all-deps.js:5296
+load @ jquery.fancytree-all-deps.js:3097
+nodeSetExpanded @ jquery.fancytree-all-deps.js:7038
+l @ jquery.fancytree-all-deps.js:1775
+nodeSetExpanded @ jquery.fancytree-all-deps.js:13360
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+nodeToggleExpanded @ jquery.fancytree-all-deps.js:7363
+_callHook @ jquery.fancytree-all-deps.js:4241
+nodeClick @ jquery.fancytree-all-deps.js:5505
+_callHook @ jquery.fancytree-all-deps.js:4241
+(anonymous) @ jquery.fancytree-all-deps.js:8116
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery-3.7.1.min.js:2  jQuery.Deferred exception: n is not defined ReferenceError: n is not defined
+    at I.renderColumns (http://10.177.129.188:8080/js/sidebar/task-wbs/ui/fancy-tree-init.js:259:22)
+    at I.nodeRenderTitle (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:124807)
+    at I.nodeRenderTitle (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:123616)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:123905)
+    at I.nodeRender (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:75987)
+    at I._callHook (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:34387)
+    at t (https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:57123)
+    at https://cdn.jsdelivr.net/npm/jquery.fancytree@2/dist/jquery.fancytree-all-deps.min.js:1:57836 undefined
+ce.Deferred.exceptionHook @ jquery-3.7.1.min.js:2
+t @ jquery-3.7.1.min.js:2
+setTimeout
+(anonymous) @ jquery-3.7.1.min.js:2
+c @ jquery-3.7.1.min.js:2
+fireWith @ jquery-3.7.1.min.js:2
+fire @ jquery-3.7.1.min.js:2
+c @ jquery-3.7.1.min.js:2
+fireWith @ jquery-3.7.1.min.js:2
+s.<computed> @ jquery-3.7.1.min.js:2
+(anonymous) @ fancy-tree-init.js:213
+Promise.then
+lazyLoad @ fancy-tree-init.js:211
+_trigger @ jquery.fancytree-all-deps.js:715
+_triggerNodeEvent @ jquery.fancytree-all-deps.js:5296
+load @ jquery.fancytree-all-deps.js:3097
+nodeSetExpanded @ jquery.fancytree-all-deps.js:7038
+l @ jquery.fancytree-all-deps.js:1775
+nodeSetExpanded @ jquery.fancytree-all-deps.js:13360
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+nodeToggleExpanded @ jquery.fancytree-all-deps.js:7363
+_callHook @ jquery.fancytree-all-deps.js:4241
+nodeClick @ jquery.fancytree-all-deps.js:5505
+_callHook @ jquery.fancytree-all-deps.js:4241
+(anonymous) @ jquery.fancytree-all-deps.js:8116
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2

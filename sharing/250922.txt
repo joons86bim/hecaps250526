@@ -1,115 +1,67 @@
-// --- 현황 계산 헬퍼 ---
-const _countEnsureGuard = new Set();
+// --- helpers for counts/state -------------------------------------------------
 
-function sumCounts(cnt){
-  if (!cnt) return null;
-  const c = Number(cnt.c || 0), t = Number(cnt.t || 0), d = Number(cnt.d || 0);
-  return c + t + d;
-}
-
-// 해당 단일 노드의 pathKey 카운트를 온디맨드 보장/계산
+// 노드 1개(자기 자신만) 보장+계산
 async function ensureCountsForNode(node){
   const key = node?.data?.pathKey;
-  if (!key || _countEnsureGuard.has(key)) return;
-  _countEnsureGuard.add(key);
-  try{
-    await bulkEnsureForVisible([key]);
-    computePathState(key);
-    try { node.render(true); } catch {}
-  } finally {
-    // 너무 자주 돌지 않게 살짝 늦게 풀어준다
-    setTimeout(() => _countEnsureGuard.delete(key), 50);
-  }
+  if (!key) return;
+  // 이미 계산돼 있으면 스킵
+  if (getCounts(key)) return;
+  await bulkEnsureForVisible([key]);
+  computePathState(key);
 }
 
-// 브랜치 전체(자기+자식) 키 수집 → 보장+계산
-async function ensureCountsForSubtree(rootNode){
+// provider를 통해 서브트리 전체 pathKey 수집
+async function collectAllPathKeys(provider, startPath, cap = 20000) {
   const keys = [];
-  rootNode.visit(n => { const k = n.data?.pathKey; if (k) keys.push(k); });
-  if (!keys.length) return;
-  await bulkEnsureForVisible(keys);
-  keys.forEach(k => computePathState(k));
-  try { rootNode.render(true); } catch {}
+  const q = [startPath];
+  const seen = new Set();
+  while (q.length && cap > 0) {
+    const p = q.shift();
+    const k = toKey(p);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    keys.push(k);
+    let children = [];
+    try { children = await provider.childrenByPath(p) || []; } catch {}
+    cap -= children.length;
+    for (const ch of children) {
+      const cp = ch.__path || [...p, ch.text];
+      q.push(cp);
+    }
+  }
+  return keys;
 }
 
-// 모든 루트 서브트리 일괄 보장(샘플 데이터 소량일 때 유용)
+// 브랜치(자기+자식) 보장+계산 후, 그 브랜치만 리렌더
+async function ensureCountsForSubtree(provider, node){
+  const path = node?.data?.__path || buildPathFromNode(node);
+  if (!path) return;
+
+  const keys = await collectAllPathKeys(provider, path);
+  const uniq = Array.from(new Set(keys));
+  if (!uniq.length && node?.data?.pathKey) uniq.push(node.data.pathKey);
+
+  if (uniq.length) {
+    await bulkEnsureForVisible(uniq);
+    uniq.forEach(k => computePathState(k));
+  }
+
+  try { node.render(true); } catch {}
+}
+
+// 초기 1회: 모든 루트의 전 서브트리 보장+계산 후 전체 리렌더
 async function ensureCountsForAllRoots(tree, provider){
-  const root = tree.getRootNode();
-  const keys = [];
-  for (const n of (root.children || [])){
-    // provider를 이용해 실제 전체 서브트리 키를 수집
-    try {
-      const klist = await collectAllPathKeys(provider, n.data.__path || [n.title]);
-      keys.push(...klist);
-    } catch {}
+  const roots = tree.getRootNode().children || [];
+  const all = [];
+  for (const r of roots){
+    const p = r.data?.__path || [r.title];
+    const ks = await collectAllPathKeys(provider, p);
+    all.push(...ks);
   }
-  if (!keys.length) return;
-  await bulkEnsureForVisible(keys);
-  keys.forEach(k => computePathState(k));
+  const uniq = Array.from(new Set(all));
+  if (uniq.length) {
+    await bulkEnsureForVisible(uniq);
+    uniq.forEach(k => computePathState(k));
+  }
   try { tree.render(true, true); } catch {}
 }
-
-
-// 2) 현황 칼럼
-const $statusCell = $tds.eq(2);
-if (node.data?.dbId != null) {
-  $statusCell.text(""); // 말단은 빈칸
-} else {
-  const key  = node.data?.pathKey;
-  const st   = getPathState(key);
-  const cls  = stateToClass(st);
-  $(node.tr).removeClass("wbs-c wbs-t wbs-d wbs-td");
-  if (cls) $(node.tr).addClass(cls);
-
-  const counts = getCounts(key);
-  const total  = sumCounts(counts);
-
-  // (A) 계산이 끝난 경우: 그대로 출력
-  if (counts && total != null && (total > 0 || node.data.leafCount === 0)) {
-    $statusCell.addClass("text-center").html(`
-      <div class="wbs-status" style="justify-content: center;">
-        <div class="nums">
-          <span class="b c" title="시공">${counts.c ?? 0}</span>
-          <span class="b t" title="가설">${counts.t ?? 0}</span>
-          <span class="b d" title="철거">${counts.d ?? 0}</span>
-        </div>
-      </div>
-    `);
-  } else {
-    // (B) 아직 계산 안된 것으로 판단: 잠깐 '…' 넣고 비동기로 보장/계산 → 본인 행만 리렌더
-    $statusCell.text("…");
-    setTimeout(() => { ensureCountsForNode(node); }, 0);
-  }
-}
-
-
-loadChildren: function(event, data){
-  try {
-    ensureCountsForSubtree(data.node); // ← 추가
-  } catch(e) {
-    console.warn("[WBS] loadChildren compute failed:", e);
-  }
-},
-
-expand: async function(event, data) {
-  try {
-    await ensureCountsForSubtree(data.node); // ← 교체
-  } catch(e) {
-    console.warn("[WBS] expand compute failed:", e);
-  }
-}
-
-
-init: function(event, data){
-  setTimeout(async () => {
-    try {
-      const tree = data.tree;
-      // 루트들 전체 서브트리 키를 provider 통해 수집해서 한번에 보장/계산
-      await ensureCountsForAllRoots(tree, provider);
-    } catch(e) {
-      console.warn("[WBS] initial compute failed:", e);
-    }
-  }, 0);
-}
-
-

@@ -9,9 +9,8 @@ import { formatObjectLabel } from "../core/element-id.js";
 //import e from "express";
 
 const HIDDEN_KEYS = new Set();
-
+const _subtreeBusy = new Set();
 // --- 현황 계산 헬퍼 ---
-const _countEnsureGuard = new Set();
 
 function sumCounts(cnt){
   if (!cnt) return null;
@@ -54,19 +53,26 @@ async function ensureCountsForNode(node){
 // }
 // 브랜치(자기+자식) 보장+계산 후, 그 브랜치만 리렌더
 async function ensureCountsForSubtree(provider, node){
+  const key = node?.data?.pathKey;
   const path = node?.data?.__path || buildPathFromNode(node);
-  if (!path) return;
+  if (!key || !path) return;
 
-  const keys = await collectAllPathKeys(provider, path);
-  const uniq = Array.from(new Set(keys));
-  if (!uniq.length && node?.data?.pathKey) uniq.push(node.data.pathKey);
+  //중복 실행 방지 (짧게 락)
+  if (_subtreeBusy.has(key)) return;
+  _subtreeBusy.add(key);
 
-  if (uniq.length) {
-    await bulkEnsureForVisible(uniq);
-    uniq.forEach(k => computePathState(k));
+  try {
+    const keys = await collectAllPathKeys(provider, path);
+    const uniq = Array.from(new Set(keys.length ? keys : [key]));
+
+    if (uniq.length) {
+      await bulkEnsureForVisible(uniq);
+      uniq.forEach(k => computePathState(k));
+    }
+    try { node.render(true); } catch {}
+  } finally {
+    setTimeout(() => _subtreeBusy.delete(key), 50);
   }
-
-  try { node.render(true); } catch {}
 }
 
 
@@ -350,7 +356,7 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
         //   try { data.node.render(true); } catch {}
         // }
         // , 0);
-        ensureCountsForSubtree(provider, data.node);
+        await ensureCountsForSubtree(provider, data.node);
       } catch (e) {
         console.warn("[WBS] loadChildren compute failed:", e);
       }
@@ -433,7 +439,25 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
               .finally(() => { node.data.__countsRequested = false; } );
           }
         }
-      
+        
+        // --- 숫자/상태 불일치 자동 복구 (1회) ---
+        if (key) {
+          const total = counts ? ((counts.c || 0) + (counts.t || 0) + (counts.d || 0)) : 0;
+          const likelyWrong =
+            // 숫자는 0인데 (또는 아직 없음) 자식이 있고,
+            ((node.data?.leafCount || 0) > 0) &&
+            //상태는 이미 결정(=칠됨)되어 있는 경우
+            !!getPathState(key) &&
+            //아직 복구 시도 안했으면
+            !node.data.__countsRepairOnce;
+          
+          if (likelyWrong) {
+            node.data.__countsRepairOnce = true;
+            ensureCountsForSubtree(provider, node)
+              .then(() => { try { node.render(true); } catch {} })
+              .finally(() => { node.data.__countsRepairOnce = false; } );
+          }
+        }
         // const total  = sumCounts(counts);
 
         // // (A) 계산이 끝난 경우: 그대로 출력

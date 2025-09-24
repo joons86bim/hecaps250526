@@ -29,66 +29,7 @@ main.js:298 [STEP 6] panel2 resizer bound
 main.js:308 [STEP 1] Task panel OK
 main.js:315 [STEP 2] panel2-ready dispatched
 gantt-view.js:171 [gantt-view] google loaded
-CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-GeometryList.js:344 Total geometry size: 22.579627990722656 MB
-GeometryList.js:345 Number of meshes: 6614
-GeometryList.js:346 Num Meshes on GPU: 6647
-GeometryList.js:347 Net GPU geom memory used: 75519924
-main.js:257 [WBS] roots: 5
-main.js:279 [STEP 4] WBS warmup OK (depth<=2, cap<=200)
-main.js:290 [STEP 5] WBS fancytree init OK
-main.js:298 [STEP 6] panel2 resizer bound
-main.js:308 [STEP 1] Task panel OK
-main.js:315 [STEP 2] panel2-ready dispatched
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_12[title='지상1층']
 c @ jquery.fancytree-all-deps.js:1645
 error @ jquery.fancytree-all-deps.js:8278
 k @ jquery.fancytree-all-deps.js:1611
@@ -96,70 +37,15 @@ nodeRender @ jquery.fancytree-all-deps.js:12945
 (anonymous) @ jquery.fancytree-all-deps.js:1791
 _callHook @ jquery.fancytree-all-deps.js:4241
 render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 await in (anonymous)
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-jquery-3.7.1.min.js:2  Uncaught (in promise) Error: Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
-error @ jquery-3.7.1.min.js:2
-k @ jquery.fancytree-all-deps.js:1615
-nodeRender @ jquery.fancytree-all-deps.js:12945
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-_callHook @ jquery.fancytree-all-deps.js:4241
-render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
-visit @ jquery.fancytree-all-deps.js:3931
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_14[title='Zone 미지정']
 c @ jquery.fancytree-all-deps.js:1645
 error @ jquery.fancytree-all-deps.js:8278
 k @ jquery.fancytree-all-deps.js:1611
@@ -167,30 +53,16 @@ nodeRender @ jquery.fancytree-all-deps.js:12945
 (anonymous) @ jquery.fancytree-all-deps.js:1791
 _callHook @ jquery.fancytree-all-deps.js:4241
 render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
 await in (anonymous)
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-jquery-3.7.1.min.js:2  Uncaught (in promise) Error: Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
-error @ jquery-3.7.1.min.js:2
-k @ jquery.fancytree-all-deps.js:1615
-nodeRender @ jquery.fancytree-all-deps.js:12945
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-_callHook @ jquery.fancytree-all-deps.js:4241
-render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
-visit @ jquery.fancytree-all-deps.js:3931
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_15[title='기본 벽']
 c @ jquery.fancytree-all-deps.js:1645
 error @ jquery.fancytree-all-deps.js:8278
 k @ jquery.fancytree-all-deps.js:1611
@@ -198,36 +70,17 @@ nodeRender @ jquery.fancytree-all-deps.js:12945
 (anonymous) @ jquery.fancytree-all-deps.js:1791
 _callHook @ jquery.fancytree-all-deps.js:4241
 render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-jquery-3.7.1.min.js:2  Uncaught (in promise) Error: Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
-error @ jquery-3.7.1.min.js:2
-k @ jquery.fancytree-all-deps.js:1615
-nodeRender @ jquery.fancytree-all-deps.js:12945
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-_callHook @ jquery.fancytree-all-deps.js:4241
-render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
-visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 await in (anonymous)
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:302  Uncaught (in promise) TypeError: Cannot read properties of null (reading 'render')
-    at HTMLSpanElement.<anonymous> (fancy-tree-init.js:302:12)
-(anonymous) @ fancy-tree-init.js:302
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_16[title='RW1_400']
 c @ jquery.fancytree-all-deps.js:1645
 error @ jquery.fancytree-all-deps.js:8278
 k @ jquery.fancytree-all-deps.js:1611
@@ -235,30 +88,78 @@ nodeRender @ jquery.fancytree-all-deps.js:12945
 (anonymous) @ jquery.fancytree-all-deps.js:1791
 _callHook @ jquery.fancytree-all-deps.js:4241
 render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
 await in (anonymous)
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-jquery-3.7.1.min.js:2  Uncaught (in promise) Error: Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
-error @ jquery-3.7.1.min.js:2
-k @ jquery.fancytree-all-deps.js:1615
-nodeRender @ jquery.fancytree-all-deps.js:12945
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_17[title='[1353431]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
 (anonymous) @ jquery.fancytree-all-deps.js:1791
 _callHook @ jquery.fancytree-all-deps.js:4241
 render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
 await in (anonymous)
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_18[title='[1353432]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_19[title='[1353433]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_12[title='지상1층']
 c @ jquery.fancytree-all-deps.js:1645
 error @ jquery.fancytree-all-deps.js:8278
 k @ jquery.fancytree-all-deps.js:1611
@@ -266,30 +167,15 @@ nodeRender @ jquery.fancytree-all-deps.js:12945
 (anonymous) @ jquery.fancytree-all-deps.js:1791
 _callHook @ jquery.fancytree-all-deps.js:4241
 render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 await in (anonymous)
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-jquery-3.7.1.min.js:2  Uncaught (in promise) Error: Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
-error @ jquery-3.7.1.min.js:2
-k @ jquery.fancytree-all-deps.js:1615
-nodeRender @ jquery.fancytree-all-deps.js:12945
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-_callHook @ jquery.fancytree-all-deps.js:4241
-render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
-visit @ jquery.fancytree-all-deps.js:3931
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_14[title='Zone 미지정']
 c @ jquery.fancytree-all-deps.js:1645
 error @ jquery.fancytree-all-deps.js:8278
 k @ jquery.fancytree-all-deps.js:1611
@@ -297,34 +183,16 @@ nodeRender @ jquery.fancytree-all-deps.js:12945
 (anonymous) @ jquery.fancytree-all-deps.js:1791
 _callHook @ jquery.fancytree-all-deps.js:4241
 render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 await in (anonymous)
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-jquery-3.7.1.min.js:2  Uncaught (in promise) Error: Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_38[title='파일-스틸 배관']
-error @ jquery-3.7.1.min.js:2
-k @ jquery.fancytree-all-deps.js:1615
-nodeRender @ jquery.fancytree-all-deps.js:12945
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-_callHook @ jquery.fancytree-all-deps.js:4241
-render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
-visit @ jquery.fancytree-all-deps.js:3931
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
-await in (anonymous)
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_24[title='지하 1층 SL']
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_15[title='기본 벽']
 c @ jquery.fancytree-all-deps.js:1645
 error @ jquery.fancytree-all-deps.js:8278
 k @ jquery.fancytree-all-deps.js:1611
@@ -332,26 +200,512 @@ nodeRender @ jquery.fancytree-all-deps.js:12945
 (anonymous) @ jquery.fancytree-all-deps.js:1791
 _callHook @ jquery.fancytree-all-deps.js:4241
 render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
 await in (anonymous)
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-jquery-3.7.1.min.js:2  Uncaught (in promise) Error: Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_24[title='지하 1층 SL']
-error @ jquery-3.7.1.min.js:2
-k @ jquery.fancytree-all-deps.js:1615
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_16[title='RW1_400']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
 nodeRender @ jquery.fancytree-all-deps.js:12945
 (anonymous) @ jquery.fancytree-all-deps.js:1791
 _callHook @ jquery.fancytree-all-deps.js:4241
 render @ jquery.fancytree-all-deps.js:3417
-(anonymous) @ fancy-tree-init.js:299
+(anonymous) @ fancy-tree-init.js:356
 visit @ jquery.fancytree-all-deps.js:3931
 visit @ jquery.fancytree-all-deps.js:3938
 visit @ jquery.fancytree-all-deps.js:3938
-(anonymous) @ fancy-tree-init.js:299
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_17[title='[1353431]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_18[title='[1353432]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_19[title='[1353433]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_21[title='지상2층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_22[title='지상3층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_21[title='지상2층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_22[title='지상3층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_21[title='지상2층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_22[title='지상3층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_21[title='지상2층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_22[title='지상3층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_21[title='지상2층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_22[title='지상3층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_12[title='지상1층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_14[title='Zone 미지정']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_15[title='기본 벽']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_16[title='RW1_400']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_17[title='[1353431]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_18[title='[1353432]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_19[title='[1353433]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_12[title='지상1층']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_14[title='Zone 미지정']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_15[title='기본 벽']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev. row must have a tr, or be system root: FancytreeNode@_16[title='RW1_400']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+nodeRender @ jquery.fancytree-all-deps.js:12945
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_17[title='[1353431]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_18[title='[1353432]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
+await in (anonymous)
+dispatch @ jquery-3.7.1.min.js:2
+v.handle @ jquery-3.7.1.min.js:2
+jquery.fancytree-all-deps.js:1645  Fancytree assertion failed: prev.tr missing: FancytreeNode@_19[title='[1353433]']
+c @ jquery.fancytree-all-deps.js:1645
+error @ jquery.fancytree-all-deps.js:8278
+k @ jquery.fancytree-all-deps.js:1611
+(anonymous) @ jquery.fancytree-all-deps.js:12976
+nodeRender @ jquery.fancytree-all-deps.js:12984
+(anonymous) @ jquery.fancytree-all-deps.js:1791
+_callHook @ jquery.fancytree-all-deps.js:4241
+render @ jquery.fancytree-all-deps.js:3417
+(anonymous) @ fancy-tree-init.js:356
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:3938
+(anonymous) @ fancy-tree-init.js:356
 await in (anonymous)
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2

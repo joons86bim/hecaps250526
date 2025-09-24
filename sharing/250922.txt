@@ -69,7 +69,7 @@ function calcEyeStateForNode(node){
       anyHidden = true;
     }
   });
-  return allHidden ? "mixed" : "none";
+  return anyHidden ? "mixed" : "none";
 }
 
 export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
@@ -313,8 +313,17 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
 
   // 눈알 토글: 위임
   $("#wbs-tree").on("click", ".eye-toggle", async (e) => {
+    e.stopPropagation();
+    const el = e.currentTarget;
+    const node = $.ui.fancytree.getNode(el);
+    if (!node) return;
+
     const state = calcEyeStateForNode(node);
     const hideAll = (state === "none");
+
+    const path = node.data?.__path || buildPathFromNode(node);
+    const key  = node.data?.pathKey;
+    if (!key) return;
 
     const idsAll = await getAllDbIdsForPath(provider, path);
     if (!idsAll?.length) return;

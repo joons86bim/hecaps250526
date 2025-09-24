@@ -1,0 +1,69 @@
+/* 간트 패널은 #preview 내부에서만 레이아웃. (※ #preview의 left는 10-layout.css가 담당) */
+
+/* viewer 위/아래로 배치 */
+#gantt-splitter{
+  position: relative;
+  z-index: 2600;
+  flex: 0 0 4px;
+  height: 4px;
+  cursor: row-resize;
+  background: linear-gradient(to bottom,#e9edf3,#dfe5ee);
+  border-top: 1px solid #cfd6e3;
+  border-bottom: 1px solid #cfd6e3;
+}
+#gantt-pane{
+  flex: 0 0 var(--gantt-height, 320px);
+  min-height: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+  z-index: 2000;
+  position: relative;
+}
+.gantt-open-btn{ z-index: 3000; }
+
+.gantt-toolbar{
+  display:flex; align-items:center; gap:8px; padding:8px 10px;
+  border-bottom:1px solid #eef1f6; background:#f9fafb;
+}
+.gantt-toolbar .btn{
+  border:1px solid #d1d5db; background:#fff; padding:4px 10px; border-radius:6px; font-size:12px; cursor:pointer;
+}
+.gantt-toolbar .btn:hover{ background:#f3f4f6; }
+
+.gantt-range{ margin-left:8px; color:#6b7280; font-weight:500; font-size:12px; }
+
+/* 차트 */
+#gantt-chart{
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+#gantt-chart > div{ height:100% !important; }
+#gantt-chart svg text{ text-anchor: start !important; }
+
+/* 접힘 상태 */
+#preview.gantt-collapsed #gantt-pane{ flex-basis:0!important; height:0!important; border-top:none; }
+#preview.gantt-collapsed #gantt-splitter{ cursor: ns-resize; }
+.gantt-open-btn{
+  position:absolute; right:12px; bottom:12px; z-index:3000; display:none;
+  padding:6px 10px; font-size:12px; border:1px solid #d1d5db; border-radius:999px;
+  background:#fff; color:#111827; box-shadow:0 2px 8px rgba(0,0,0,.08); cursor:pointer;
+}
+.gantt-open-btn:hover{ background:#f3f4f6; }
+#preview.gantt-collapsed .gantt-open-btn{ display:inline-flex; }
+
+/* 상단 날짜축(커스텀) */
+.gantt-top-axis{
+  position: sticky; top: 0; z-index: 2;
+  background:#fafbff; border-bottom:1px solid #eef1f6;
+  height:26px; display:flex; align-items:center; overflow:hidden; padding:0 8px;
+  font-size:12px; color:#4b5563;
+}
+.gantt-top-axis .axis-track{ position:relative; height:100%; white-space:nowrap; will-change: transform; }
+.gantt-top-axis .axis-month{ display:inline-block; text-align:center; border-left:1px solid #e5e7eb; height:100%; line-height:26px; padding:0 4px; }

@@ -74,7 +74,7 @@
  #wbs-tree .eye-toggle:hover{ opacity:1; border-color:#e5e7eb; background:#f9fafb; }
  
  /* 상태 표시: hidden=강조, mixed=연함 */
- #wbs-tree .eye-toggle.hidden { opacity:1; }
+ /* #wbs-tree .eye-toggle.hidden { opacity:1; } */
  #wbs-tree .eye-toggle.mixed  { opacity:.5; }
  
  /* SVG 크기 */

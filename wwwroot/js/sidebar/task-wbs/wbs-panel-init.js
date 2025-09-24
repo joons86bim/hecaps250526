@@ -1,16 +1,10 @@
 import { buildWbsProviderLazy } from "./wbs/loader.js";
 import { initWbsWithFancytree } from "./ui/fancy-tree-init.js";
 
-export async function initWbsPanelWithFancytree(){
-  const viewer = window.viewer;
-  if (!viewer) return;
-
-  const { provider } = await buildWbsProviderLazy(viewer, {
-    primaryOrder: ["HEC.WBS", "HEC.Level", "HEC.Zone"],
-    source: "all",
-    bucketThreshold: 400,
-    bucketSize: 200
-  });
-
-  await initWbsWithFancytree(provider, { primaryOrder: ["HEC.WBS", "HEC.Level", "HEC.Zone"] });
+export async function initWbsPanelWithFancytree(provider, Options = {}) {
+  if (!provider || typeof provider.roots !== "function" || typeof provider.childrenByPath !== "function") {
+  throw new Error("initWbsPanelWithFancytree: invalid provider (roots/childrenByPath requied)");
+  }
+  const primaryOrder = Options.primaryOrder || ["HEC.WBS", "HEC.Level", "HEC.Zone"];
+  return initWbsWithFancytree(provider, { primaryOrder });
 }

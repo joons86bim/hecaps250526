@@ -53,25 +53,23 @@ function calcEyeStateForNode(node){
   const key = node.data?.pathKey;
   if (!key) return "none";
 
-  // 1) 부모중 하나라도 숨김이면 이 노드는 hidden으로 처리
+  // 1) 부모중 하나라도 숨김이면 이 노드는 mixed으로 처리
   const ancestors = node.getParentList(false, true) || [];
   for (const p of ancestors) {
     const k = p.data?.pathKey;
-    if (k && HIDDEN_KEYS.has(k)) return "hidden";
+    if (k && HIDDEN_KEYS.has(k)) return "mixed";
   }
 
   // 2) 자손 기준으로 혼합/숨김 판정
   let anyHidden = false;
-  let allHidden = true;
   node.visit(n => {
     const k = n.data?.pathKey;
     if (!k) return;
-    const hid = HIDDEN_KEYS.has(k);
-    anyHidden = anyHidden || hid;
-    allHidden = allHidden && hid;
+    if (HIDDEN_KEYS.has(k)) {
+      anyHidden = true;
+    }
   });
-  if (!anyHidden) return "none";
-  return allHidden ? "hidden" : "mixed";
+  return allHidden ? "mixed" : "none";
 }
 
 export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
@@ -173,18 +171,17 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
       if ($eye.length) {
         // 이미 눈알 있음 -> 상태 / 아이콘만 업데이트
         $eye
-          .removeClass("hidden mixed")
+          .removeClass("mixed none")
           .addClass(eyeState)
           .attr("title", "가시성 토글")
-          .html(eyeState === "hidden" ? EyeOff : Eye);
+          .html(Eye);
       } else {
         // 최초 1회: 문서아이콘은 숨기고 (삭제 X), 그 앞에 눈알 삽입
         const $iconSpan  = $nodeSpan.find("> .fancytree-icon");
         $iconSpan.hide().addClass("eye-hidden");
         $iconSpan.before(
           $(`<span class="eye-toggle ${eyeState}" title="가시성 토글">${
-            eyeState === "hidden" ? EyeOff : Eye
-          }</span>`)
+            Eye}</span>`)
         );
       }
       //기본 아이콘은 유지(숨김) 눈알은 그 앞에 삽입/갱신
@@ -256,7 +253,7 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
       } catch(e) {
         console.warn("[WBS] expand compute failed:", e);
       } finally {
-        try { data.tree.renderRows(data.node); } catch {}
+        try { data.tree.render(true, true); } catch {}
         // data.tree.render(true, true);
       }
     },
@@ -316,47 +313,68 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
 
   // 눈알 토글: 위임
   $("#wbs-tree").on("click", ".eye-toggle", async (e) => {
-    e.stopPropagation();
-    const el = e.currentTarget;
-    const node = $.ui.fancytree.getNode(el);
-    if (!node) return;
+    const state = calcEyeStateForNode(node);
+    const hideAll = (state === "none");
 
-    const viewer = window.viewer;
-    if (!viewer) return;
-
-    const path = node.data?.__path || buildPathFromNode(node);
-    const key  = node.data?.pathKey;
-    if (!key) return;
-
-    const isHidden = HIDDEN_KEYS.has(key);
-    const ids = await getAllDbIdsForPath(provider, path);
-    if (!ids || !ids.length) return;
+    const idsAll = await getAllDbIdsForPath(provider, path);
+    if (!idsAll?.length) return;
 
     try {
-      if (isHidden) {
-        viewer.show(ids);
-        // HIDDEN_KEYS.delete(key);
-        // 자신 + 보이는 자식 전부에서 숨김 해제
-        node.visit(n => { const k = n.data?.pathKey; if (k) HIDDEN_KEYS.delete(k); });
-      } else {
-        viewer.hide(ids);
-        // HIDDEN_KEYS.add(key);
-        // 자신 + 보이는 자식 전부를 숨김
+      if (hideAll) {
+        viewer.hide(idsAll);
         node.visit(n => { const k = n.data?.pathKey; if (k) HIDDEN_KEYS.add(k); });
+      } else {
+        viewer.show(idsAll);
+        node.visit(n => { const k = n.data?.pathKey; if (k) HIDDEN_KEYS.delete(k); });
       }
     } finally {
-      // 안전하게 렌더 (노드/부모/전체)
       try { node.visit(n => {try { n.render(true);} catch {} }); } catch {}
       try { node.getParentList(false, true).forEach(p => { try { p.render(true); } catch {} }); } catch {}
       try { $.ui.fancytree.getTree("#wbs-tree").render(true, true); } catch {}
     }
+    
+    // e.stopPropagation();
+    // const el = e.currentTarget;
+    // const node = $.ui.fancytree.getNode(el);
+    // if (!node) return;
+
+    // const viewer = window.viewer;
+    // if (!viewer) return;
+
+    // const path = node.data?.__path || buildPathFromNode(node);
+    // const key  = node.data?.pathKey;
+    // if (!key) return;
+
+    // const isHidden = HIDDEN_KEYS.has(key);
+    // const ids = await getAllDbIdsForPath(provider, path);
+    // if (!ids || !ids.length) return;
+
+    // try {
+    //   if (isHidden) {
+    //     viewer.show(ids);
+    //     // HIDDEN_KEYS.delete(key);
+    //     // 자신 + 보이는 자식 전부에서 숨김 해제
+    //     node.visit(n => { const k = n.data?.pathKey; if (k) HIDDEN_KEYS.delete(k); });
+    //   } else {
+    //     viewer.hide(ids);
+    //     // HIDDEN_KEYS.add(key);
+    //     // 자신 + 보이는 자식 전부를 숨김
+    //     node.visit(n => { const k = n.data?.pathKey; if (k) HIDDEN_KEYS.add(k); });
+    //   }
+    // } finally {
+    //   // 안전하게 렌더 (노드/부모/전체)
+    //   try { node.visit(n => {try { n.render(true);} catch {} }); } catch {}
+    //   try { node.getParentList(false, true).forEach(p => { try { p.render(true); } catch {} }); } catch {}
+    //   try { $.ui.fancytree.getTree("#wbs-tree").render(true, true); } catch {}
+    // }
   });
 
   // Task 갱신 → 현황 반영(배치 1회)
   window.__WBS_MARK_TASKS_CHANGED = function(){
     try {
       markTasksChanged();
-      // const tree = $.ui.fancytree.getTree("#wbs-tree");
+      const tree = $.ui.fancytree.getTree("#wbs-tree");
+      if (!tree) return;
       const keys = [];
       tree.getRootNode().visit(n => { if (n.data?.pathKey) keys.push(n.data.pathKey); });
       bulkEnsureForVisible(keys).then(() => {

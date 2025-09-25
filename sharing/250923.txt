@@ -1,64 +1,61 @@
-highlight.js:4 [hec] wbs/highlight.js loaded
-endpoints.js:236  getCdnRedirectUrl is deprecated and will be removed soon
-endp.getCdnRedirectUrl @ endpoints.js:236
-initializeCDN @ envinit.js:640
-Initializer @ envinit.js:759
-(anonymous) @ init-viewer.js:18
-initViewer @ init-viewer.js:17
-(anonymous) @ main.js:191
-await in (anonymous)
-(anonymous) @ main.js:325
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-(index):1 Autofocus processing was blocked because a document already has a focused element.
-GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
-GeometryList.js:345 Number of meshes: 23
-GeometryList.js:346 Num Meshes on GPU: 26
-GeometryList.js:347 Net GPU geom memory used: 53208
-CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
-GeometryList.js:345 Number of meshes: 23
-GeometryList.js:346 Num Meshes on GPU: 26
-GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:257 [WBS] roots: 3
-main.js:257 [WBS] roots: 3
-main.js:279 [STEP 4] WBS warmup OK (depth<=2, cap<=200)
-main.js:290 [STEP 5] WBS fancytree init OK
-main.js:298 [STEP 6] panel2 resizer bound
-main.js:308 [STEP 1] Task panel OK
-main.js:315 [STEP 2] panel2-ready dispatched
-main.js:279 [STEP 4] WBS warmup OK (depth<=2, cap<=200)
-main.js:290 [STEP 5] WBS fancytree init OK
-main.js:298 [STEP 6] panel2 resizer bound
-main.js:308 [STEP 1] Task panel OK
-main.js:315 [STEP 2] panel2-ready dispatched
-gantt-view.js:171 [gantt-view] google loaded
-gantt-view.js:171 [gantt-view] google loaded
-const D = window.__WBS_DEBUG;
-const t = D.tree();
-const n = t.getRootNode().children[1];
+} else {
+        const key  = node.data?.pathKey;
 
-const keys = await D.collectAllPathKeys(D.provider, n.data.__path);
-await D.bulkEnsureForVisible(keys);
-keys.forEach(D.computePathState);
+        //2-0 숫자 먼저 확보 (부모 직접값이 0이면 서브트리 합계 폴백 사용)
+        let counts = key && getCounts(key);
+        let sum0 = counts ? ((counts.c || 0) + (counts.t || 0) + (counts.d || 0)) : 0;
+        if ((!counts || sum0 === 0) && node.data?.__aggCounts) {
+          counts = node.data.__aggCounts;
+          sum0 = (counts.c || 0) + (counts.t || 0) + (counts.d || 0);
+        }
+        
+        //2-1 상태(색칠) = counts로 판정
+        const st   = calcStateByCounts(counts);
+        const cls  = stateToClass(st);
+        $(node.tr).removeClass("wbs-c wbs-t wbs-d wbs-td");
+        if (cls) $(node.tr).addClass(cls);
+        
+        //2-2 숫자 렌더
+        const agg   = node.data.__aggCounts;
 
-// 폴백 집계 강제
-await D.ensureCountsForSubtree(D.provider, n);
-console.log("top getCounts=", D.getCounts(n.data.pathKey), "agg=", n.data.__aggCounts);
+        if ((!counts || sum3(counts) === 0) && agg && sum3(agg) > 0) {
+          counts = agg;
+        }
 
-t.render(true);
-VM7839:11 top getCounts= {total: 12, c: 0, t: 0, d: 0, td: 12}c: 0d: 0t: 0td: 12total: 12[[Prototype]]: Object agg= {c: 0, t: 0, d: 0}c: 0d: 0t: 0[[Prototype]]: Object
-undefined
+        if (counts && (typeof counts.c === "number" || typeof counts.t === "number" || typeof counts.d === "number")) {
+          $statusCell
+            .addClass("text-center")
+            .html(`
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">${counts.c ?? 0}</span>
+                  <span class="b t" title="가설">${counts.t ?? 0}</span>
+                  <span class="b d" title="철거">${counts.d ?? 0}</span>
+                </div>
+              </div>
+            `);
+        } else {
+          $statusCell.text("…");
+          if (!node.data.__countsRequested && key) {
+            node.data.__countsRequested = true;
+            ensureCountsForNode(node)
+              .then(() => { try { node.render(true); } catch {} })
+              .finally(() => { node.data.__countsRequested = false; });
+          }
+        }
+        
+        // --- 숫자/상태 불일치 자동 복구 (1회) ---
+        if (key) {
+          const total = counts ? ((counts.c || 0) + (counts.t || 0) + (counts.d || 0)) : 0;
+          const likelyWrong =
+            ((node.data?.leafCount || 0) > 0) &&
+            total === 0 &&
+            !node.data.__countsRepairOnce;
+            if (likelyWrong) {
+              node.data.__countsRepairOnce = true;
+              ensureCountsForSubtree(provider, node)
+                .then(() => { try { node.render(true); } catch {} })
+                .finally(() => { node.data.__countsRepairOnce = false; } );
+            }
+        }
+      }

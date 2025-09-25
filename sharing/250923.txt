@@ -22,10 +22,6 @@ GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
 GeometryList.js:345 Number of meshes: 23
 GeometryList.js:346 Num Meshes on GPU: 26
 GeometryList.js:347 Net GPU geom memory used: 53208
-GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
-GeometryList.js:345 Number of meshes: 23
-GeometryList.js:346 Num Meshes on GPU: 26
-GeometryList.js:347 Net GPU geom memory used: 53208
 CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
 CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
 CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
@@ -44,282 +40,37 @@ main.js:290 [STEP 5] WBS fancytree init OK
 main.js:298 [STEP 6] panel2 resizer bound
 main.js:308 [STEP 1] Task panel OK
 main.js:315 [STEP 2] panel2-ready dispatched
-fancy-tree-init.js:355  [WBS] loadChildren compute failed: ReferenceError: providerdata is not defined
-    at HTMLTableElement.loadChildren (fancy-tree-init.js:353:32)
-    at _.<computed>.<computed>._trigger (jquery.fancytree-all-deps.js:715:14)
-    at I._triggerNodeEvent (jquery.fancytree-all-deps.js:5296:23)
-    at jquery.fancytree-all-deps.js:6003:12
-    at c (jquery-3.7.1.min.js:2:25304)
-    at Object.fireWith [as resolveWith] (jquery-3.7.1.min.js:2:26053)
-    at jquery.fancytree-all-deps.js:5924:17
-    at e (jquery-3.7.1.min.js:2:27028)
-    at t (jquery-3.7.1.min.js:2:27330)
-loadChildren @ fancy-tree-init.js:355
-_trigger @ jquery.fancytree-all-deps.js:715
-_triggerNodeEvent @ jquery.fancytree-all-deps.js:5296
-(anonymous) @ jquery.fancytree-all-deps.js:6003
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-(anonymous) @ jquery.fancytree-all-deps.js:5924
-e @ jquery-3.7.1.min.js:2
-t @ jquery-3.7.1.min.js:2
-setTimeout
-(anonymous) @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-fire @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-s.<computed> @ jquery-3.7.1.min.js:2
-(anonymous) @ fancy-tree-init.js:295
-Promise.then
-source @ fancy-tree-init.js:293
-nodeLoadChildren @ jquery.fancytree-all-deps.js:5733
-treeLoad @ jquery.fancytree-all-deps.js:7544
-treeInit @ jquery.fancytree-all-deps.js:7451
-d @ jquery.fancytree-all-deps.js:1778
-treeInit @ jquery.fancytree-all-deps.js:13106
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-d @ jquery.fancytree-all-deps.js:1778
-treeInit @ jquery.fancytree-all-deps.js:12176
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-_callHook @ jquery.fancytree-all-deps.js:4241
-_init @ jquery.fancytree-all-deps.js:7917
-a.<computed> @ jquery.fancytree-all-deps.js:141
-_createWidget @ jquery.fancytree-all-deps.js:346
-_.<computed>.<computed> @ jquery.fancytree-all-deps.js:96
-(anonymous) @ jquery.fancytree-all-deps.js:279
-each @ jquery-3.7.1.min.js:2
-each @ jquery-3.7.1.min.js:2
-_.fn.<computed> @ jquery.fancytree-all-deps.js:271
-initWbsWithFancytree @ fancy-tree-init.js:284
-await in initWbsWithFancytree
-initWbsPanelWithFancytree @ wbs-panel-init.js:9
-(anonymous) @ main.js:287
-await in (anonymous)
-(anonymous) @ init-tree.js:98
-EventEmitter.emit @ inspire-tree.js:4919
-InspireTree.tree.emit @ inspire-tree.js:5507
-value @ inspire-tree-dom.min.js:8
-(anonymous) @ inspire-tree-dom.min.js:8
-o @ inspire-tree-dom.min.js:8
-main.js:257 [WBS] roots: 3
 main.js:279 [STEP 4] WBS warmup OK (depth<=2, cap<=200)
 main.js:290 [STEP 5] WBS fancytree init OK
 main.js:298 [STEP 6] panel2 resizer bound
 main.js:308 [STEP 1] Task panel OK
 main.js:315 [STEP 2] panel2-ready dispatched
-fancy-tree-init.js:355  [WBS] loadChildren compute failed: ReferenceError: providerdata is not defined
-    at HTMLTableElement.loadChildren (fancy-tree-init.js:353:32)
-    at _.<computed>.<computed>._trigger (jquery.fancytree-all-deps.js:715:14)
-    at I._triggerNodeEvent (jquery.fancytree-all-deps.js:5296:23)
-    at jquery.fancytree-all-deps.js:6003:12
-    at c (jquery-3.7.1.min.js:2:25304)
-    at Object.fireWith [as resolveWith] (jquery-3.7.1.min.js:2:26053)
-    at jquery.fancytree-all-deps.js:5924:17
-    at e (jquery-3.7.1.min.js:2:27028)
-    at t (jquery-3.7.1.min.js:2:27330)
-loadChildren @ fancy-tree-init.js:355
-_trigger @ jquery.fancytree-all-deps.js:715
-_triggerNodeEvent @ jquery.fancytree-all-deps.js:5296
-(anonymous) @ jquery.fancytree-all-deps.js:6003
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-(anonymous) @ jquery.fancytree-all-deps.js:5924
-e @ jquery-3.7.1.min.js:2
-t @ jquery-3.7.1.min.js:2
-setTimeout
-(anonymous) @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-fire @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-s.<computed> @ jquery-3.7.1.min.js:2
-(anonymous) @ fancy-tree-init.js:295
-Promise.then
-source @ fancy-tree-init.js:293
-nodeLoadChildren @ jquery.fancytree-all-deps.js:5733
-treeLoad @ jquery.fancytree-all-deps.js:7544
-treeInit @ jquery.fancytree-all-deps.js:7451
-d @ jquery.fancytree-all-deps.js:1778
-treeInit @ jquery.fancytree-all-deps.js:13106
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-d @ jquery.fancytree-all-deps.js:1778
-treeInit @ jquery.fancytree-all-deps.js:12176
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-_callHook @ jquery.fancytree-all-deps.js:4241
-_init @ jquery.fancytree-all-deps.js:7917
-a.<computed> @ jquery.fancytree-all-deps.js:141
-_createWidget @ jquery.fancytree-all-deps.js:346
-_.<computed>.<computed> @ jquery.fancytree-all-deps.js:96
-(anonymous) @ jquery.fancytree-all-deps.js:279
-each @ jquery-3.7.1.min.js:2
-each @ jquery-3.7.1.min.js:2
-_.fn.<computed> @ jquery.fancytree-all-deps.js:271
-initWbsWithFancytree @ fancy-tree-init.js:284
-await in initWbsWithFancytree
-initWbsPanelWithFancytree @ wbs-panel-init.js:9
-(anonymous) @ main.js:287
-await in (anonymous)
-(anonymous) @ init-tree.js:98
-EventEmitter.emit @ inspire-tree.js:4919
-InspireTree.tree.emit @ inspire-tree.js:5507
-value @ inspire-tree-dom.min.js:8
-(anonymous) @ inspire-tree-dom.min.js:8
-o @ inspire-tree-dom.min.js:8
-main.js:279 [STEP 4] WBS warmup OK (depth<=2, cap<=200)
-main.js:290 [STEP 5] WBS fancytree init OK
-main.js:298 [STEP 6] panel2 resizer bound
-main.js:308 [STEP 1] Task panel OK
-main.js:315 [STEP 2] panel2-ready dispatched
-fancy-tree-init.js:355  [WBS] loadChildren compute failed: ReferenceError: providerdata is not defined
-    at HTMLTableElement.loadChildren (fancy-tree-init.js:353:32)
-    at _.<computed>.<computed>._trigger (jquery.fancytree-all-deps.js:715:14)
-    at I._triggerNodeEvent (jquery.fancytree-all-deps.js:5296:23)
-    at jquery.fancytree-all-deps.js:6003:12
-    at c (jquery-3.7.1.min.js:2:25304)
-    at Object.fireWith [as resolveWith] (jquery-3.7.1.min.js:2:26053)
-    at jquery.fancytree-all-deps.js:5924:17
-    at e (jquery-3.7.1.min.js:2:27028)
-    at t (jquery-3.7.1.min.js:2:27330)
-loadChildren @ fancy-tree-init.js:355
-_trigger @ jquery.fancytree-all-deps.js:715
-_triggerNodeEvent @ jquery.fancytree-all-deps.js:5296
-(anonymous) @ jquery.fancytree-all-deps.js:6003
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-(anonymous) @ jquery.fancytree-all-deps.js:5924
-e @ jquery-3.7.1.min.js:2
-t @ jquery-3.7.1.min.js:2
-setTimeout
-(anonymous) @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-fire @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-s.<computed> @ jquery-3.7.1.min.js:2
-(anonymous) @ fancy-tree-init.js:295
-Promise.then
-source @ fancy-tree-init.js:293
-nodeLoadChildren @ jquery.fancytree-all-deps.js:5733
-treeLoad @ jquery.fancytree-all-deps.js:7544
-treeInit @ jquery.fancytree-all-deps.js:7451
-d @ jquery.fancytree-all-deps.js:1778
-treeInit @ jquery.fancytree-all-deps.js:13106
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-d @ jquery.fancytree-all-deps.js:1778
-treeInit @ jquery.fancytree-all-deps.js:12176
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-_callHook @ jquery.fancytree-all-deps.js:4241
-_init @ jquery.fancytree-all-deps.js:7917
-a.<computed> @ jquery.fancytree-all-deps.js:141
-_createWidget @ jquery.fancytree-all-deps.js:346
-_.<computed>.<computed> @ jquery.fancytree-all-deps.js:96
-(anonymous) @ jquery.fancytree-all-deps.js:279
-each @ jquery-3.7.1.min.js:2
-each @ jquery-3.7.1.min.js:2
-_.fn.<computed> @ jquery.fancytree-all-deps.js:271
-initWbsWithFancytree @ fancy-tree-init.js:284
-await in initWbsWithFancytree
-initWbsPanelWithFancytree @ wbs-panel-init.js:9
-(anonymous) @ main.js:287
-await in (anonymous)
-(anonymous) @ init-tree.js:98
-EventEmitter.emit @ inspire-tree.js:4919
-InspireTree.tree.emit @ inspire-tree.js:5507
-value @ inspire-tree-dom.min.js:8
-(anonymous) @ inspire-tree-dom.min.js:8
-o @ inspire-tree-dom.min.js:8
 gantt-view.js:171 [gantt-view] google loaded
 gantt-view.js:171 [gantt-view] google loaded
-gantt-view.js:171 [gantt-view] google loaded
-fancy-tree-init.js:355  [WBS] loadChildren compute failed: ReferenceError: providerdata is not defined
-    at HTMLTableElement.loadChildren (fancy-tree-init.js:353:32)
-    at _.<computed>.<computed>._trigger (jquery.fancytree-all-deps.js:715:14)
-    at I._triggerNodeEvent (jquery.fancytree-all-deps.js:5296:23)
-    at jquery.fancytree-all-deps.js:6003:12
-    at c (jquery-3.7.1.min.js:2:25304)
-    at Object.fireWith [as resolveWith] (jquery-3.7.1.min.js:2:26053)
-    at jquery.fancytree-all-deps.js:5924:17
-    at e (jquery-3.7.1.min.js:2:27028)
-    at t (jquery-3.7.1.min.js:2:27330)
-loadChildren @ fancy-tree-init.js:355
-_trigger @ jquery.fancytree-all-deps.js:715
-_triggerNodeEvent @ jquery.fancytree-all-deps.js:5296
-(anonymous) @ jquery.fancytree-all-deps.js:6003
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-(anonymous) @ jquery.fancytree-all-deps.js:5924
-e @ jquery-3.7.1.min.js:2
-t @ jquery-3.7.1.min.js:2
-setTimeout
-(anonymous) @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-fire @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-s.<computed> @ jquery-3.7.1.min.js:2
-(anonymous) @ fancy-tree-init.js:321
-Promise.then
-lazyLoad @ fancy-tree-init.js:319
-_trigger @ jquery.fancytree-all-deps.js:715
-_triggerNodeEvent @ jquery.fancytree-all-deps.js:5296
-load @ jquery.fancytree-all-deps.js:3097
-nodeSetExpanded @ jquery.fancytree-all-deps.js:7038
-l @ jquery.fancytree-all-deps.js:1775
-nodeSetExpanded @ jquery.fancytree-all-deps.js:13360
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-nodeToggleExpanded @ jquery.fancytree-all-deps.js:7363
-_callHook @ jquery.fancytree-all-deps.js:4241
-nodeClick @ jquery.fancytree-all-deps.js:5505
-_callHook @ jquery.fancytree-all-deps.js:4241
-(anonymous) @ jquery.fancytree-all-deps.js:8116
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
-fancy-tree-init.js:355  [WBS] loadChildren compute failed: ReferenceError: providerdata is not defined
-    at HTMLTableElement.loadChildren (fancy-tree-init.js:353:32)
-    at _.<computed>.<computed>._trigger (jquery.fancytree-all-deps.js:715:14)
-    at I._triggerNodeEvent (jquery.fancytree-all-deps.js:5296:23)
-    at jquery.fancytree-all-deps.js:6003:12
-    at c (jquery-3.7.1.min.js:2:25304)
-    at Object.fireWith [as resolveWith] (jquery-3.7.1.min.js:2:26053)
-    at jquery.fancytree-all-deps.js:5924:17
-    at e (jquery-3.7.1.min.js:2:27028)
-    at t (jquery-3.7.1.min.js:2:27330)
-loadChildren @ fancy-tree-init.js:355
-_trigger @ jquery.fancytree-all-deps.js:715
-_triggerNodeEvent @ jquery.fancytree-all-deps.js:5296
-(anonymous) @ jquery.fancytree-all-deps.js:6003
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-(anonymous) @ jquery.fancytree-all-deps.js:5924
-e @ jquery-3.7.1.min.js:2
-t @ jquery-3.7.1.min.js:2
-setTimeout
-(anonymous) @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-fire @ jquery-3.7.1.min.js:2
-c @ jquery-3.7.1.min.js:2
-fireWith @ jquery-3.7.1.min.js:2
-s.<computed> @ jquery-3.7.1.min.js:2
-(anonymous) @ fancy-tree-init.js:321
-Promise.then
-lazyLoad @ fancy-tree-init.js:319
-_trigger @ jquery.fancytree-all-deps.js:715
-_triggerNodeEvent @ jquery.fancytree-all-deps.js:5296
-load @ jquery.fancytree-all-deps.js:3097
-nodeSetExpanded @ jquery.fancytree-all-deps.js:7038
-l @ jquery.fancytree-all-deps.js:1775
-nodeSetExpanded @ jquery.fancytree-all-deps.js:13360
-(anonymous) @ jquery.fancytree-all-deps.js:1791
-nodeToggleExpanded @ jquery.fancytree-all-deps.js:7363
-_callHook @ jquery.fancytree-all-deps.js:4241
-nodeClick @ jquery.fancytree-all-deps.js:5505
-_callHook @ jquery.fancytree-all-deps.js:4241
-(anonymous) @ jquery.fancytree-all-deps.js:8116
-dispatch @ jquery-3.7.1.min.js:2
-v.handle @ jquery-3.7.1.min.js:2
+const D = window.__WBS_DEBUG;
+const t = D.tree();
+const n = t.getRootNode().children[1];
+console.log("title=", n.title, "path=", n.data.__path, "pathKey=", n.data.pathKey);
+VM4991:4 title= 보 path= ['보']0: "보"length: 1lastIndex: 0lastItem: "보"[[Prototype]]: Array(0)at: ƒ at()concat: ƒ concat()constructor: ƒ Array()copyWithin: ƒ copyWithin()entries: ƒ entries()every: ƒ every()fill: ƒ fill()filter: ƒ filter()find: ƒ find()findIndex: ƒ findIndex()findLast: ƒ findLast()findLastIndex: ƒ findLastIndex()flat: ƒ flat()flatMap: ƒ flatMap()forEach: ƒ forEach()includes: ƒ includes()indexOf: ƒ indexOf()join: ƒ join()keys: ƒ keys()lastIndex: (...)lastIndexOf: ƒ lastIndexOf()lastItem: (...)length: 0map: ƒ map()pop: ƒ pop()push: ƒ push()reduce: ƒ reduce()reduceRight: ƒ reduceRight()reverse: ƒ reverse()shift: ƒ shift()slice: ƒ slice()some: ƒ some()sort: ƒ sort()splice: ƒ splice()toLocaleString: ƒ toLocaleString()toReversed: ƒ toReversed()toSorted: ƒ toSorted()toSpliced: ƒ toSpliced()toString: ƒ toString()unshift: ƒ unshift()values: ƒ values()with: ƒ with()Symbol(Symbol.iterator): ƒ values()Symbol(Symbol.unscopables): {at: true, copyWithin: true, entries: true, fill: true, find: true, …}get lastIndex: ƒ lastIndex()get lastItem: ƒ lastItem()set lastItem: ƒ lastItem(value)[[Prototype]]: Object pathKey= 보
+undefined
+const keys = await D.collectAllPathKeys(D.provider, n.data.__path);
+console.log("keys.length=", keys.length, keys);
+
+await D.bulkEnsureForVisible(keys);
+keys.forEach(D.computePathState);
+
+const table = keys.map(k => [k, D.getCounts(k)]);
+console.table(table);
+VM5649:2 keys.length= 21 (21) ['보', '보¦지상2층', '보¦지상3층', '보¦지상2층¦Zone 미지정', '보¦지상3층¦Zone 미지정', '보¦지상2층¦Zone 미지정¦보', '보¦지상3층¦Zone 미지정¦보', '보¦지상2층¦Zone 미지정¦보¦G1_300x700', '보¦지상3층¦Zone 미지정¦보¦G1_300x700', '보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353581]', '보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353594]', '보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353607]', '보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353619]', '보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353677]', '보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353712]', '보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353872]', '보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353885]', '보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353898]', '보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353910]', '보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353943]', '보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353972]']0: "보"1: "보¦지상2층"2: "보¦지상3층"3: "보¦지상2층¦Zone 미지정"4: "보¦지상3층¦Zone 미지정"5: "보¦지상2층¦Zone 미지정¦보"6: "보¦지상3층¦Zone 미지정¦보"7: "보¦지상2층¦Zone 미지정¦보¦G1_300x700"8: "보¦지상3층¦Zone 미지정¦보¦G1_300x700"9: "보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353581]"10: "보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353594]"11: "보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353607]"12: "보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353619]"13: "보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353677]"14: "보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353712]"15: "보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353872]"16: "보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353885]"17: "보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353898]"18: "보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353910]"19: "보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353943]"20: "보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353972]"length: 21lastIndex: (...)lastItem: (...)[[Prototype]]: Array(0)
+VM5649:8 (index)01(index)010'보'{…}1'보¦지상2층'{…}2'보¦지상3층'{…}3'보¦지상2층¦Zone 미지정'{…}4'보¦지상3층¦Zone 미지정'{…}5'보¦지상2층¦Zone 미지정¦보'{…}6'보¦지상3층¦Zone 미지정¦보'{…}7'보¦지상2층¦Zone 미지정¦보¦G1_300x700'{…}8'보¦지상3층¦Zone 미지정¦보¦G1_300x700'{…}9'보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353581]'undefined10'보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353594]'undefined11'보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353607]'undefined12'보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353619]'undefined13'보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353677]'undefined14'보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353712]'undefined15'보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353872]'undefined16'보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353885]'undefined17'보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353898]'undefined18'보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353910]'undefined19'보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353943]'undefined20'보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353972]'undefinedArray(21)0: (2) ['보', {…}]1: (2) ['보¦지상2층', {…}]2: (2) ['보¦지상3층', {…}]3: (2) ['보¦지상2층¦Zone 미지정', {…}]4: (2) ['보¦지상3층¦Zone 미지정', {…}]5: (2) ['보¦지상2층¦Zone 미지정¦보', {…}]6: (2) ['보¦지상3층¦Zone 미지정¦보', {…}]7: (2) ['보¦지상2층¦Zone 미지정¦보¦G1_300x700', {…}]8: (2) ['보¦지상3층¦Zone 미지정¦보¦G1_300x700', {…}]9: (2) ['보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353581]', undefined]10: (2) ['보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353594]', undefined]11: (2) ['보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353607]', undefined]12: (2) ['보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353619]', undefined]13: (2) ['보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353677]', undefined]14: (2) ['보¦지상2층¦Zone 미지정¦보¦G1_300x700¦[1353712]', undefined]15: (2) ['보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353872]', undefined]16: (2) ['보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353885]', undefined]17: (2) ['보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353898]', undefined]18: (2) ['보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353910]', undefined]19: (2) ['보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353943]', undefined]20: (2) ['보¦지상3층¦Zone 미지정¦보¦G1_300x700¦[1353972]', undefined]length: 21lastIndex: (...)lastItem: (...)[[Prototype]]: Array(0)
+undefined
+const idsDesc = await D.provider.getDbIdsForPath(n.data.__path, { includeDescendants:true, allowUnbuilt:true });
+console.log("dbIds(desc) =", idsDesc.length, idsDesc.slice(0, 10));
+VM6189:2 dbIds(desc) = 12 (10) [7516, 7517, 7518, 7519, 7520, 7521, 7536, 7537, 7538, 7539]0: 75161: 75172: 75183: 75194: 75205: 75216: 75367: 75378: 75389: 7539length: 10lastIndex: (...)lastItem: (...)[[Prototype]]: Array(0)
+undefined
+await D.ensureCountsForSubtree(D.provider, n);
+console.log("aggCounts on node =", n.data.__aggCounts);
+
+t.render(true);
+VM6573:2 aggCounts on node = {c: 0, t: 0, d: 0}c: 0d: 0t: 0[[Prototype]]: Object
+undefined

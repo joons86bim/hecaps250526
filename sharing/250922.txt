@@ -7,9 +7,22 @@ function addCounts(dst, src){
   dst.d = (dst.d || 0) + Number(src.d || 0);
 }
 
-function sum3(x){
-  return Number(x?.c || 0) + Number(x?.t || 0) + Number(x?.d || 0);
+// 화면 표시용으로 td를 T/D에 반영
+function toDisplayCounts(raw){
+  if (!raw) return null;
+  const td = Number(raw.td || 0);
+  return {
+    c: Number(raw.c || 0),
+    t: Number(raw.t || 0) + td,
+    d: Number(raw.d || 0) + td,
+  };
 }
+
+// “데이터가 있나?” 판정할 때 td도 포함해야 함
+function sum3(x){
+  return Number(x?.c || 0) + Number(x?.t || 0) + Number(x?.d || 0) + Number(x?.td || 0);
+}
+
 
 
 async function ensureCountsForSubtree(provider, node){
@@ -25,12 +38,12 @@ async function ensureCountsForSubtree(provider, node){
     const uniq = Array.from(new Set(keys.length ? keys : [key]));
 
     if (uniq.length) {
-      // 1) 매트릭스 보장/상태 계산
+      // 1) 보장 + 상태계산
       await bulkEnsureForVisible(uniq);
       uniq.forEach(k => computePathState(k));
 
-      // 2) "가장 데이터가 많은(=가장 깊은) 레벨"의 counts만 모아 합산 → 중복합산 방지
-      const levels = new Map(); // depth -> counts[]
+      // 2) 가장 깊은 레벨의 counts만 모아서 합산 (중복합산 방지)
+      const levels = new Map(); // depth -> rawCounts[]
       for (const k of uniq){
         const c = getCounts(k);
         if (c && sum3(c) > 0){
@@ -44,10 +57,14 @@ async function ensureCountsForSubtree(provider, node){
       if (levels.size){
         const depths = Array.from(levels.keys()).sort((a,b)=>a-b);
         const deepest = depths[depths.length - 1];
-        for (const c of (levels.get(deepest) || [])) addCounts(totals, c);
+
+        // 화며 표시 기준: td를 T/D 양쪽에 더해준다
+        for (const raw of (levels.get(deepest) || [])) {
+          const disp = toDisplayCounts(raw);
+          addCounts(totals, disp);
+        }
       }
-      // 3) 폴백 합계 저장 (렌더에서 필요시 사용)
-      node.data.__aggCounts = totals;
+      node.data.__aggCounts = totals; // 폴백 합계 저장
     }
 
     try { node.render(true); } catch {}
@@ -57,12 +74,13 @@ async function ensureCountsForSubtree(provider, node){
 }
 
 
-//2-2 카운트 렌더 (getCounts → __aggCounts 폴백)
-let counts = key && getCounts(key);
-const agg   = node.data.__aggCounts;
 
-if ((!counts || sum3(counts) === 0) && agg && sum3(agg) > 0) {
-  counts = agg;
+// 2-2 카운트 렌더: getCounts → 화면표시 변환(toDisplayCounts) + __aggCounts 폴백
+const raw = key && getCounts(key);
+let counts = toDisplayCounts(raw);
+
+if ((!counts || sum3(counts) === 0) && node.data.__aggCounts) {
+  counts = node.data.__aggCounts; // 서브트리 집계 폴백 사용
 }
 
 if (counts && (typeof counts.c === "number" || typeof counts.t === "number" || typeof counts.d === "number")) {
@@ -89,7 +107,6 @@ if (counts && (typeof counts.c === "number" || typeof counts.t === "number" || t
 
 
 
-
 const D = window.__WBS_DEBUG;
 const t = D.tree();
 const n = t.getRootNode().children[1];
@@ -98,8 +115,9 @@ const keys = await D.collectAllPathKeys(D.provider, n.data.__path);
 await D.bulkEnsureForVisible(keys);
 keys.forEach(D.computePathState);
 
-// 폴백 집계 강제
 await D.ensureCountsForSubtree(D.provider, n);
-console.log("top getCounts=", D.getCounts(n.data.pathKey), "agg=", n.data.__aggCounts);
+
+console.log("raw on top =", D.getCounts(n.data.pathKey));     // {total, c, t, d, td}
+console.log("agg on top =", n.data.__aggCounts);               // {c, t, d} (td 반영된 숫자)
 
 t.render(true);

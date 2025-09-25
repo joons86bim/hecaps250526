@@ -1,41 +1,82 @@
-// 루트가 비어있지 않을 때까지 짧게 재시도
-async function waitForNonEmptyRoots(provider, { tries = 5, idleMs = 120 } = {}) {
-  let roots = [];
-  for (let i = 0; i < tries; i++) {
-    try { roots = await provider.roots(); } catch { roots = []; }
-    if (Array.isArray(roots) && roots.length > 0) return roots;
+// 간단 sleep
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+// requestAnimationFrame 2틱 대기 (DOM/렌더 안정화)
+async function raf2(){ await new Promise(r => requestAnimationFrame(r)); await new Promise(r => requestAnimationFrame(r)); }
+
+// 루트가 "비어있지 않을 때"까지 기다림
+async function waitForNonEmptyRoots(provider, { tries=6, idleMs=160 } = {}){
+  for (let i=0; i<tries; i++){
+    try{
+      const roots = await provider.roots();
+      if (Array.isArray(roots) && roots.length > 0) return roots;
+    }catch{}
     await waitIdle(idleMs);
   }
-  // 그래도 비면 마지막 값(또는 []) 반환
-  return Array.isArray(roots) ? roots : [];
+  // 끝까지 비어있으면 마지막 값 반환(또는 [])
+  try{ return await provider.roots(); }catch{ return []; }
 }
 
-// Fancytree 초기화 직후 현황 카운트 더블 패스 (무조건 2회)
-// 0 0 0 이더라도 "정의되면 OK"로 간주 → '…' 잔상 제거
-async function wbsPostInit(provider) {
+// provider를 확실히 ‘프라임’(인덱스 구축) : 루트/자식 일부를 강제로 건드려서 내부 캐시/맵을 채움
+async function primeWbsProvider(provider, { maxDepth=2, cap=300, tries=3 } = {}){
+  let lastRoots = [];
+  for (let t=0; t<tries; t++){
+    lastRoots = await waitForNonEmptyRoots(provider, { tries: 4, idleMs: 120 });
+    if (!Array.isArray(lastRoots) || lastRoots.length === 0){
+      await waitIdle(120);
+      continue;
+    }
+
+    // BFS로 depth<=maxDepth 까지 childrenByPath 호출 + 경로→dbId 조회를 섞어서 강제 구축
+    const q = lastRoots.map(r => ({ path: [r.text], depth: 0 }));
+    let seen = 0;
+    while (q.length && seen < cap){
+      const { path, depth } = q.shift();
+      // 경로→dbId를 한 번이라도 만져서 맵이 올라오게 함
+      try{ provider.getDbIdsForPath?.(path, { includeDescendants:true, allowUnbuilt:true }); }catch{}
+
+      let kids = [];
+      try{ kids = await provider.childrenByPath(path) || []; }catch{ kids = []; }
+      seen += kids.length;
+
+      if (depth < maxDepth){
+        for (const ch of kids){
+          const np = ch.__path || [...path, ch.text];
+          q.push({ path: np, depth: depth+1 });
+        }
+      }
+    }
+
+    // 한 틱 쉬고 루트 재확인
+    await waitIdle(80);
+    const roots2 = await provider.roots().catch(() => []);
+    if (Array.isArray(roots2) && roots2.length > 0) return roots2; // 프라임 성공
+  }
+  return lastRoots;
+}
+
+// Fancytree 초기화 직후: 현황 집계 더블(또는 트리플) 패스
+async function wbsPostInit(provider){
+  // __WBS_DEBUG가 아직 주입 전일 수 있으니 잠깐 대기
+  for (let i=0; i<6; i++){
+    if (window.__WBS_DEBUG?.ensureCountsForAllRoots) break;
+    await waitIdle(60);
+  }
   const tree = $.ui.fancytree.getTree("#wbs-tree");
   const D = window.__WBS_DEBUG;
   if (!tree || !D?.ensureCountsForAllRoots) return;
 
+  // 1차
   await D.ensureCountsForAllRoots(tree, provider);
   try { tree.render(true, true); } catch {}
+  await raf2();
 
-  await waitIdle(100);
-
+  // 2차
   await D.ensureCountsForAllRoots(tree, provider);
   try { tree.render(true, true); } catch {}
-}
+  await raf2();
 
-
-await initWbsPanelWithFancytree(wbsProvider, {
-  primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"]
-});
-console.log("[STEP 5] WBS fancytree init OK");
-
-// ✅ 초기 집계는 무조건 2회 돌린다 (idempotent)
-//    첫 패스: 빠른 준비 / 둘째 패스: 비동기 인덱싱 지연 흡수
-try {
-  await wbsPostInit(wbsProvider);
-} catch (e) {
-  console.warn("[WBS] wbsPostInit failed:", e);
+  // 상황에 따라 3차(선택)
+  // await D.ensureCountsForAllRoots(tree, provider);
+  // try { tree.render(true, true); } catch {}
 }

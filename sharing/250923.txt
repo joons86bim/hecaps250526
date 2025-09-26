@@ -1,10 +1,50 @@
-// 스냅샷 존재/일치 확인
-const RAW = window.CURRENT_MODEL_URN;
-const SAFE = window.CURRENT_MODEL_SAFE_URN;
-console.log("[LS] hasRaw/hasSafe", !!localStorage.getItem(`hec:tasks:${RAW}`), !!localStorage.getItem(`hec:tasks:${SAFE}`));
-console.log("[mem] __SAVED_TASKS len =", (window.__SAVED_TASKS||[]).length);
+(() => {
+  const RAW = window.CURRENT_MODEL_URN;
+  const tasks = window.__SAVED_TASKS || [];
+  const it = viewer?.model?.getData?.()?.instanceTree;
 
-// 루트 집계 확인
+  const urns = new Set();
+  let totalLinks=0, wrongUrn=0, missingIds=0;
+  function hasDb(dbId) {
+    try { return it?.nodeAccess?.dbIdToIndex?.[dbId] != null; } catch { return false; }
+  }
+  (function walk(arr){
+    (arr||[]).forEach(t=>{
+      (t.linkedObjects||[]).forEach(o=>{
+        urns.add(o.urn);
+        totalLinks++;
+        if (o.urn !== RAW) wrongUrn++;
+        if (!hasDb(o.dbId)) missingIds++;
+      });
+      if (t.children) walk(t.children);
+    });
+  })(tasks);
+
+  console.log("[validate]", { urns: Array.from(urns), totalLinks, wrongUrn, missingIds });
+})();
+
+
+
+const provider = window.WBS_PROVIDER;
+const RAW = window.CURRENT_MODEL_URN;
+
+// "보" 브랜치에서 임의 dbId 하나 뽑기
+const ids = provider.getDbIdsForPath(["보"], { includeDescendants:true, allowUnbuilt:true }) || [];
+const any = ids[0];
+
+const mini = [{ no:"X", title:"SMOKE", status:"C", linkedObjects:[{ urn: RAW, dbId: any, text:"X" }] }];
+localStorage.setItem(`hec:tasks:${RAW}`,  JSON.stringify(mini));
+localStorage.setItem(`hec:tasks:${window.CURRENT_MODEL_SAFE_URN}`, JSON.stringify(mini));
+window.__SAVED_TASKS = mini;
+setSavedTaskData(mini);
+
+await initMatrix({ primaryOrder:["HEC.WBS","HEC.Level","HEC.Zone"], provider });
+markTasksChanged();
+await waitIdle(0);
+
 const D = window.__WBS_DEBUG;
-const tree = $.ui.fancytree.getTree("#wbs-tree");
-tree.getRootNode().children.forEach(n => console.log("[root counts]", n.title, D.getCounts(n.data.pathKey)));
+const k = toKey(["보"]);
+await bulkEnsureForVisible([k]);
+computePathState(k);
+console.log("SMOKE result:", D.getCounts(k));
+

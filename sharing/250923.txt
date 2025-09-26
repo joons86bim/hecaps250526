@@ -5,58 +5,37 @@ initializeCDN @ envinit.js:640
 Initializer @ envinit.js:759
 (anonymous) @ init-viewer.js:18
 initViewer @ init-viewer.js:17
-(anonymous) @ main.js:363
+(anonymous) @ main.js:327
 await in (anonymous)
-(anonymous) @ main.js:505
+(anonymous) @ main.js:449
 WebGLRenderer.js:29 THREE.WebGLRenderer 71
 WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
 WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
 CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-main.js:307 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 2
-main.js:307 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 3
 CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
 CustomViewerExtension.js:207 툴바 커스터마이징 완료.
 WebGLRenderer.js:29 THREE.WebGLRenderer 71
 WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
 WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-main.js:307 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 3
 (index):1 Autofocus processing was blocked because a document already has a focused element.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
 GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
 GeometryList.js:345 Number of meshes: 23
 GeometryList.js:346 Num Meshes on GPU: 26
 GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:420 [WBS] roots: 3
-main.js:420 [WBS] roots: 3
-main.js:453 [precompute] roots= 3
-main.js:456 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:456 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:456 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:466 [STEP 5] WBS fancytree init OK
-main.js:197 [hardSync] root: 구조벽 counts= {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:197 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:197 [hardSync] root: 슬라브 counts= {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:480 [STEP 6] panel2 resizer bound
-main.js:488 [STEP 1] Task panel OK
-main.js:495 [STEP 2] panel2-ready dispatched
-main.js:453 [precompute] roots= 3
-main.js:456 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:456 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:456 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:466 [STEP 5] WBS fancytree init OK
+main.js:377 [WBS] roots: 3
+main.js:160 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 3
+main.js:403 [precompute] roots= 3
+main.js:406 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
+main.js:406 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
+main.js:406 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
+main.js:413 [STEP 5] WBS fancytree init OK
+main.js:223 [hardSync] root: 구조벽 counts= {total: 8, c: 0, t: 0, d: 0, td: 0}
+main.js:223 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 0}
+main.js:223 [hardSync] root: 슬라브 counts= {total: 3, c: 0, t: 0, d: 0, td: 0}
+main.js:424 [STEP 6] panel2 resizer bound
+main.js:432 [STEP 1] Task panel OK
+main.js:439 [STEP 2] panel2-ready dispatched
 gantt-view.js:171 [gantt-view] google loaded
-main.js:197 [hardSync] root: 구조벽 counts= {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:197 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:197 [hardSync] root: 슬라브 counts= {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:480 [STEP 6] panel2 resizer bound
-main.js:488 [STEP 1] Task panel OK
-main.js:495 [STEP 2] panel2-ready dispatched
 CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
 CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
 CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
@@ -68,66 +47,39 @@ GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
 GeometryList.js:345 Number of meshes: 23
 GeometryList.js:346 Num Meshes on GPU: 26
 GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:420 [WBS] roots: 3
-main.js:453 [precompute] roots= 3
-main.js:456 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:456 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:456 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:466 [STEP 5] WBS fancytree init OK
-main.js:197 [hardSync] root: 구조벽 counts= {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:197 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:197 [hardSync] root: 슬라브 counts= {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:480 [STEP 6] panel2 resizer bound
-main.js:488 [STEP 1] Task panel OK
-main.js:495 [STEP 2] panel2-ready dispatched
-(() => {
-  const RAW = window.CURRENT_MODEL_URN;
-  const tasks = window.__SAVED_TASKS || [];
-  const it = viewer?.model?.getData?.()?.instanceTree;
-
-  const urns = new Set();
-  let totalLinks=0, wrongUrn=0, missingIds=0;
-  function hasDb(dbId) {
-    try { return it?.nodeAccess?.dbIdToIndex?.[dbId] != null; } catch { return false; }
-  }
-  (function walk(arr){
-    (arr||[]).forEach(t=>{
-      (t.linkedObjects||[]).forEach(o=>{
-        urns.add(o.urn);
-        totalLinks++;
-        if (o.urn !== RAW) wrongUrn++;
-        if (!hasDb(o.dbId)) missingIds++;
-      });
-      if (t.children) walk(t.children);
-    });
-  })(tasks);
-
-  console.log("[validate]", { urns: Array.from(urns), totalLinks, wrongUrn, missingIds });
-})();
-VM31280:23 [validate] {urns: Array(1), totalLinks: 35, wrongUrn: 0, missingIds: 0}missingIds: 0totalLinks: 35urns: ['dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z']wrongUrn: 0[[Prototype]]: Object
+main.js:377 [WBS] roots: 3
+main.js:160 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 3
+main.js:403 [precompute] roots= 3
+main.js:406 [precompute after MARK] 구조벽 {total: 8, c: 8, t: 0, d: 0, td: 0}
+main.js:406 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 12}
+main.js:406 [precompute after MARK] 슬라브 {total: 3, c: 3, t: 0, d: 0, td: 0}
+main.js:413 [STEP 5] WBS fancytree init OK
+main.js:223 [hardSync] root: 구조벽 counts= {total: 8, c: 8, t: 0, d: 0, td: 0}
+main.js:223 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 12}
+main.js:223 [hardSync] root: 슬라브 counts= {total: 3, c: 3, t: 0, d: 0, td: 0}
+main.js:424 [STEP 6] panel2 resizer bound
+main.js:432 [STEP 1] Task panel OK
+main.js:439 [STEP 2] panel2-ready dispatched
+DEBUG_WBS.lsInfo();
+main.js:541 [LS] RAW/SAFE: {RAW: 'dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z', SAFE: 'dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc_dmVyc2lvbj0z', hasRaw: true, hasSafe: true, memLen: 3}
 undefined
-const provider = window.WBS_PROVIDER;
-const RAW = window.CURRENT_MODEL_URN;
-
-// "보" 브랜치에서 임의 dbId 하나 뽑기
-const ids = provider.getDbIdsForPath(["보"], { includeDescendants:true, allowUnbuilt:true }) || [];
-const any = ids[0];
-
-const mini = [{ no:"X", title:"SMOKE", status:"C", linkedObjects:[{ urn: RAW, dbId: any, text:"X" }] }];
-localStorage.setItem(`hec:tasks:${RAW}`,  JSON.stringify(mini));
-localStorage.setItem(`hec:tasks:${window.CURRENT_MODEL_SAFE_URN}`, JSON.stringify(mini));
-window.__SAVED_TASKS = mini;
-setSavedTaskData(mini);
-
-await initMatrix({ primaryOrder:["HEC.WBS","HEC.Level","HEC.Zone"], provider });
-markTasksChanged();
-await waitIdle(0);
-
-const D = window.__WBS_DEBUG;
-const k = toKey(["보"]);
-await bulkEnsureForVisible([k]);
-computePathState(k);
-console.log("SMOKE result:", D.getCounts(k));
-VM31284:5 Uncaught TypeError: Cannot read properties of undefined (reading 'getDbIdsForPath')
-    at <anonymous>:5:22
-(anonymous) @ VM31284:5
+DEBUG_WBS.dumpExpectedVsCurrent();
+main.js:496 (index)rootexpectedcurrent(index)rootexpectedcurrent0'구조벽'{…}{…}1'보'{…}{…}2'슬라브'{…}{…}Array(3)
+Promise {<fulfilled>: undefined}
+DEBUG_WBS.sampleDbRootMap();
+main.js:526 [db 7496] -> root = 구조벽, status=시공
+main.js:526 [db 7497] -> root = 구조벽, status=시공
+main.js:526 [db 7498] -> root = 구조벽, status=시공
+main.js:526 [db 7499] -> root = 구조벽, status=시공
+main.js:526 [db 7532] -> root = 구조벽, status=시공
+main.js:526 [db 7533] -> root = 구조벽, status=시공
+main.js:526 [db 7534] -> root = 구조벽, status=시공
+main.js:526 [db 7535] -> root = 구조벽, status=시공
+main.js:526 [db 7506] -> root = 슬라브, status=시공
+main.js:526 [db 7524] -> root = 슬라브, status=시공
+main.js:526 [db 7544] -> root = 슬라브, status=시공
+main.js:526 [db 7516] -> root = 보, status=가설
+main.js:526 [db 7517] -> root = 보, status=가설
+main.js:526 [db 7518] -> root = 보, status=가설
+main.js:526 [db 7519] -> root = 보, status=가설
+Promise {<fulfilled>: undefined}

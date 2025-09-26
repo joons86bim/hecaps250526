@@ -234,13 +234,17 @@ const SAMPLE_TASK_DATA = [
   { no: "2", selectOptions: ["시공", "가설", "철거"], selectedOption: "시공", title: "Task B", start: "", end: "", linkedObjects: [] },
 ];
 
-function safeUrn(urn) { return urn.replace(/[^a-zA-Z0-9]/g, "_"); }
+// 슬래시 등 비영문 포함 URN을 UI/집계용으로 안전 문자열로 변환
+function safeUrn(urn) { return String(urn || "").replace(/[^a-zA-Z0-9]/g, "_"); }
+
+// ✅ 항상 SAFE_URN으로 통일해서 주입
 function fillUrnRecursive(task, defaultUrn) {
+  const urnToUse = defaultUrn || window.CURRENT_MODEL_SAFE_URN || window.CURRENT_MODEL_URN;
   if (Array.isArray(task.linkedObjects)) {
-    task.linkedObjects.forEach((obj) => { if (!obj.urn) obj.urn = defaultUrn || window.CURRENT_MODEL_URN; });
+    for (const obj of task.linkedObjects) obj.urn = urnToUse;
   }
   if (Array.isArray(task.children)) {
-    task.children.forEach((child) => fillUrnRecursive(child, defaultUrn));
+    for (const child of task.children) fillUrnRecursive(child, urnToUse);
   }
 }
 
@@ -345,20 +349,20 @@ window.addEventListener("resize", _.throttle(() => {
 
     // 4) 모델 선택
     initTree("#tree", async (versionId) => {
-      const urn = window.btoa(versionId).replace(/=/g, "");
-      window.CURRENT_MODEL_URN = urn;
-      window.CURRENT_MODEL_SAFE_URN = safeUrn(urn);
+      const rawUrn = window.btoa(versionId).replace(/=/g, "");
+      window.CURRENT_MODEL_URN = rawUrn;
+      window.CURRENT_MODEL_SAFE_URN = safeUrn(rawUrn);
 
       // 기존 WBS 파괴
       try { $.ui.fancytree.getTree("#wbs-tree")?.destroy(); } catch {}
       $("#wbs-group-content").empty();
 
-      // 태스크 로드(저장은 여기선 하지 않음)
+      // 태스크 로드(아직 저장 X)
       taskData.length = 0;
       await loadTaskDataIfExists();
 
       // 모델 로드 & 뷰어준비 & 카메라 안정화
-      await loadModel(viewer, urn);
+      await loadModel(viewer, rawUrn);
       await waitViewerReady(viewer);
       await focusCameraAndWait(viewer);
       viewer.resize();
@@ -385,10 +389,11 @@ window.addEventListener("resize", _.throttle(() => {
         wbsProvider = { __provider:true, roots:async()=>[], childrenByPath:async()=>[] };
       }
 
-      // ────────── ★ 핵심 순서: 첫 프레임 0 방지 ──────────
-      // (0) 태스크 URN 보정 + 저장(단 1회)
-      taskData.forEach((t) => fillUrnRecursive(t, urn));
-      setSavedTaskData(taskData);
+      /* ────────── ★ 핵심 순서: SAFE_URN 통일 → 스냅샷 저장 → 매트릭스/집계 ────────── */
+      // (0) 태스크 URN을 **항상 SAFE** 로 통일 후 저장
+      const SAFE_URN = window.CURRENT_MODEL_SAFE_URN;
+      taskData.forEach((t) => fillUrnRecursive(t, SAFE_URN));
+      setSavedTaskData(taskData); // 저장 스냅샷에는 SAFE_URN만 존재
 
       // (1) 매트릭스 초기화
       const PRIMARY = ["HEC.WBS","HEC.Level","HEC.Zone"];
@@ -414,7 +419,7 @@ window.addEventListener("resize", _.throttle(() => {
           console.log("[precompute after MARK]", r.text, getCounts(k));
         });
       } catch {}
-      // ────────────────────────────────────────────
+      /* ────────────────────────────────────────────────────────────────────────── */
 
       // FancyTree 초기화
       try {

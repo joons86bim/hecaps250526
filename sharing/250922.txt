@@ -1,14 +1,64 @@
-async function waitForMatrixPrimed(provider, timeoutMs = 2000) {
-  const roots = (await provider.roots().catch(()=>[])) || [];
-  const keys  = roots.map(r => (window.__WBS_DEBUG?.toKey ? window.__WBS_DEBUG.toKey([r.text]) : toKey([r.text])));
-  const t0 = performance.now();
-  while (performance.now() - t0 < timeoutMs) {
-    const ready = keys.some(k => {
-      const c = (window.getCounts && window.getCounts(k)) || (window.__WBS_DEBUG?.getCounts?.(k));
-      return c && ((c.c|0)+(c.t|0)+(c.d|0)+(c.td|0)) > 0;
+// 전역 폴백 저장소
+window.__FA_FALLBACK_BY_KEY = Object.create(null);
+
+function keyFromPath(path) {
+  const D = window.__WBS_DEBUG;
+  return (D?.toKey ? D.toKey(path) : toKey(path));
+}
+
+async function installFallbackCounts(tree, provider) {
+  const tasks = window.__SAVED_TASKS || [];
+  if (!tree || !provider || !tasks.length) return;
+
+  const S = buildStatusSetsFromTasks(tasks);
+  console.log("[FA] sets size =", { C:S.C.size, T:S.T.size, D:S.D.size, TD:S.TD.size });
+
+  const visit = (node, path) => {
+    const counts = calcCountsForPath(provider, path, S);
+    node.data = node.data || {};
+    node.data.__aggCounts = counts;  // 트리 노드 폴백
+    // ★ 키→폴백 매핑 저장 (렌더러가 getCounts만 볼 때를 대비)
+    const k = keyFromPath(path);
+    window.__FA_FALLBACK_BY_KEY[k] = counts;
+
+    (node.children||[]).forEach(ch => {
+      const next = ch.data?.__path || [...path, ch.title];
+      visit(ch, next);
     });
-    if (ready) return true;
-    await new Promise(r => requestAnimationFrame(r));
-  }
-  return false;
+  };
+
+  const root = tree.getRootNode();
+  (root.children||[]).forEach(n => visit(n, n.data?.__path || [n.title]));
+
+  try { tree.render(true, true); } catch {}
+  requestAnimationFrame(() => { try { tree.render(true, true); } catch {} });
+  console.log("[FA] fallback counts installed");
+}
+
+
+function patchGetCountsToUseFallback() {
+  const D = window.__WBS_DEBUG;
+  if (!D?.getCounts) return;
+  if (D.__patchedForFallback) return; // 중복 방지
+
+  const orig = D.getCounts.bind(D);
+  D.__origGetCounts = orig;           // 디버깅용 원본 보관
+
+  D.getCounts = function (k) {
+    const r = orig(k) || {};
+    const sum = ((r.c|0) + (r.t|0) + (r.d|0) + (r.td|0));
+    if (sum > 0) return r; // 매트릭스 집계 준비되면 그대로 사용
+
+    // 매트릭스가 아직 0이면, 우리가 계산해 둔 폴백을 사용
+    const fb = window.__FA_FALLBACK_BY_KEY?.[k];
+    if (fb) {
+      // total은 원본/폴백 중 큰 값 사용 (원본 total은 이미 맞는 경우가 많음)
+      const total = Math.max((r.total|0), (fb.total|0));
+      return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 };
+    }
+    return r;
+  };
+
+  D.__patchedForFallback = true;
+  console.log("[FA] getCounts patched for fallback");
 }

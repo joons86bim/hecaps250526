@@ -5,9 +5,9 @@ initializeCDN @ envinit.js:640
 Initializer @ envinit.js:759
 (anonymous) @ init-viewer.js:18
 initViewer @ init-viewer.js:17
-(anonymous) @ main.js:358
+(anonymous) @ main.js:461
 await in (anonymous)
-(anonymous) @ main.js:488
+(anonymous) @ main.js:590
 WebGLRenderer.js:29 THREE.WebGLRenderer 71
 WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
 WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
@@ -22,13 +22,13 @@ GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
 GeometryList.js:345 Number of meshes: 23
 GeometryList.js:346 Num Meshes on GPU: 26
 GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:408 [WBS] roots: 3
-main.js:191 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 3
-main.js:424 [reply] setSavedTaskData done
-main.js:56  [matrix] priming timed out (will proceed, counts may be zero on first frame)
-ensureMatrixFromTasks @ main.js:56
+main.js:511 [WBS] roots: 3
+main.js:169 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 3
+main.js:527 [reply] setSavedTaskData done
+main.js:245  [matrix] priming timed out (counts may be zero on first frame)
+ensureMatrixFromTasks @ main.js:245
 await in ensureMatrixFromTasks
-(anonymous) @ main.js:427
+(anonymous) @ main.js:534
 await in (anonymous)
 (anonymous) @ init-tree.js:98
 EventEmitter.emit @ inspire-tree.js:4919
@@ -36,16 +36,17 @@ InspireTree.tree.emit @ inspire-tree.js:5507
 value @ inspire-tree-dom.min.js:8
 (anonymous) @ inspire-tree-dom.min.js:8
 o @ inspire-tree-dom.min.js:8
-main.js:438 [precompute] kick
-main.js:442 [precompute] roots= 3
-main.js:445 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:445 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:445 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:452 [STEP 5] WBS fancytree init OK
-main.js:254 [hardSync] root: 구조벽 counts= {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:254 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:254 [hardSync] root: 슬라브 counts= {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:463 [STEP 6] panel2 resizer bound
-main.js:471 [STEP 1] Task panel OK
-main.js:478 [STEP 2] panel2-ready dispatched
+main.js:543 [precompute] roots= 3
+main.js:546 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
+main.js:546 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
+main.js:546 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
+main.js:553 [STEP 5] WBS fancytree init OK
+main.js:389 [FA] sets size = {C: 11, T: 12, D: 12, TD: 0}C: 11D: 12T: 12TD: 0[[Prototype]]: Object
+main.js:405 [FA] fallback counts installed
+main.js:279 [hardSync] root: 구조벽 counts= {total: 8, c: 0, t: 0, d: 0, td: 0}
+main.js:279 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 0}
+main.js:279 [hardSync] root: 슬라브 counts= {total: 3, c: 0, t: 0, d: 0, td: 0}
+main.js:565 [STEP 6] panel2 resizer bound
+main.js:573 [STEP 1] Task panel OK
+main.js:580 [STEP 2] panel2-ready dispatched
 gantt-view.js:171 [gantt-view] google loaded

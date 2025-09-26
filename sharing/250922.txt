@@ -1,47 +1,29 @@
-// ── [추가] WBS 집계 하드 싱크: 루트 전체 서브트리 키 수집 → 보장 → 상태계산 → 강제 렌더
-async function hardSyncCountsForRoots(tree, provider, { cap = 10000 } = {}) {
-  if (!tree || !provider || !window.__WBS_DEBUG) return;
-  const D = window.__WBS_DEBUG;
-
-  const roots = tree.getRootNode().children || [];
-  if (!roots.length) return;
-
-  // 1) 루트들의 전체 서브트리 pathKey 수집
-  const all = [];
-  for (const r of roots) {
-    const p = r.data?.__path || [r.title];
-    try {
-      const ks = await D.collectAllPathKeys(provider, p, cap);
-      all.push(...ks);
-    } catch (e) {
-      console.warn("[hardSync] collectAllPathKeys failed for", p, e);
+async function loadTaskDataIfExists() {
+  try {
+    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
+    const url = `/api/tasks?urn=${safeUrnVal}`;
+    const resp = await fetch(url, { credentials: "include" });
+    if (resp.ok) {
+      const data = await resp.json();
+      taskData.length = 0;
+      setSavedTaskData([]);
+      
+      if (Array.isArray(data) && data.length > 0) {
+        data.forEach((item) => taskData.push(item));
+        setSavedTaskData(taskData);
+      } else {
+        SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+        setSavedTaskData(taskData);
+      }
+    } else {
+      taskData.length = 0;
+      SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+      setSavedTaskData(taskData);
     }
-  }
-  const uniq = Array.from(new Set(all));
-  if (!uniq.length) return;
-
-  // 2) 보장 + 상태계산
-  try {
-    await D.bulkEnsureForVisible(uniq);
-    uniq.forEach(D.computePathState);
-  } catch (e) {
-    console.warn("[hardSync] ensure/compute failed:", e);
-  }
-
-  // 3) sanity log (루트별 count 확인)
-  try {
-    for (const r of roots) {
-      const k = r.data?.pathKey;
-      const c = k && D.getCounts?.(k);
-      console.log("[hardSync] root:", r.title, "counts=", c);
-    }
-  } catch {}
-
-  // 4) 강제 렌더(두 번: 레이아웃/페인트 파이프라인 안정화용)
-  try {
-    tree.render(true, true);
-    requestAnimationFrame(() => { try { tree.render(true, true); } catch {} });
-  } catch (e) {
-    console.warn("[hardSync] render failed:", e);
+  } catch (err) {
+    taskData.length = 0;
+    SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+    setSavedTaskData(taskData);
+    console.warn("task 데이터를 불러오지 못했습니다. 샘플로 초기화:", err);
   }
 }

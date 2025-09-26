@@ -1,53 +1,47 @@
-// STEP 4: 워밍업 + DBID 매핑 씨드
-async function seedDbIdMappings(provider, { maxDepth = 2, cap = 600 } = {}) {
-  const roots = await provider.roots();
-  const q = (roots || []).map(r => ({ path: [r.text], depth: 0 }));
-  let visited = 0, mapped = 0;
+// ── [추가] WBS 집계 하드 싱크: 루트 전체 서브트리 키 수집 → 보장 → 상태계산 → 강제 렌더
+async function hardSyncCountsForRoots(tree, provider, { cap = 10000 } = {}) {
+  if (!tree || !provider || !window.__WBS_DEBUG) return;
+  const D = window.__WBS_DEBUG;
 
-  while (q.length && visited < cap) {
-    const { path, depth } = q.shift();
-    visited++;
+  const roots = tree.getRootNode().children || [];
+  if (!roots.length) return;
 
-    // ❗여기가 핵심: 경로→dbId 맵을 먼저 씨드
+  // 1) 루트들의 전체 서브트리 pathKey 수집
+  const all = [];
+  for (const r of roots) {
+    const p = r.data?.__path || [r.title];
     try {
-      const ids = provider.getDbIdsForPath?.(path, { includeDescendants: true, allowUnbuilt: true }) || [];
-      if (Array.isArray(ids)) mapped += 1;
-    } catch {}
-
-    // 자식 큐잉
-    if (depth < maxDepth) {
-      let kids = [];
-      try { kids = await provider.childrenByPath(path) || []; } catch {}
-      for (const ch of kids) {
-        const np = ch.__path || [...path, ch.text];
-        q.push({ path: np, depth: depth + 1 });
-      }
+      const ks = await D.collectAllPathKeys(provider, p, cap);
+      all.push(...ks);
+    } catch (e) {
+      console.warn("[hardSync] collectAllPathKeys failed for", p, e);
     }
   }
-  console.log("[STEP 4] WBS warmup+seed OK (visited=", visited, ", mappedPaths=", mapped, ")");
-}
+  const uniq = Array.from(new Set(all));
+  if (!uniq.length) return;
 
-
-
-try {
-  await initWbsPanelWithFancytree(wbsProvider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
-  console.log("[STEP 5] WBS fancytree init OK");
-
-  // 루트 대상 더블패스: 0 0 0도 '준비 완료'로 취급 (객체만 있으면 OK)
-  const tree = $.ui.fancytree.getTree("#wbs-tree");
-  if (tree && window.__WBS_DEBUG?.ensureCountsForAllRoots) {
-    const roots = tree.getRootNode().children || [];
-    const need =
-      !roots.some(n => {
-        const k = n.data?.pathKey;
-        const c = k && window.__WBS_DEBUG.getCounts?.(k);
-        return c && typeof c === "object";
-      });
-    if (need) {
-      await window.__WBS_DEBUG.ensureCountsForAllRoots(tree, wbsProvider);
-      tree.render(true, true);
-    }
+  // 2) 보장 + 상태계산
+  try {
+    await D.bulkEnsureForVisible(uniq);
+    uniq.forEach(D.computePathState);
+  } catch (e) {
+    console.warn("[hardSync] ensure/compute failed:", e);
   }
-} catch (e) {
-  console.warn("[STEP 5] WBS fancytree init failed:", e);
+
+  // 3) sanity log (루트별 count 확인)
+  try {
+    for (const r of roots) {
+      const k = r.data?.pathKey;
+      const c = k && D.getCounts?.(k);
+      console.log("[hardSync] root:", r.title, "counts=", c);
+    }
+  } catch {}
+
+  // 4) 강제 렌더(두 번: 레이아웃/페인트 파이프라인 안정화용)
+  try {
+    tree.render(true, true);
+    requestAnimationFrame(() => { try { tree.render(true, true); } catch {} });
+  } catch (e) {
+    console.warn("[hardSync] render failed:", e);
+  }
 }

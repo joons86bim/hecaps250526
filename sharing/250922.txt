@@ -1,37 +1,40 @@
-// /wwwroot/js/main.js  — SAFE MODE: Tasks/WBS/Gantt 모두 차단하여 프리즈 원인 격리
+// /wwwroot/js/main.js  — 선택 최적화 버전 (선계산 → FancyTree, 1회 초기화)
 
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
 import { buildWbsProviderLazy } from "./sidebar/task-wbs/wbs/loader.js";
 import { bindPanel2Resizer } from "./sidebar/task-wbs/layout/panel-resizer.js";
-import { 
+
+import {
   initMatrix,
   bulkEnsureForVisible,
   computePathState,
   getCounts,
   markTasksChanged
- } from "./sidebar/task-wbs/core/matrix-index.js";
+} from "./sidebar/task-wbs/core/matrix-index.js";
 import { toKey } from "./sidebar/task-wbs/core/path-key.js";
-import { 
-  initTaskPanel, 
-  initTaskListButtons, 
-  setSavedTaskData, 
-  disableViewerEscReset, 
-  initWbsPanelWithFancytree 
+
+import {
+  initTaskPanel,
+  initTaskListButtons,
+  setSavedTaskData,
+  disableViewerEscReset,
+  initWbsPanelWithFancytree
 } from "./sidebar/index.js";
 
 /* ============================== */
 const SIDEBAR_MIN = 360;
 const SIDEBAR_DEFAULT = 900;
 const PREVIEW_MIN = 520;
-let __MODEL_RUN_TOKEN = 0; // 모델 전환/초기화 레이스 가드
+
+let __MODEL_RUN_TOKEN = 0;           // 모델 전환/초기화 레이스 가드
 window.__MODEL_RUN_TOKEN = (window.__MODEL_RUN_TOKEN || 0);
+window.__MATRIX_READY = false;
 
-//Helpers
-
-// provider에서 루트 기준 BFS로 pathKey 수집
-async function collectKeysForRoots(provider, { maxDepth = 3, cap = 5000 } = {}) {
+/* ============================== */
+/** 루트 기준 BFS로 pathKey 수집 (childrenByPath를 적당히 건드려 캐시를 데움) */
+async function collectKeysForRoots(provider, { maxDepth = 3, cap = 6000 } = {}) {
   const roots = (await provider.roots()) || [];
   const q = roots.map(r => ({ path: [r.text], depth: 0 }));
   const keys = new Set();
@@ -40,6 +43,7 @@ async function collectKeysForRoots(provider, { maxDepth = 3, cap = 5000 } = {}) 
   while (q.length && seen < cap) {
     const { path, depth } = q.shift();
     keys.add(toKey(path));
+
     let kids = [];
     try { kids = await provider.childrenByPath(path) || []; } catch {}
     seen += kids.length;
@@ -54,15 +58,15 @@ async function collectKeysForRoots(provider, { maxDepth = 3, cap = 5000 } = {}) 
   return Array.from(keys);
 }
 
-// ── [추가] WBS 집계 하드 싱크: 루트 전체 서브트리 키 수집 → 보장 → 상태계산 → 강제 렌더
-async function hardSyncCountsForRoots(tree, provider, { cap = 10000 } = {}) {
+/** (선택) 하드 싱크: 루트 서브트리 전부 보장 → 상태계산 → 강제 렌더 (디버깅/안전망) */
+async function hardSyncCountsForRoots(tree, provider, { cap = 12000 } = {}) {
   if (!tree || !provider || !window.__WBS_DEBUG) return;
   const D = window.__WBS_DEBUG;
 
   const roots = tree.getRootNode().children || [];
   if (!roots.length) return;
 
-  // 1) 루트들의 전체 서브트리 pathKey 수집
+  // 서브트리 경로키 수집
   const all = [];
   for (const r of roots) {
     const p = r.data?.__path || [r.title];
@@ -76,7 +80,6 @@ async function hardSyncCountsForRoots(tree, provider, { cap = 10000 } = {}) {
   const uniq = Array.from(new Set(all));
   if (!uniq.length) return;
 
-  // 2) 보장 + 상태계산
   try {
     await D.bulkEnsureForVisible(uniq);
     uniq.forEach(D.computePathState);
@@ -84,7 +87,7 @@ async function hardSyncCountsForRoots(tree, provider, { cap = 10000 } = {}) {
     console.warn("[hardSync] ensure/compute failed:", e);
   }
 
-  // 3) sanity log (루트별 count 확인)
+  // sanity log
   try {
     for (const r of roots) {
       const k = r.data?.pathKey;
@@ -93,7 +96,6 @@ async function hardSyncCountsForRoots(tree, provider, { cap = 10000 } = {}) {
     }
   } catch {}
 
-  // 4) 강제 렌더(두 번: 레이아웃/페인트 파이프라인 안정화용)
   try {
     tree.render(true, true);
     requestAnimationFrame(() => { try { tree.render(true, true); } catch {} });
@@ -102,61 +104,9 @@ async function hardSyncCountsForRoots(tree, provider, { cap = 10000 } = {}) {
   }
 }
 
-// 루트가 "비어있지 않을 때"까지 기다림
-async function waitForNonEmptyRoots(provider, { tries=6, idleMs=160 } = {}){
-  for (let i=0; i<tries; i++){
-    try{
-      const roots = await provider.roots();
-      if (Array.isArray(roots) && roots.length > 0) return roots;
-    }catch{}
-    await waitIdle(idleMs);
-  }
-  // 끝까지 비어있으면 마지막 값 반환(또는 [])
-  try{ return await provider.roots(); }catch{ return []; }
-}
-
-// provider를 확실히 ‘프라임’(인덱스 구축) : 루트/자식 일부를 강제로 건드려서 내부 캐시/맵을 채움
-// async function primeWbsProvider(provider, { maxDepth=2, cap=300, tries=3 } = {}){
-//   let lastRoots = [];
-//   for (let t=0; t<tries; t++){
-//     lastRoots = await waitForNonEmptyRoots(provider, { tries: 4, idleMs: 120 });
-//     if (!Array.isArray(lastRoots) || lastRoots.length === 0){
-//       await waitIdle(120);
-//       continue;
-//     }
-
-//     // BFS로 depth<=maxDepth 까지 childrenByPath 호출 + 경로→dbId 조회를 섞어서 강제 구축
-//     const q = lastRoots.map(r => ({ path: [r.text], depth: 0 }));
-//     let seen = 0;
-//     while (q.length && seen < cap){
-//       const { path, depth } = q.shift();
-//       // 경로→dbId를 한 번이라도 만져서 맵이 올라오게 함
-//       try{ provider.getDbIdsForPath?.(path, { includeDescendants:true, allowUnbuilt:true }); }catch{}
-
-//       let kids = [];
-//       try{ kids = await provider.childrenByPath(path) || []; }catch{ kids = []; }
-//       seen += kids.length;
-
-//       if (depth < maxDepth){
-//         for (const ch of kids){
-//           const np = ch.__path || [...path, ch.text];
-//           q.push({ path: np, depth: depth+1 });
-//         }
-//       }
-//     }
-
-//     // 한 틱 쉬고 루트 재확인
-//     await waitIdle(80);
-//     const roots2 = await provider.roots().catch(() => []);
-//     if (Array.isArray(roots2) && roots2.length > 0) return roots2; // 프라임 성공
-//   }
-//   return lastRoots;
-// }
-
-
-// ── [추가] Property DB 대기
+/* ============================== */
+/** Property DB까지 포함해서 준비 대기 */
 async function waitPropertyDb(viewer, timeoutMs = 120000) {
-  // 2D는 prop DB가 다르게 동작할 수 있으니, 있으면 바로 통과
   try {
     if (viewer?.model?.getPropertyDb?.()) return;
   } catch {}
@@ -169,32 +119,7 @@ async function waitPropertyDb(viewer, timeoutMs = 120000) {
       resolve();
     };
     viewer.addEventListener(Autodesk.Viewing.PROPERTY_DB_CREATED_EVENT, h, { once: true });
-    // 타임아웃 폴백
     setTimeout(h, timeoutMs);
-  });
-}
-
-// ── [수정] waitViewerReady: PROPERTY_DB까지 포함해 모두 끝날 때까지 기다림
-async function waitViewerReady(viewer) {
-  await Promise.all([
-    waitObjectTree(viewer),   // 인스턴스 트리
-    waitPropertyDb(viewer),   // 프로퍼티 DB
-    waitGeometry(viewer)      // 지오메트리
-  ]);
-  await waitIdle(60);
-}
-
-// ── [추가] 카메라 포커싱(=fitToView 포함) 후 안정화까지 대기
-async function focusCameraAndWait(viewer) {
-  return new Promise((resolve) => {
-    const onCam = () => {
-      try { viewer.removeEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam); } catch {}
-      // 한 프레임 더 밀어서 렌더 파이프라인 안정화
-      requestAnimationFrame(() => resolve());
-    };
-    viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam, { once: true });
-    // reset 내부에서 fitToView 호출: 카메라 이동 이벤트를 트리거
-    resetViewerInputAndCamera(viewer);
   });
 }
 
@@ -233,12 +158,28 @@ function waitIdle(timeout = 60) {
     }
   });
 }
-// async function waitViewerReady(viewer) {
-//   await waitObjectTree(viewer);
-//   await waitGeometry(viewer);
-//   await waitIdle(60);
-// }
+async function waitViewerReady(viewer) {
+  await Promise.all([
+    waitObjectTree(viewer),
+    waitPropertyDb(viewer),
+    waitGeometry(viewer)
+  ]);
+  await waitIdle(60);
+}
 
+/** 카메라 포커싱(fitToView) 완료까지 대기 */
+async function focusCameraAndWait(viewer) {
+  return new Promise((resolve) => {
+    const onCam = () => {
+      try { viewer.removeEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam); } catch {}
+      requestAnimationFrame(() => resolve()); // 한 프레임 더 밀어서 안정화
+    };
+    viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam, { once: true });
+    resetViewerInputAndCamera(viewer); // 내부에서 fitToView 호출
+  });
+}
+
+/* ============================== */
 function initSidebarWidth() {
   const root = document.documentElement;
   const stored = parseInt(localStorage.getItem("sidebarWidthPx") || "0", 10);
@@ -249,7 +190,6 @@ function initSidebarWidth() {
   root.style.setProperty("--sidebar-width", initial + "px");
   return initial;
 }
-
 function resetViewerInputAndCamera(viewer) {
   try {
     const tc = viewer.toolController;
@@ -275,8 +215,6 @@ function resetViewerInputAndCamera(viewer) {
 }
 
 /* ============================== */
-window.__ALLOW_WBS_UPDATE = false;
-
 const login = document.getElementById("login");
 let taskData = [];
 
@@ -320,7 +258,6 @@ window.addEventListener("resize", _.throttle(() => {
     initSidebarWidth();
     window.viewer?.resize?.();
     window.viewer?.impl?.invalidate?.(true, true, true);
-    // SAFE_MODE: 간트/WBS 렌더링 호출 없음
   } catch (e) {
     console.warn("[resize] redraw failed", e);
   }
@@ -369,12 +306,6 @@ window.addEventListener("resize", _.throttle(() => {
     window.viewer = viewer;
     disableViewerEscReset(viewer);
 
-    // ProgressOverlay 관련은 모두 제외(주석)
-    // ensureCss('/css/05-hec-progress-overlay.css'); await import('./viewer/hec.ProgressOverlay.js'); ...
-
-    // panel2 리사이저도 잠시 제외 (레이아웃 루프 가능성 차단)
-    // bindPanel2Resizer(viewer);
-
     // 입력/카메라 보정
     viewer.resize();
     viewer.impl?.invalidate?.(true, true, true);
@@ -394,39 +325,33 @@ window.addEventListener("resize", _.throttle(() => {
 
     // 4) 모델 선택
     initTree("#tree", async (versionId) => {
-      // destroyTaskPanel() 호출도 생략: 패널2 건드리지 않음
       const urn = window.btoa(versionId).replace(/=/g, "");
       window.CURRENT_MODEL_URN = urn;
       window.CURRENT_MODEL_SAFE_URN = safeUrn(urn);
 
-      // 기존 WBS 트리 있으면 파괴 후 비우기
+      // 기존 WBS 트리 파괴/비우기
       try { $.ui.fancytree.getTree("#wbs-tree")?.destroy(); } catch {}
       $("#wbs-group-content").empty();
 
-      // Task 데이터 로딩은 하되, 패널은 만들지 않음
+      // Task 데이터 로딩(메모리만 채움)
       taskData.length = 0;
-      // setSavedTaskData([]);
       await loadTaskDataIfExists();
       taskData.forEach((t) => fillUrnRecursive(t, urn));
-      // setSavedTaskData(taskData);
+      setSavedTaskData(taskData);        // ← initMatrix 전에 저장!
+      await waitIdle(0);                 // 저장 스냅샷 접근 가능하게 한 틱
 
-      //교체
-      const myToken = ++__MODEL_RUN_TOKEN;  // 이 호출 시점의 세션 토큰
-      
+      const myToken = ++__MODEL_RUN_TOKEN;
+
       // (1) 모델 로드 & 대기
       await loadModel(viewer, urn);
-      await waitViewerReady(viewer);        // 트리+프로퍼티DB+지오메트리까지
-
-      // 카메라 포커싱이 실제로 끝날 때까지 대기 (fitToView → CAMERA_CHANGE_EVENT)
-      await focusCameraAndWait(viewer);
-      viewer.resize();
-
-      // ⚠️ 여기서도 한 번 더 레이스 체크
+      await waitViewerReady(viewer);
       if (myToken !== __MODEL_RUN_TOKEN) return;
 
-      // ─────────────────────────────────────────────
-      // [STEP 3~6] ← 카메라 안정화 이후로 이동 (여기부터 패널/데이터 초기화 시작)
-      // STEP 3: provider 생성 (모델 기반으로!)
+      await focusCameraAndWait(viewer);
+      viewer.resize();
+      if (myToken !== __MODEL_RUN_TOKEN) return;
+
+      // (2) provider 생성
       let wbsProvider = null;
       try {
         const PRIMARY = ["HEC.WBS","HEC.Level","HEC.Zone"];
@@ -436,7 +361,6 @@ window.addEventListener("resize", _.throttle(() => {
           bucketThreshold: 400,
           bucketSize: 200
         });
-        // 중간에 모델이 바뀌었으면 중단
         if (myToken !== __MODEL_RUN_TOKEN) return;
 
         wbsProvider = provider;
@@ -451,81 +375,18 @@ window.addEventListener("resize", _.throttle(() => {
         console.warn("[STEP 3] WBS provider failed:", e);
         wbsProvider = { __provider:true, roots:async()=>[], childrenByPath:async()=>[] };
       }
-      //provider를 확실히 프라임: 내부 인덱스/맵이 사용 가능해질 때까지 강제 터치
-      let primedRoots = [];
-      try {
-        primedRoots = await primeWbsProvider(wbsProvider, { maxDepth: 2, cap: 300, tries:3 });
-        console.log("[WBS] primed roots:", Array.isArray(primedRoots) ? primedRoots.length : primedRoots);
-      } catch (e) {
-        console.warn("[WBS] primeWbsProvider failed:", e);
-      }
-      if (myToken !== __MODEL_RUN_TOKEN) return;
 
-      //디버깅
-      try {
-        const first = primedRoots?.[0]?.text;
-        const kidsLen = (await wbsProvider.childrenByPath([first]).catch(()=>[])).length;
-        const idsLen = wbsProvider.getDbIdsForPath?.([first], { includeDescendants:true, allowUnbuilt:true})?.length ?? 0;
-        console.log("[PRIME] sample path check:", first, "children=", kidsLen, "descIds=", idsLen);
-      } catch (e) {
-        console.warn("[PRIME] sample path check failed:", e);
-      }
-
-      try {
-        await seedDbIdMappings(wbsProvider, { maxDepth:2, cap:600});
-      } catch (e) {
-        console.warn("[STEP 4] WBS warmup+seed failed:", e);
-      }
-
-      // STEP 4: 워밍업 + DBID 매핑 씨드
-      // async function seedDbIdMappings(provider, { maxDepth = 2, cap = 600 } = {}) {
-      //   const roots = await provider.roots();
-      //   const q = (roots || []).map(r => ({ path: [r.text], depth: 0 }));
-      //   let visited = 0, mapped = 0;
-
-      //   while (q.length && visited < cap) {
-      //     const { path, depth } = q.shift();
-      //     visited++;
-
-      //     // ❗여기가 핵심: 경로→dbId 맵을 먼저 씨드
-      //     try {
-      //       const ids = provider.getDbIdsForPath?.(path, { includeDescendants: true, allowUnbuilt: true }) || [];
-      //       if (Array.isArray(ids)) mapped += 1;
-      //     } catch {}
-
-      //     // 자식 큐잉
-      //     if (depth < maxDepth) {
-      //       let kids = [];
-      //       try { kids = await provider.childrenByPath(path) || []; } catch {}
-      //       for (const ch of kids) {
-      //         const np = ch.__path || [...path, ch.text];
-      //         q.push({ path: np, depth: depth + 1 });
-      //       }
-      //     }
-      //   }
-      //   console.log("[STEP 4] WBS warmup+seed OK (visited=", visited, ", mappedPaths=", mapped, ")");
-      // }
-
-      // 중간 레이스 체크
-      if (myToken !== __MODEL_RUN_TOKEN) return;
-
-      // NEW: 태스크 반영 → initMatrix(단 1회) → WBS 키/DBID 선계산 → paint → 그 다음 FancyTree
-      // 1) 태스크에 URN 보정 + 저장
-      taskData.forEach((t) => fillUrnRecursive(t, urn));
-      setSavedTaskData(taskData);
-      await waitIdle(0); // 1틱만 쉬어서 저장 스냅샷 접근 가능하게
-
-      // 2) 매트릭스 초기화 (단 1회)
+      // (3) 매트릭스 초기화 (1회)
       const PRIMARY = ["HEC.WBS","HEC.Level","HEC.Zone"];
       await initMatrix({ primaryOrder: PRIMARY, provider: wbsProvider });
       window.__MATRIX_READY = true;
 
-      // 3) WBS 루트 전체(깊이<=3) 키를 먼저 만들어 상태 계산을 선행
+      // (4) 선계산: 루트 전체(깊이<=3) 키를 보장 + 상태계산
       const preKeys = await collectKeysForRoots(wbsProvider, { maxDepth: 3, cap: 6000 });
       await bulkEnsureForVisible(preKeys);
       preKeys.forEach(computePathState);
 
-      // (선택) sanity log: 첫 렌더 전에 루트별 c/t/d 확인
+      // sanity log: 첫 렌더 전에 루트별 c/t/d 확인
       try {
         const roots = (await wbsProvider.roots()) || [];
         console.log("[precompute] roots=", roots.length);
@@ -535,34 +396,28 @@ window.addEventListener("resize", _.throttle(() => {
         });
       } catch {}
 
-      // STEP 5: Fancytree 초기화
+      // (5) FancyTree 초기화 — 이제 getCounts가 곧장 준비됨
       try {
         await initWbsPanelWithFancytree(wbsProvider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
         console.log("[STEP 5] WBS fancytree init OK");
-      
-        // 루트 대상 더블패스: 0 0 0도 '준비 완료'로 취급 (객체만 있으면 OK)
+
+        // (선택) 안전망: 한 번 더 보장/계산/렌더 (상황 따라 꺼도 됨)
         const tree = $.ui.fancytree.getTree("#wbs-tree");
-
-        window.__WBS_MARK_TASKS_CHANGED?.();
-
-        //한 프레임 쉬고(카메라 안정화 이후), 루트 전체 서브트리 대상으로 보장/계산/렌더
         await waitIdle(60);
-        await hardSyncCountsForRoots(tree, wbsProvider, { cap: 12000});
-
+        await hardSyncCountsForRoots(tree, wbsProvider, { cap: 12000 });
       } catch (e) {
         console.warn("[STEP 5] WBS fancytree init failed:", e);
       }
 
-      // STEP 6: 패널2 리사이저 바인딩
+      // (6) 패널2 리사이저
       try {
         bindPanel2Resizer(viewer);
         console.log("[STEP 6] panel2 resizer bound");
       } catch (e) {
         console.warn("[STEP 6] resizer bind failed:", e);
       }
-      // ─────────────────────────────────────────────
 
-      // Task 패널 (SAFE MODE 유지 시 현 상태로 OK)
+      // Task 패널
       try {
         initTaskPanel(taskData);
         initTaskListButtons();
@@ -586,7 +441,7 @@ window.addEventListener("resize", _.throttle(() => {
 })();
 
 /* ============================== */
-// ✅ 수정본: 저장 호출 전부 제거 (데이터만 채움)
+// 데이터만 메모리에 채우는 버전 (저장은 위 흐름에서 단 1회)
 async function loadTaskDataIfExists() {
   try {
     const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;

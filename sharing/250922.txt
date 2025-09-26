@@ -1,35 +1,32 @@
 function mapStatus(selectedOption) {
-  // 프로젝트 스키마에 맞춰 필요하면 조정 (“시공/가설/철거” ↔ C/T/D)
   return ({ "시공":"C", "가설":"T", "철거":"D" }[selectedOption] || selectedOption || "");
 }
 
-function persistTasksSnapshot(tasks, { forceSafeUrn=true } = {}) {
+function persistTasksSnapshot(tasks) {
   const RAW  = window.CURRENT_MODEL_URN;
   const SAFE = window.CURRENT_MODEL_SAFE_URN;
 
-  // 1) SAFE URN으로 통일 + status 보정
+  // 1) RAW URN으로 통일 + status 필드 보정
   const cloned = structuredClone(tasks);
-  (function walk(x){
-    for (const t of (x.children || cloned)) {
+  (function walk(arr){
+    (arr || []).forEach(t => {
       if (t.selectedOption && !t.status) t.status = mapStatus(t.selectedOption);
       (t.linkedObjects || []).forEach(o => {
-        if (forceSafeUrn) o.urn = SAFE;              // SAFE로 통일
-        if (!o.urn)      o.urn = SAFE;               // 비어있으면 SAFE
+        o.urn = RAW;                    // ❗RAW로 강제 통일 (SAFE 아님)
+        if (o.dbId != null) o.dbId = Number(o.dbId);
       });
-      if (t.children) walk(t);
-    }
-  })({ children: cloned });
+      if (t.children) walk(t.children);
+    });
+  })(cloned);
 
-  // 2) RAW/SAFE 키 모두에 저장 (어느 경로를 읽든 잡히도록)
+  // 2) RAW/SAFE 두 키 모두에 동일 스냅샷 저장 (키 미스까지 봉쇄)
   const payload = JSON.stringify(cloned);
   try { localStorage.setItem(`hec:tasks:${RAW}`,  payload); } catch {}
   try { localStorage.setItem(`hec:tasks:${SAFE}`, payload); } catch {}
 
-  // 3) 전역 스냅샷도 채움 (디버깅/즉시 사용)
+  // 3) 전역에도 주입 (matrix-index가 메모리 경로를 쓸 때 대비)
   window.__SAVED_TASKS = cloned;
-
-  // 4) 기존 내부 로직도 깨우기 (있으면)
   try { setSavedTaskData(cloned); } catch {}
 
-  console.log("[persistTasksSnapshot] saved tasks to RAW & SAFE keys. count =", cloned.length);
+  console.log("[persistTasksSnapshot] saved to RAW & SAFE keys. count =", cloned.length);
 }

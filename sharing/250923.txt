@@ -7,7 +7,7 @@ Initializer @ envinit.js:759
 initViewer @ init-viewer.js:17
 (anonymous) @ main.js:327
 await in (anonymous)
-(anonymous) @ main.js:449
+(anonymous) @ main.js:451
 WebGLRenderer.js:29 THREE.WebGLRenderer 71
 WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
 WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
@@ -24,18 +24,28 @@ GeometryList.js:346 Num Meshes on GPU: 26
 GeometryList.js:347 Net GPU geom memory used: 53208
 main.js:377 [WBS] roots: 3
 main.js:160 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 3
-main.js:403 [precompute] roots= 3
-main.js:406 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:406 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:406 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:413 [STEP 5] WBS fancytree init OK
+main.js:405 [precompute] roots= 3
+main.js:408 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
+main.js:408 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
+main.js:408 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
+main.js:415 [STEP 5] WBS fancytree init OK
 main.js:223 [hardSync] root: 구조벽 counts= {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:223 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 0}
+main.js:223 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 0}c: 0d: 0t: 0td: 0total: 12[[Prototype]]: Object
 main.js:223 [hardSync] root: 슬라브 counts= {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:424 [STEP 6] panel2 resizer bound
-main.js:432 [STEP 1] Task panel OK
-main.js:439 [STEP 2] panel2-ready dispatched
+main.js:426 [STEP 6] panel2 resizer bound
+main.js:434 [STEP 1] Task panel OK
+main.js:441 [STEP 2] panel2-ready dispatched
 gantt-view.js:171 [gantt-view] google loaded
+DEBUG_WBS.IsInfo();
+VM33982:1 Uncaught TypeError: DEBUG_WBS.IsInfo is not a function
+    at <anonymous>:1:11
+(anonymous) @ VM33982:1
+DEBUG_WBS.lsInfo();
+main.js:543 [LS] RAW/SAFE: {RAW: 'dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z', SAFE: 'dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc_dmVyc2lvbj0z', hasRaw: true, hasSafe: true, memLen: 3}
+undefined
+DEBUG_WBS.dumpExpectedVsCurrent();
+main.js:498 (index)rootexpectedcurrent(index)rootexpectedcurrent0'구조벽'{…}{…}1'보'{…}{…}2'슬라브'{…}{…}Array(3)0: {root: '구조벽', expected: {…}, current: {…}}1: {root: '보', expected: {…}, current: {…}}2: {root: '슬라브', expected: {…}, current: {…}}length: 3lastIndex: (...)lastItem: (...)[[Prototype]]: Array(0)
+Promise {<fulfilled>: undefined}[[Prototype]]: Promise[[PromiseState]]: "fulfilled"[[PromiseResult]]: undefined
 CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
 CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
 CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
@@ -49,37 +59,20 @@ GeometryList.js:346 Num Meshes on GPU: 26
 GeometryList.js:347 Net GPU geom memory used: 53208
 main.js:377 [WBS] roots: 3
 main.js:160 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 3
-main.js:403 [precompute] roots= 3
-main.js:406 [precompute after MARK] 구조벽 {total: 8, c: 8, t: 0, d: 0, td: 0}
-main.js:406 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 12}
-main.js:406 [precompute after MARK] 슬라브 {total: 3, c: 3, t: 0, d: 0, td: 0}
-main.js:413 [STEP 5] WBS fancytree init OK
+main.js:405 [precompute] roots= 3
+main.js:408 [precompute after MARK] 구조벽 {total: 8, c: 8, t: 0, d: 0, td: 0}
+main.js:408 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 12}
+main.js:408 [precompute after MARK] 슬라브 {total: 3, c: 3, t: 0, d: 0, td: 0}
+main.js:415 [STEP 5] WBS fancytree init OK
 main.js:223 [hardSync] root: 구조벽 counts= {total: 8, c: 8, t: 0, d: 0, td: 0}
 main.js:223 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 12}
 main.js:223 [hardSync] root: 슬라브 counts= {total: 3, c: 3, t: 0, d: 0, td: 0}
-main.js:424 [STEP 6] panel2 resizer bound
-main.js:432 [STEP 1] Task panel OK
-main.js:439 [STEP 2] panel2-ready dispatched
+main.js:426 [STEP 6] panel2 resizer bound
+main.js:434 [STEP 1] Task panel OK
+main.js:441 [STEP 2] panel2-ready dispatched
 DEBUG_WBS.lsInfo();
-main.js:541 [LS] RAW/SAFE: {RAW: 'dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z', SAFE: 'dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc_dmVyc2lvbj0z', hasRaw: true, hasSafe: true, memLen: 3}
+main.js:543 [LS] RAW/SAFE: {RAW: 'dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc/dmVyc2lvbj0z', SAFE: 'dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjVNSEc3T1VLU1JhRlhQYkZBeWFGcWc_dmVyc2lvbj0z', hasRaw: true, hasSafe: true, memLen: 3}
 undefined
 DEBUG_WBS.dumpExpectedVsCurrent();
-main.js:496 (index)rootexpectedcurrent(index)rootexpectedcurrent0'구조벽'{…}{…}1'보'{…}{…}2'슬라브'{…}{…}Array(3)
-Promise {<fulfilled>: undefined}
-DEBUG_WBS.sampleDbRootMap();
-main.js:526 [db 7496] -> root = 구조벽, status=시공
-main.js:526 [db 7497] -> root = 구조벽, status=시공
-main.js:526 [db 7498] -> root = 구조벽, status=시공
-main.js:526 [db 7499] -> root = 구조벽, status=시공
-main.js:526 [db 7532] -> root = 구조벽, status=시공
-main.js:526 [db 7533] -> root = 구조벽, status=시공
-main.js:526 [db 7534] -> root = 구조벽, status=시공
-main.js:526 [db 7535] -> root = 구조벽, status=시공
-main.js:526 [db 7506] -> root = 슬라브, status=시공
-main.js:526 [db 7524] -> root = 슬라브, status=시공
-main.js:526 [db 7544] -> root = 슬라브, status=시공
-main.js:526 [db 7516] -> root = 보, status=가설
-main.js:526 [db 7517] -> root = 보, status=가설
-main.js:526 [db 7518] -> root = 보, status=가설
-main.js:526 [db 7519] -> root = 보, status=가설
+main.js:498 (index)rootexpectedcurrent(index)rootexpectedcurrent0'구조벽'{…}{…}1'보'{…}{…}2'슬라브'{…}{…}Array(3)
 Promise {<fulfilled>: undefined}

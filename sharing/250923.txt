@@ -1,18 +1,14 @@
-// 1) 저장된 태스크의 URN이 전부 SAFE('_') 형태인지
-const urns = new Set();
-(window.__SAVED_TASKS||[]).forEach(t=>{
-  (function walk(x){
-    (x.linkedObjects||[]).forEach(o=>urns.add(o.urn));
-    (x.children||[]).forEach(walk);
-  })(t);
-});
-console.log("distinct urns in saved tasks =", Array.from(urns));
-// => 여기 값들이 '_' 포함된 SAFE 형태여야 함
+// 현재 URN들 확인
+const RAW = window.CURRENT_MODEL_URN;
+const SAFE = window.CURRENT_MODEL_SAFE_URN;
+console.log({ RAW, SAFE });
 
-// 2) 루트별 집계 들어왔는지
-const D = window.__WBS_DEBUG;
-const tree = $.ui.fancytree.getTree("#wbs-tree");
-tree.getRootNode().children.forEach(n=>{
-  console.log("[root counts]", n.title, D.getCounts(n.data.pathKey));
-});
-// => total만이 아니라 c/t/d/td도 채워진 값이 찍혀야 정상
+// 저장소에 RAW/SAFE 둘 다 있는지 확인
+const kRaw  = `hec:tasks:${RAW}`;
+const kSafe = `hec:tasks:${SAFE}`;
+const rawJson  = localStorage.getItem(kRaw);
+const safeJson = localStorage.getItem(kSafe);
+console.log("[LS] keys", { kRaw, hasRaw: !!rawJson, kSafe, hasSafe: !!safeJson });
+
+// 메모리 스냅샷도 확인
+console.log("[mem] __SAVED_TASKS len =", (window.__SAVED_TASKS||[]).length);

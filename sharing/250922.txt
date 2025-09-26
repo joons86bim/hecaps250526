@@ -1,34 +1,46 @@
-// __SAVED_TASKS → 상태별 dbId 집합으로 빌드
+// 1) 태스크 → 상태별 dbId 세트 (부모 상태 상속 + 객체 status 우선 + 숫자형 dbId 강제)
 function buildStatusSetsFromTasks(tasks) {
   const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
-  (function walk(arr){
-    (arr||[]).forEach(t=>{
-      const raw = (t.status || t.selectedOption || "").trim();
-      // 한국어 옵션 → 코드 매핑 (필요시 여기 확장)
-      let code = raw;
-      if (raw === "시공") code = "C";
-      else if (raw === "가설") code = "T";
-      else if (raw === "철거") code = "D";
-      // 그외 TD/X 같은 값은 그대로 허용
-      const k = (code || "").toUpperCase();
-      (t.linkedObjects||[]).forEach(o=>{
-        if (k === "C") S.C.add(o.dbId);
-        else if (k === "T") S.T.add(o.dbId);
-        else if (k === "D") S.D.add(o.dbId);
-        else if (k === "TD" || k === "X") S.TD.add(o.dbId);
+
+  const norm = (code) => {
+    if (!code) return "";
+    const raw = String(code).trim();
+    if (raw === "시공") return "C";
+    if (raw === "가설") return "T";
+    if (raw === "철거") return "D";
+    return raw.toUpperCase(); // "C" | "T" | "D" | "TD" | "X" ...
+  };
+
+  const put = (status, idRaw) => {
+    const id = Number(idRaw);
+    if (!Number.isFinite(id)) return;
+    if (status === "C") S.C.add(id);
+    else if (status === "T") S.T.add(id);
+    else if (status === "D") S.D.add(id);
+    else if (status === "TD" || status === "X") S.TD.add(id);
+  };
+
+  const walk = (arr, inherited) => {
+    (arr||[]).forEach(t => {
+      const tStatus = norm(t.status || t.selectedOption || inherited);
+      (t.linkedObjects||[]).forEach(o => {
+        const oStatus = norm(o.status || tStatus);
+        put(oStatus, o.dbId);
       });
-      if (t.children) walk(t.children);
+      if (t.children) walk(t.children, tStatus);
     });
-  })(tasks);
+  };
+
+  walk(tasks, "");
   return S;
 }
 
-// 경로 하나에 대한 카운트 계산
+// 2) 특정 경로(path) 집계(문자↔숫자 불일치 방지)
 function calcCountsForPath(provider, path, S) {
   let ids = [];
   try { ids = provider.getDbIdsForPath(path, { includeDescendants:true, allowUnbuilt:true }) || []; }
   catch {}
-  const set = new Set(ids);
+  const set = new Set(ids.map(Number));
   const r = { total: set.size, c:0, t:0, d:0, td:0 };
   for (const id of set) {
     if (S.C.has(id))  r.c++;
@@ -39,31 +51,27 @@ function calcCountsForPath(provider, path, S) {
   return r;
 }
 
-// FancyTree 전체에 폴백 집계 주입(노드.data.__aggCounts 사용)
+// 3) 트리 전체에 폴백 집계 주입 (+렌더 2회)
 async function installFallbackCounts(tree, provider) {
   const tasks = window.__SAVED_TASKS || [];
   if (!tree || !provider || !tasks.length) return;
 
   const S = buildStatusSetsFromTasks(tasks);
+  console.log("[FA] sets size =", { C:S.C.size, T:S.T.size, D:S.D.size, TD:S.TD.size });
 
-  function visit(node, path) {
+  const visit = (node, path) => {
     const counts = calcCountsForPath(provider, path, S);
-    // 매트릭스가 0을 주더라도 __aggCounts가 있으면 렌더러가 사용하도록(네 코드가 그렇게 되어 있었음)
     node.data = node.data || {};
-    node.data.__aggCounts = counts;
-    if (node.children) {
-      node.children.forEach(ch=>{
-        visit(ch, (ch.data?.__path) || [...path, ch.title]);
-      });
-    }
-  }
+    node.data.__aggCounts = counts;              // ★ 폴백 카운트
+    (node.children||[]).forEach(ch => {
+      visit(ch, ch.data?.__path || [...path, ch.title]);
+    });
+  };
 
   const root = tree.getRootNode();
-  (root.children||[]).forEach(n=>{
-    visit(n, n.data?.__path || [n.title]);
-  });
+  (root.children||[]).forEach(n => visit(n, n.data?.__path || [n.title]));
 
   try { tree.render(true, true); } catch {}
-  requestAnimationFrame(()=>{ try { tree.render(true, true); } catch {} });
-  console.log("[FA] fallback counts installed (__aggCounts)");
+  requestAnimationFrame(() => { try { tree.render(true, true); } catch {} });
+  console.log("[FA] fallback counts installed");
 }

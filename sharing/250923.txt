@@ -1,20 +1,20 @@
-// 1) 태스크 스냅샷 샘플
-console.log("TASK SAMPLE", (window.__SAVED_TASKS || taskData).slice(0,3));
+// 1) 저장된 태스크 스냅샷
+console.log("SAVED_TASKS len =", window.__SAVED_TASKS?.length);
+console.log("SAVED_TASKS sample =", window.__SAVED_TASKS?.slice(0,2));
 
-// 2) 루트 키와 counts
+// 2) 루트별 집계
 const D = window.__WBS_DEBUG;
 const t = $.ui.fancytree.getTree("#wbs-tree");
 t.getRootNode().children.forEach(n => {
-  const k = n.data.pathKey;
-  console.log("[check]", n.title, k, D.getCounts(k));
+  console.log("[root counts]", n.title, D.getCounts(n.data.pathKey));
 });
 
-// 3) 특정 경로(문제 항목) 강제 보장 + 재계산
+// 3) 특정 문제 항목 강제 보장→재계산
 (async ()=>{
-  const node = t.getRootNode().children[1]; // 예: 2번째 항목
-  const keys = await D.collectAllPathKeys(WBS_PROVIDER, node.data.__path);
+  const n = t.getRootNode().children[1];  // 2번째 항목 예시
+  const keys = await D.collectAllPathKeys(WBS_PROVIDER, n.data.__path);
   await D.bulkEnsureForVisible(keys);
   keys.forEach(D.computePathState);
   t.render(true);
-  console.log("[after-force]", node.title, D.getCounts(node.data.pathKey));
+  console.log("[force ok?]", n.title, D.getCounts(n.data.pathKey));
 })();

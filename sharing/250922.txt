@@ -1,29 +1,26 @@
+// ✅ 수정본: 저장 호출 전부 제거 (데이터만 채움)
 async function loadTaskDataIfExists() {
   try {
     const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
     const url = `/api/tasks?urn=${safeUrnVal}`;
     const resp = await fetch(url, { credentials: "include" });
+
+    taskData.length = 0;
+
     if (resp.ok) {
       const data = await resp.json();
-      taskData.length = 0;
-      setSavedTaskData([]);
-      
       if (Array.isArray(data) && data.length > 0) {
         data.forEach((item) => taskData.push(item));
-        setSavedTaskData(taskData);
       } else {
         SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-        setSavedTaskData(taskData);
       }
     } else {
-      taskData.length = 0;
       SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-      setSavedTaskData(taskData);
     }
   } catch (err) {
     taskData.length = 0;
     SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-    setSavedTaskData(taskData);
     console.warn("task 데이터를 불러오지 못했습니다. 샘플로 초기화:", err);
   }
 }
+

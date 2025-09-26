@@ -1,20 +1,16 @@
-// 1) 저장된 태스크 스냅샷
-console.log("SAVED_TASKS len =", window.__SAVED_TASKS?.length);
-console.log("SAVED_TASKS sample =", window.__SAVED_TASKS?.slice(0,2));
+// 1) 저장된 태스크의 URN이 “전부 현재 모델 URN”으로 통일됐는지 확인
+const urns = new Set();
+(window.__SAVED_TASKS||[]).forEach(t => {
+  (function walk(x){
+    (x.linkedObjects||[]).forEach(o => urns.add(o.urn));
+    (x.children||[]).forEach(walk);
+  })(t);
+});
+console.log("distinct urns in saved tasks =", Array.from(urns));
 
-// 2) 루트별 집계
+// 2) 루트별 집계가 들어왔는지 확인
 const D = window.__WBS_DEBUG;
-const t = $.ui.fancytree.getTree("#wbs-tree");
-t.getRootNode().children.forEach(n => {
+const tree = $.ui.fancytree.getTree("#wbs-tree");
+tree.getRootNode().children.forEach(n => {
   console.log("[root counts]", n.title, D.getCounts(n.data.pathKey));
 });
-
-// 3) 특정 문제 항목 강제 보장→재계산
-(async ()=>{
-  const n = t.getRootNode().children[1];  // 2번째 항목 예시
-  const keys = await D.collectAllPathKeys(WBS_PROVIDER, n.data.__path);
-  await D.bulkEnsureForVisible(keys);
-  keys.forEach(D.computePathState);
-  t.render(true);
-  console.log("[force ok?]", n.title, D.getCounts(n.data.pathKey));
-})();

@@ -25,37 +25,6 @@ import {
 } from "./sidebar/index.js";
 
 /* ============================== */
-
-// 매트릭스가 루트 몇 개라도 c/t/d/td를 채울 때까지 대기
-async function waitForMatrixPrimed(provider, timeoutMs = 1800) {
-  const roots = (await provider.roots().catch(() => [])) || [];
-  const keys  = roots.map(r => toKey([r.text]));
-  const t0 = performance.now();
-
-  while (performance.now() - t0 < timeoutMs) {
-    const ready = keys.some(k => {
-      const c = getCounts(k);
-      if (!c) return false;
-      const sum = (c.c|0) + (c.t|0) + (c.d|0) + (c.td|0);
-      return sum > 0;
-    });
-    if (ready) return true;
-
-    // 이벤트 큐 한 번 밀어주고, 혹시 모를 디바운스 해제용으로 신호 재발행
-    await new Promise(r => requestAnimationFrame(r));
-    await waitIdle(60);
-    try { markTasksChanged(); } catch { window.__WBS_MARK_TASKS_CHANGED?.(); }
-  }
-  return false;
-}
-
-// 태스크 → 매트릭스 반영을 결정적으로 완료시키는 래퍼
-async function ensureMatrixFromTasks(provider) {
-  try { markTasksChanged(); } catch { window.__WBS_MARK_TASKS_CHANGED?.(); }
-  const ok = await waitForMatrixPrimed(provider, 1800);
-  if (!ok) console.warn("[matrix] priming timed out (will proceed, counts may be zero on first frame)");
-}
-
 /* 레이아웃 / 공통 설정 */
 const SIDEBAR_MIN = 360;
 const SIDEBAR_DEFAULT = 900;
@@ -195,9 +164,35 @@ function persistTasksSnapshot(tasks) {
 }
 
 /* ============================== */
-/* WBS 키 수집 / 집계 싱크 */
+/* WBS 키/맵 사전구축 + 집계 싱크 */
+
+// (NEW) provider 경로→dbId 맵 사전 구축(BFS)
+async function seedDbIdMappings(provider, { maxDepth = 3, cap = 6000 } = {}) {
+  const roots = await provider.roots().catch(() => []) || [];
+  const q = roots.map(r => ({ path: [r.text], depth: 0 }));
+  let visited = 0;
+
+  while (q.length && visited < cap) {
+    const { path, depth } = q.shift();
+
+    // ❗이 호출이 내부 맵/캐시를 채워준다
+    try { provider.getDbIdsForPath?.(path, { includeDescendants: true, allowUnbuilt: true }); } catch {}
+
+    if (depth < maxDepth) {
+      let kids = [];
+      try { kids = await provider.childrenByPath(path) || []; } catch {}
+      visited += kids.length;
+      for (const ch of kids) {
+        const np = ch.__path || [...path, ch.text];
+        q.push({ path: np, depth: depth + 1 });
+      }
+    }
+  }
+}
+
+// 루트~깊이3의 pathKey 수집 (선계산용)
 async function collectKeysForRoots(provider, { maxDepth = 3, cap = 6000 } = {}) {
-  const roots = (await provider.roots()) || [];
+  const roots = (await provider.roots().catch(() => [])) || [];
   const q = roots.map(r => ({ path: [r.text], depth: 0 }));
   const keys = new Set();
   let seen = 0;
@@ -205,11 +200,9 @@ async function collectKeysForRoots(provider, { maxDepth = 3, cap = 6000 } = {}) 
   while (q.length && seen < cap) {
     const { path, depth } = q.shift();
     keys.add(toKey(path));
-
     let kids = [];
     try { kids = await provider.childrenByPath(path) || []; } catch {}
     seen += kids.length;
-
     if (depth < maxDepth) {
       for (const ch of kids) {
         const np = ch.__path || [...path, ch.text];
@@ -218,6 +211,42 @@ async function collectKeysForRoots(provider, { maxDepth = 3, cap = 6000 } = {}) 
     }
   }
   return Array.from(keys);
+}
+
+// (수정) 매트릭스가 루트 몇 개라도 c/t/d/td를 채울 때까지 강제 진행
+async function waitForMatrixPrimed(provider, preKeys, timeoutMs = 2000) {
+  const roots = (await provider.roots().catch(() => [])) || [];
+  const keys  = roots.map(r => toKey([r.text]));
+  const t0 = performance.now();
+
+  while (performance.now() - t0 < timeoutMs) {
+    // 선계산을 계속 눌러주며 집계 갱신 트리거
+    if (preKeys?.length) {
+      await bulkEnsureForVisible(preKeys);
+      preKeys.forEach(computePathState);
+    }
+
+    const ready = keys.some(k => {
+      const c = getCounts(k);
+      if (!c) return false;
+      const sum = (c.c|0) + (c.t|0) + (c.d|0) + (c.td|0);
+      return sum > 0;
+    });
+    if (ready) return true;
+
+    // 이벤트 큐 한 번 밀어주고, 혹시 모를 디바운스 해제용으로 신호 재발행
+    await new Promise(r => requestAnimationFrame(r));
+    await waitIdle(60);
+    try { markTasksChanged(); } catch { window.__WBS_MARK_TASKS_CHANGED?.(); }
+  }
+  return false;
+}
+
+// (수정) 태스크 → 매트릭스 반영을 결정적으로 완료시키는 래퍼
+async function ensureMatrixFromTasks(provider, preKeys) {
+  try { markTasksChanged(); } catch { window.__WBS_MARK_TASKS_CHANGED?.(); }
+  const ok = await waitForMatrixPrimed(provider, preKeys, 2000);
+  if (!ok) console.warn("[matrix] priming timed out (counts may be zero on first frame)");
 }
 
 async function hardSyncCountsForRoots(tree, provider, { cap = 12000 } = {}) {
@@ -412,31 +441,28 @@ window.addEventListener("resize", _.throttle(() => {
         window.WBS_PROVIDER = wbsProvider;
       }
 
-      // (C) 태스크 로드 → URN 통일 → 스냅샷 영속(RAW/SAFE 모두) → 인메모리도 주입
+      // (C) 태스크 로드 → URN 통일 → 스냅샷 영속(RAW/SAFE 모두)
       const taskData = await fetchTaskDataForCurrentModel();
       taskData.forEach((t) => fillUrnRecursive(t, urn));
       persistTasksSnapshot(taskData);     // RAW & SAFE + window.__SAVED_TASKS
 
-      // (D) 매트릭스 초기화 → 태스크 변경 통지 → 이벤트 큐 1틱
+      // (D) provider 맵 사전 구축(최우선) → 매트릭스 초기화 → 태스크 주입
+      await seedDbIdMappings(wbsProvider, { maxDepth: 3, cap: 6000 });  // ★ 추가됨
       await initMatrix({ primaryOrder:["HEC.WBS","HEC.Level","HEC.Zone"], provider: wbsProvider });
-
-      setSavedTaskData(taskData);         // UI 측에 동일 스냅샷 전달
+      setSavedTaskData(taskData);
       console.log("[reply] setSavedTaskData done");
 
-      // 테스크 -> 매스릭스 반영이 완료될때까지 확실하게 대기
-      await ensureMatrixFromTasks(wbsProvider);
-
-      // try { markTasksChanged(); } catch { window.__WBS_MARK_TASKS_CHANGED?.(); }
-      // await waitIdle(0);
-      // await new Promise(r=>requestAnimationFrame(r));
-
-      // (E) 루트~깊이3 키 선계산 → 보장 → 상태계산
+      // (E) 루트~깊이3 키 선수집
       const preKeys = await collectKeysForRoots(wbsProvider, { maxDepth: 3, cap: 6000 });
+
+      // (F) 태스크→매트릭스 반영이 실제로 끝날 때까지 강제 루프
+      await ensureMatrixFromTasks(wbsProvider, preKeys);
+
+      // (G) 한 번 더 보장/계산(안정화)
       await bulkEnsureForVisible(preKeys);
       preKeys.forEach(computePathState);
 
-      console.log("[precompute] kick");
-      // (F) 선행 집계 로그(디버그)
+      // (H) 선행 집계 로그(디버그)
       try {
         const roots = (await wbsProvider.roots()) || [];
         console.log("[precompute] roots=", roots.length);
@@ -446,7 +472,7 @@ window.addEventListener("resize", _.throttle(() => {
         });
       } catch {}
 
-      // (G) FancyTree 초기화 → 하드 싱크
+      // (I) FancyTree 초기화 → 하드 싱크
       try {
         await initWbsPanelWithFancytree(wbsProvider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
         console.log("[STEP 5] WBS fancytree init OK");
@@ -505,7 +531,7 @@ window.DEBUG_WBS.dumpExpectedVsCurrent = async function () {
           if (s === "C") dbC.add(o.dbId);
           else if (s === "T") dbT.add(o.dbId);
           else if (s === "D") dbD.add(o.dbId);
-          else if (s === "X" || s === "TD") dbTD.add(o.dbId);
+          else if (s === "X" || s === "T" && (t.status||"").toUpperCase()==="TD") dbTD.add(o.dbId);
         });
         if (t.children) walk(t.children);
       });

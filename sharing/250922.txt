@@ -1,10 +1,11 @@
-// /wwwroot/js/main.js  — SAFE MODE: Tasks/WBS/Gantt 모두 차단하여 프리즈 원인 격리
+// /wwwroot/js/main.js
 
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
 import { buildWbsProviderLazy } from "./sidebar/task-wbs/wbs/loader.js";
 import { bindPanel2Resizer } from "./sidebar/task-wbs/layout/panel-resizer.js";
+
 import {
   initMatrix,
   bulkEnsureForVisible,
@@ -12,7 +13,9 @@ import {
   getCounts,
   markTasksChanged
 } from "./sidebar/task-wbs/core/matrix-index.js";
+
 import { toKey } from "./sidebar/task-wbs/core/path-key.js";
+
 import {
   initTaskPanel,
   initTaskListButtons,
@@ -22,217 +25,10 @@ import {
 } from "./sidebar/index.js";
 
 /* ============================== */
+/* 레이아웃 / 공통 설정 */
 const SIDEBAR_MIN = 360;
 const SIDEBAR_DEFAULT = 900;
 const PREVIEW_MIN = 520;
-let __MODEL_RUN_TOKEN = 0; // 모델 전환/초기화 레이스 가드
-window.__MODEL_RUN_TOKEN = (window.__MODEL_RUN_TOKEN || 0);
-
-/* ========== [GL-GUARD] WebGL 안전 래퍼 ========== */
-function hasGL(viewer) {
-  try {
-    return !!(viewer && viewer.impl && viewer.impl.canvas && viewer.impl.glrenderer);
-  } catch { return false; }
-}
-function safeInvalidate(viewer) {
-  try {
-    if (!hasGL(viewer)) return;
-    viewer.impl.invalidate(true, true, true);
-  } catch (e) {
-    console.warn("[safeInvalidate] skipped:", e?.message || e);
-  }
-}
-function safeResize(viewer) {
-  try {
-    if (!hasGL(viewer)) return;
-    viewer.resize();
-    viewer.impl.invalidate(true, true, true);
-  } catch (e) {
-    console.warn("[safeResize] skipped:", e?.message || e);
-  }
-}
-function wireWebGLGuards(viewer) {
-  try {
-    const canvas = viewer?.impl?.canvas;
-    if (!canvas || canvas.__hec_guard_wired) return;
-    canvas.__hec_guard_wired = true;
-
-    canvas.addEventListener("webglcontextlost", (e) => {
-      try { e.preventDefault(); } catch {}
-      console.warn("[WebGL] context lost");
-    }, false);
-
-    canvas.addEventListener("webglcontextrestored", () => {
-      console.warn("[WebGL] context restored → invalidate");
-      safeInvalidate(viewer);
-    }, false);
-  } catch (e) {
-    console.warn("[wireWebGLGuards] failed:", e);
-  }
-}
-/* =============================================== */
-
-//Helpers
-
-// provider에서 루트 기준 BFS로 pathKey 수집
-async function collectKeysForRoots(provider, { maxDepth = 3, cap = 5000 } = {}) {
-  const roots = (await provider.roots()) || [];
-  const q = roots.map(r => ({ path: [r.text], depth: 0 }));
-  const keys = new Set();
-  let seen = 0;
-
-  while (q.length && seen < cap) {
-    const { path, depth } = q.shift();
-    keys.add(toKey(path));
-    let kids = [];
-    try { kids = await provider.childrenByPath(path) || []; } catch {}
-    seen += kids.length;
-
-    if (depth < maxDepth) {
-      for (const ch of kids) {
-        const np = ch.__path || [...path, ch.text];
-        q.push({ path: np, depth: depth + 1 });
-      }
-    }
-  }
-  return Array.from(keys);
-}
-
-// ── [추가] WBS 집계 하드 싱크: 루트 전체 서브트리 키 수집 → 보장 → 상태계산 → 강제 렌더
-async function hardSyncCountsForRoots(tree, provider, { cap = 10000 } = {}) {
-  if (!tree || !provider || !window.__WBS_DEBUG) return;
-  const D = window.__WBS_DEBUG;
-
-  const roots = tree.getRootNode().children || [];
-  if (!roots.length) return;
-
-  // 1) 루트들의 전체 서브트리 pathKey 수집
-  const all = [];
-  for (const r of roots) {
-    const p = r.data?.__path || [r.title];
-    try {
-      const ks = await D.collectAllPathKeys(provider, p, cap);
-      all.push(...ks);
-    } catch (e) {
-      console.warn("[hardSync] collectAllPathKeys failed for", p, e);
-    }
-  }
-  const uniq = Array.from(new Set(all));
-  if (!uniq.length) return;
-
-  // 2) 보장 + 상태계산
-  try {
-    await D.bulkEnsureForVisible(uniq);
-    uniq.forEach(D.computePathState);
-  } catch (e) {
-    console.warn("[hardSync] ensure/compute failed:", e);
-  }
-
-  // 3) sanity log (루트별 count 확인)
-  try {
-    for (const r of roots) {
-      const k = r.data?.pathKey;
-      const c = k && D.getCounts?.(k);
-      console.log("[hardSync] root:", r.title, "counts=", c);
-    }
-  } catch {}
-
-  // 4) 강제 렌더(두 번: 레이아웃/페인트 파이프라인 안정화용)
-  try {
-    tree.render(true, true);
-    requestAnimationFrame(() => { try { tree.render(true, true); } catch {} });
-  } catch (e) {
-    console.warn("[hardSync] render failed:", e);
-  }
-}
-
-// 루트가 "비어있지 않을 때"까지 기다림
-async function waitForNonEmptyRoots(provider, { tries=6, idleMs=160 } = {}){
-  for (let i=0; i<tries; i++){
-    try{
-      const roots = await provider.roots();
-      if (Array.isArray(roots) && roots.length > 0) return roots;
-    }catch{}
-    await waitIdle(idleMs);
-  }
-  try{ return await provider.roots(); }catch{ return []; }
-}
-
-// ── [추가] Property DB 대기
-async function waitPropertyDb(viewer, timeoutMs = 120000) {
-  try {
-    if (viewer?.model?.getPropertyDb?.()) return;
-  } catch {}
-  await new Promise((resolve) => {
-    let done = false;
-    const h = () => {
-      if (done) return;
-      done = true;
-      try { viewer.removeEventListener(Autodesk.Viewing.PROPERTY_DB_CREATED_EVENT, h); } catch {}
-      resolve();
-    };
-    viewer.addEventListener(Autodesk.Viewing.PROPERTY_DB_CREATED_EVENT, h, { once: true });
-    setTimeout(h, timeoutMs);
-  });
-}
-
-// ── [수정] waitViewerReady: PROPERTY_DB까지 포함해 모두 끝날 때까지 기다림
-async function waitViewerReady(viewer) {
-  await Promise.all([
-    waitObjectTree(viewer),
-    waitPropertyDb(viewer),
-    waitGeometry(viewer)
-  ]);
-  await waitIdle(60);
-}
-
-// ── [추가] 카메라 포커싱(=fitToView 포함) 후 안정화까지 대기
-async function focusCameraAndWait(viewer) {
-  return new Promise((resolve) => {
-    const onCam = () => {
-      try { viewer.removeEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam); } catch {}
-      requestAnimationFrame(() => resolve());
-    };
-    viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam, { once: true });
-    resetViewerInputAndCamera(viewer);
-  });
-}
-
-function onceViewer(viewer, type) {
-  return new Promise((resolve) => {
-    const h = () => { viewer.removeEventListener(type, h); resolve(); };
-    viewer.addEventListener(type, h);
-  });
-}
-function hasObjectTree(viewer) {
-  return !!viewer.model?.getData?.()?.instanceTree;
-}
-async function waitObjectTree(viewer) {
-  if (hasObjectTree(viewer)) return;
-  await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
-}
-async function waitGeometry(viewer, timeoutMs = 180000) {
-  await new Promise((resolve) => {
-    let done = false;
-    const h = () => {
-      if (done) return;
-      done = true;
-      try { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h); } catch {}
-      resolve();
-    };
-    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h, { once: true });
-    setTimeout(h, timeoutMs);
-  });
-}
-function waitIdle(timeout = 60) {
-  return new Promise((resolve) => {
-    if (typeof window.requestIdleCallback === "function") {
-      window.requestIdleCallback(() => resolve(), { timeout });
-    } else {
-      setTimeout(resolve, timeout);
-    }
-  });
-}
 
 function initSidebarWidth() {
   const root = document.documentElement;
@@ -270,9 +66,148 @@ function resetViewerInputAndCamera(viewer) {
 }
 
 /* ============================== */
-window.__ALLOW_WBS_UPDATE = false;
+/* 뷰어 준비 대기 유틸 */
+function onceViewer(viewer, type) {
+  return new Promise((resolve) => {
+    const h = () => { try { viewer.removeEventListener(type, h); } catch {} ; resolve(); };
+    viewer.addEventListener(type, h);
+  });
+}
+function hasObjectTree(viewer) {
+  return !!viewer.model?.getData?.()?.instanceTree;
+}
+async function waitObjectTree(viewer) {
+  if (hasObjectTree(viewer)) return;
+  await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
+}
+async function waitGeometry(viewer, timeoutMs = 180000) {
+  await new Promise((resolve) => {
+    let done = false;
+    const h = () => {
+      if (done) return;
+      done = true;
+      try { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h); } catch {}
+      resolve();
+    };
+    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h, { once: true });
+    setTimeout(h, timeoutMs);
+  });
+}
+async function waitPropertyDb(viewer, timeoutMs = 120000) {
+  try {
+    if (viewer?.model?.getPropertyDb?.()) return;
+  } catch {}
+  await new Promise((resolve) => {
+    let done = false;
+    const h = () => {
+      if (done) return;
+      done = true;
+      try { viewer.removeEventListener(Autodesk.Viewing.PROPERTY_DB_CREATED_EVENT, h); } catch {}
+      resolve();
+    };
+    viewer.addEventListener(Autodesk.Viewing.PROPERTY_DB_CREATED_EVENT, h, { once: true });
+    setTimeout(h, timeoutMs);
+  });
+}
+function waitIdle(timeout = 60) {
+  return new Promise((resolve) => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => resolve(), { timeout });
+    } else {
+      setTimeout(resolve, timeout);
+    }
+  });
+}
+async function waitViewerReady(viewer) {
+  await Promise.all([
+    waitObjectTree(viewer),
+    waitPropertyDb(viewer),
+    waitGeometry(viewer)
+  ]);
+  await waitIdle(60);
+}
+async function focusCameraAndWait(viewer) {
+  return new Promise((resolve) => {
+    const onCam = () => {
+      try { viewer.removeEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam); } catch {}
+      requestAnimationFrame(() => resolve());
+    };
+    viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam, { once: true });
+    resetViewerInputAndCamera(viewer);
+  });
+}
 
-const login = document.getElementById("login");
+/* ============================== */
+/* WBS 키 수집 / 집계 싱크 */
+async function collectKeysForRoots(provider, { maxDepth = 3, cap = 5000 } = {}) {
+  const roots = (await provider.roots()) || [];
+  const q = roots.map(r => ({ path: [r.text], depth: 0 }));
+  const keys = new Set();
+  let seen = 0;
+
+  while (q.length && seen < cap) {
+    const { path, depth } = q.shift();
+    keys.add(toKey(path));
+
+    let kids = [];
+    try { kids = await provider.childrenByPath(path) || []; } catch {}
+    seen += kids.length;
+
+    if (depth < maxDepth) {
+      for (const ch of kids) {
+        const np = ch.__path || [...path, ch.text];
+        q.push({ path: np, depth: depth + 1 });
+      }
+    }
+  }
+  return Array.from(keys);
+}
+
+async function hardSyncCountsForRoots(tree, provider, { cap = 12000 } = {}) {
+  if (!tree || !provider || !window.__WBS_DEBUG) return;
+  const D = window.__WBS_DEBUG;
+
+  const roots = tree.getRootNode().children || [];
+  if (!roots.length) return;
+
+  const all = [];
+  for (const r of roots) {
+    const p = r.data?.__path || [r.title];
+    try {
+      const ks = await D.collectAllPathKeys(provider, p, cap);
+      all.push(...ks);
+    } catch (e) {
+      console.warn("[hardSync] collectAllPathKeys failed for", p, e);
+    }
+  }
+  const uniq = Array.from(new Set(all));
+  if (!uniq.length) return;
+
+  try {
+    await D.bulkEnsureForVisible(uniq);
+    uniq.forEach(D.computePathState);
+  } catch (e) {
+    console.warn("[hardSync] ensure/compute failed:", e);
+  }
+
+  try {
+    for (const r of roots) {
+      const k = r.data?.pathKey;
+      const c = k && D.getCounts?.(k);
+      console.log("[hardSync] root:", r.title, "counts=", c);
+    }
+  } catch {}
+
+  try {
+    tree.render(true, true);
+    requestAnimationFrame(() => { try { tree.render(true, true); } catch {} });
+  } catch (e) {
+    console.warn("[hardSync] render failed:", e);
+  }
+}
+
+/* ============================== */
+/* 태스크 샘플/유틸 */
 let taskData = [];
 
 const SAMPLE_TASK_DATA = [
@@ -309,24 +244,52 @@ function fillUrnRecursive(task, defaultUrn) {
   }
 }
 
+async function loadTaskDataIfExists() {
+  try {
+    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
+    const url = `/api/tasks?urn=${safeUrnVal}`;
+    const resp = await fetch(url, { credentials: "include" });
+
+    taskData.length = 0;
+
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data) && data.length > 0) {
+        data.forEach((item) => taskData.push(item));
+      } else {
+        SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+      }
+    } else {
+      SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+    }
+  } catch (err) {
+    taskData.length = 0;
+    SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
+    console.warn("task 데이터를 불러오지 못했습니다. 샘플로 초기화:", err);
+  }
+}
+
 /* ============================== */
-// [GL-GUARD] resize도 안전 래퍼 사용
+/* resize */
 window.addEventListener("resize", _.throttle(() => {
   try {
     initSidebarWidth();
-    safeResize(window.viewer);
+    window.viewer?.resize?.();
+    window.viewer?.impl?.invalidate?.(true, true, true);
   } catch (e) {
     console.warn("[resize] redraw failed", e);
   }
 }, 120));
 
 /* ============================== */
+/* main */
 (async function () {
   try {
     // 1) 로그인
     const resp = await fetch("/api/auth/profile", { credentials: "include" });
     if (!resp.ok) { window.location.replace("/api/auth/login"); return; }
     const user = await resp.json();
+    const login = document.getElementById("login");
     login.innerText = `Logout (${user.name})`;
     login.onclick = () => {
       const iframe = document.createElement("iframe");
@@ -363,13 +326,11 @@ window.addEventListener("resize", _.throttle(() => {
     window.viewer = viewer;
     disableViewerEscReset(viewer);
 
-    // [GL-GUARD] WebGL 컨텍스트 로스트/복구 가드 연결
-    wireWebGLGuards(viewer);
-
-    // 입력/카메라 보정 → 안전 리사이즈만 1~2회
-    safeResize(viewer);
+    // 초기 보정
+    viewer.resize();
+    viewer.impl?.invalidate?.(true, true, true);
     requestAnimationFrame(() => {
-      try { safeResize(viewer); } catch {}
+      try { viewer.resize(); viewer.impl?.invalidate?.(true, true, true); } catch {}
     });
     resetViewerInputAndCamera(viewer);
 
@@ -377,7 +338,8 @@ window.addEventListener("resize", _.throttle(() => {
       const sb = document.getElementById("sidebar");
       if (sb && sb.offsetWidth === 0) {
         document.documentElement.style.setProperty("--sidebar-width", SIDEBAR_DEFAULT + "px");
-        safeResize(viewer);
+        viewer.resize();
+        viewer.impl?.invalidate?.(true, true, true);
       }
     });
 
@@ -387,31 +349,21 @@ window.addEventListener("resize", _.throttle(() => {
       window.CURRENT_MODEL_URN = urn;
       window.CURRENT_MODEL_SAFE_URN = safeUrn(urn);
 
-      // 기존 WBS 트리 있으면 파괴 후 비우기
+      // 기존 WBS 파괴
       try { $.ui.fancytree.getTree("#wbs-tree")?.destroy(); } catch {}
       $("#wbs-group-content").empty();
 
-      // Task 데이터 로딩(저장 X, 메모리만 채움)
+      // 태스크 로드(저장은 여기선 하지 않음)
       taskData.length = 0;
       await loadTaskDataIfExists();
-      taskData.forEach((t) => fillUrnRecursive(t, urn));
 
-      const myToken = ++__MODEL_RUN_TOKEN;
-
-      // (1) 모델 로드 & 대기
+      // 모델 로드 & 뷰어준비 & 카메라 안정화
       await loadModel(viewer, urn);
       await waitViewerReady(viewer);
-
-      if (myToken !== __MODEL_RUN_TOKEN) return;
-
-      // 카메라 포커싱 완료까지 대기
       await focusCameraAndWait(viewer);
-      safeResize(viewer); // [GL-GUARD] 한 번만
+      viewer.resize();
 
-      if (myToken !== __MODEL_RUN_TOKEN) return;
-
-      // ─────────────────────────────────────────────
-      // STEP 3: provider 생성
+      // provider 생성
       let wbsProvider = null;
       try {
         const PRIMARY = ["HEC.WBS","HEC.Level","HEC.Zone"];
@@ -421,10 +373,7 @@ window.addEventListener("resize", _.throttle(() => {
           bucketThreshold: 400,
           bucketSize: 200
         });
-        if (myToken !== __MODEL_RUN_TOKEN) return;
-
         wbsProvider = provider;
-        window.WBS_PROVIDER = provider;
         try {
           const roots = await provider.roots();
           console.log("[WBS] roots:", Array.isArray(roots) ? roots.length : roots);
@@ -436,49 +385,46 @@ window.addEventListener("resize", _.throttle(() => {
         wbsProvider = { __provider:true, roots:async()=>[], childrenByPath:async()=>[] };
       }
 
-      // 디버그: 샘플 경로 확인 (선택)
-      try {
-        const roots = await waitForNonEmptyRoots(wbsProvider, { tries: 4, idleMs: 120 });
-        const first = roots?.[0]?.text;
-        const kidsLen = (await wbsProvider.childrenByPath([first]).catch(()=>[])).length;
-        const idsLen = wbsProvider.getDbIdsForPath?.([first], { includeDescendants:true, allowUnbuilt:true})?.length ?? 0;
-        console.log("[PRIME] sample path check:", first, "children=", kidsLen, "descIds=", idsLen);
-      } catch (e) {
-        console.warn("[PRIME] sample path check failed:", e);
-      }
-
-      if (myToken !== __MODEL_RUN_TOKEN) return;
-
-      // NEW: 태스크 반영 → initMatrix(단 1회) → WBS 키/DBID 선계산 → paint → 그 다음 FancyTree
+      // ────────── ★ 핵심 순서: 첫 프레임 0 방지 ──────────
+      // (0) 태스크 URN 보정 + 저장(단 1회)
       taskData.forEach((t) => fillUrnRecursive(t, urn));
       setSavedTaskData(taskData);
-      await waitIdle(0);
 
+      // (1) 매트릭스 초기화
       const PRIMARY = ["HEC.WBS","HEC.Level","HEC.Zone"];
       await initMatrix({ primaryOrder: PRIMARY, provider: wbsProvider });
-      window.__MATRIX_READY = true;
 
+      // (2) 태스크 변경 적용(동기 트리거)
+      markTasksChanged();
+
+      // (3) 이벤트 큐 비우기용 1틱
+      await waitIdle(0);
+
+      // (4) 루트~깊이3 키 선계산 → 보장 → 상태계산
       const preKeys = await collectKeysForRoots(wbsProvider, { maxDepth: 3, cap: 6000 });
       await bulkEnsureForVisible(preKeys);
       preKeys.forEach(computePathState);
 
+      // (5) sanity log
       try {
         const roots = (await wbsProvider.roots()) || [];
         console.log("[precompute] roots=", roots.length);
         roots.forEach(r => {
           const k = toKey([r.text]);
-          console.log("[precompute] root", r.text, getCounts(k));
+          console.log("[precompute after MARK]", r.text, getCounts(k));
         });
       } catch {}
+      // ────────────────────────────────────────────
 
-      // STEP 5: Fancytree 초기화
+      // FancyTree 초기화
       try {
-        await initWbsPanelWithFancytree(wbsProvider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
+        await initWbsPanelWithFancytree(wbsProvider, {
+          primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"]
+        });
         console.log("[STEP 5] WBS fancytree init OK");
 
+        // 루트 서브트리 전체 보장/계산/리렌더 강제 싱크(첫 화면 안정화)
         const tree = $.ui.fancytree.getTree("#wbs-tree");
-        window.__WBS_MARK_TASKS_CHANGED?.();
-
         await waitIdle(60);
         await hardSyncCountsForRoots(tree, wbsProvider, { cap: 12000 });
 
@@ -486,16 +432,14 @@ window.addEventListener("resize", _.throttle(() => {
         console.warn("[STEP 5] WBS fancytree init failed:", e);
       }
 
-      // STEP 6: 패널2 리사이저 바인딩
+      // 나머지 패널들
       try {
         bindPanel2Resizer(viewer);
         console.log("[STEP 6] panel2 resizer bound");
       } catch (e) {
         console.warn("[STEP 6] resizer bind failed:", e);
       }
-      // ─────────────────────────────────────────────
 
-      // Task 패널 (SAFE MODE 유지 시 현 상태로 OK)
       try {
         initTaskPanel(taskData);
         initTaskListButtons();
@@ -517,30 +461,3 @@ window.addEventListener("resize", _.throttle(() => {
     console.error(err);
   }
 })();
-
-/* ============================== */
-// 저장 호출 전부 제거 (데이터만 채움)
-async function loadTaskDataIfExists() {
-  try {
-    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
-    const url = `/api/tasks?urn=${safeUrnVal}`;
-    const resp = await fetch(url, { credentials: "include" });
-
-    taskData.length = 0;
-
-    if (resp.ok) {
-      const data = await resp.json();
-      if (Array.isArray(data) && data.length > 0) {
-        data.forEach((item) => taskData.push(item));
-      } else {
-        SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-      }
-    } else {
-      SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-    }
-  } catch (err) {
-    taskData.length = 0;
-    SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-    console.warn("task 데이터를 불러오지 못했습니다. 샘플로 초기화:", err);
-  }
-}

@@ -5,9 +5,9 @@ initializeCDN @ envinit.js:640
 Initializer @ envinit.js:759
 (anonymous) @ init-viewer.js:18
 initViewer @ init-viewer.js:17
-(anonymous) @ main.js:555
+(anonymous) @ main.js:504
 await in (anonymous)
-(anonymous) @ main.js:649
+(anonymous) @ main.js:591
 WebGLRenderer.js:29 THREE.WebGLRenderer 71
 WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
 WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
@@ -22,19 +22,31 @@ GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
 GeometryList.js:345 Number of meshes: 23
 GeometryList.js:346 Num Meshes on GPU: 26
 GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:600 [WBS] roots: 3
-main.js:167 [persistTasksSnapshot] saved. count = 3
-main.js:267 [FA] fallback map ready (keys = 24 )
-main.js:303 [FA] getCounts bridged
-main.js:456  Uncaught (in promise) TypeError: Cannot set properties of undefined (setting 'repaintCells')
-    at installWbsDecorators (main.js:456:33)
-    at main.js:629:7
-installWbsDecorators @ main.js:456
-(anonymous) @ main.js:629
-await in (anonymous)
-(anonymous) @ init-tree.js:98
-EventEmitter.emit @ inspire-tree.js:4919
-InspireTree.tree.emit @ inspire-tree.js:5507
-value @ inspire-tree-dom.min.js:8
-(anonymous) @ inspire-tree-dom.min.js:8
-o @ inspire-tree-dom.min.js:8
+main.js:548 [WBS] roots: 3
+main.js:148 [persistTasksSnapshot] saved. count = 3
+main.js:276 [FA] fallback map ready (keys = 24 )
+main.js:310 [FA] getCounts bridged
+main.js:576 [STEP 5] WBS fancytree init OK
+main.js:582 [STEP 6] panel2 resizer bound
+main.js:583 [STEP 1] Task panel OK
+main.js:584 [STEP 2] panel2-ready dispatched
+gantt-view.js:171 [gantt-view] google loaded
+CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
+CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
+CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
+CustomViewerExtension.js:207 툴바 커스터마이징 완료.
+WebGLRenderer.js:29 THREE.WebGLRenderer 71
+WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
+GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
+GeometryList.js:345 Number of meshes: 23
+GeometryList.js:346 Num Meshes on GPU: 26
+GeometryList.js:347 Net GPU geom memory used: 53208
+main.js:548 [WBS] roots: 3
+main.js:148 [persistTasksSnapshot] saved. count = 3
+main.js:276 [FA] fallback map ready (keys = 24 )
+main.js:310 [FA] getCounts bridged
+main.js:576 [STEP 5] WBS fancytree init OK
+main.js:582 [STEP 6] panel2 resizer bound
+main.js:583 [STEP 1] Task panel OK
+main.js:584 [STEP 2] panel2-ready dispatched

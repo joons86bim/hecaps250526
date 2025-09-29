@@ -1,27 +1,25 @@
 // /wwwroot/js/task-wbs/task-buttons.js
-// Test 버튼: 선택된 객체의 바운딩박스를 기준으로 Z축 컷플레인을 2초간 위로 스윕하여 사라지게 하고,
-// 1초 대기 후 2초간 역방향으로 스윕하여 다시 나타나게 함.
-// ※ 컷플레인은 뷰어 전역에 적용됩니다(선택 객체만 효과를 보고 싶으면 ISOLATE_SELECTION=true로).
+// Test: 선택 객체만 대상으로 컷플레인 스윕
+// 2s 상→하 스윕(사라짐) → 1s 대기 → 2s 하→상 스윕(등장)
 
 export function initTaskWbsButtons(viewer) {
   let btn = document.getElementById('btn-test');
   if (!btn || !viewer) return;
 
-  // 기존 리스너 제거(중복 방지)
   const clone = btn.cloneNode(true);
   btn.parentNode.replaceChild(clone, btn);
   btn = clone;
 
   btn.addEventListener('click', async () => {
     try {
-      await runTestAnimation(viewer);
+      await runTestCutSweep(viewer);
     } catch (e) {
       console.error('[test-btn] error:', e);
     }
   });
 }
 
-async function runTestAnimation(viewer) {
+async function runTestCutSweep(viewer) {
   const sel = getSelectionSmart(viewer);
   if (!sel || !sel.model || !sel.dbIds.length) {
     console.warn('[test-btn] 먼저 객체를 선택하세요.');
@@ -29,96 +27,89 @@ async function runTestAnimation(viewer) {
   }
   const { model, dbIds } = sel;
 
-  // 선택 해제(애니메이션 중 실수 방지)
+  // 선택만 보이도록(선택 객체만 애니메이션 대상)
+  const ISOLATE_SELECTION = true;
+  let prevIsolated = null;
+  if (ISOLATE_SELECTION) {
+    try { prevIsolated = viewer.getIsolatedNodes?.() || null; } catch(_) {}
+    viewer.isolate(dbIds);
+  }
   viewer.clearSelection();
 
-  // 선택 바운딩박스 계산
+  // 선택 bbox 계산
   const bbox = computeSelectionBBox(viewer, model, dbIds);
   if (!bbox) {
-    console.warn('[test-btn] 선택 바운딩박스를 계산할 수 없습니다.');
+    console.warn('[test-btn] 바운딩박스를 계산할 수 없습니다.');
+    if (ISOLATE_SELECTION) viewer.isolate([]);
     return;
   }
 
-  // (옵션) 선택 대상만 보이게 하고 싶다면 true
-  const ISOLATE_SELECTION = false;
-  let prevIsolated = null;
-  if (ISOLATE_SELECTION) {
-    // 기존 isolate 정보 복원은 간단히 전체표시로 마무리
-    try {
-      prevIsolated = (viewer.getIsolatedNodes && viewer.getIsolatedNodes()) || null;
-    } catch(_) {}
-    viewer.isolate(dbIds);
-  }
-
-  // 컷플레인 원상복구용 백업
-  const originalPlanes = (viewer.getCutPlanes && viewer.getCutPlanes()) ? viewer.getCutPlanes().slice() : [];
+  // 기존 컷플레인 백업
+  const originalPlanes = viewer.getCutPlanes ? (viewer.getCutPlanes().slice()) : [];
 
   const THREE = window.THREE || Autodesk.Viewing.THREE;
+  // 컷 방향: Z+
+  const dir = new THREE.Vector3(0, 0, 1);
 
-  // Z축 위로 스윕 (Bottom -> Up)
-  const dir = new THREE.Vector3(0, 0, 1); // Z+
   const minZ = bbox.min.z;
   const maxZ = bbox.max.z;
   const range = Math.max(1e-6, maxZ - minZ);
   const margin = range * 0.05;
-  const startH = minZ - margin; // 시작: 바닥 아래
-  const endH   = maxZ + margin; // 끝: 천장 위
 
-  // 스윕용 컷플레인 (normal·constant는 three.js 규칙: dot(n,p)+c < 0 쪽이 잘림)
-  // z 하방(z<h) 영역을 잘라내려면 n=(0,0,1), c=-h 로 설정
-  const sweepPlane = new THREE.Plane(dir.clone(), -startH);
+  // ★ 핵심: 시작을 '천장 위'로 잡아 처음 프레임에서 아무 것도 잘리지 않게 함
+  const startH_top = maxZ + margin;
+  const endH_bottom = minZ - margin;
 
-  // 2s 사라짐(아래→위로 잘라내며 전체 사라짐)
+  // THREE.Plane: n·p + c = 0, 뷰어는 양/음 중 한쪽을 클립함
+  // 여기서는 start를 위쪽으로 잡고 ↓로 이동시키며 점차 클립되도록 설정
+  const sweepPlane = new THREE.Plane(dir.clone(), -startH_top);
+
+  // 상→하 2초: 점점 사라짐(Top→Bottom)
   await animate(2000, (t) => {
-    const k = easeInOutSine(t);
-    const h = lerp(startH, endH, k);
-    sweepPlane.constant = -h;
-    // 기존 컷플레인이 있었다면 함께 유지
-    viewer.setCutPlanes([...originalPlanes, sweepPlane]);
-    viewer.impl.sceneUpdated(true);
-  });
-
-  // 1s 대기
-  await delay(1000);
-
-  // 2s 나타남(위→아래로 컷플레인 되돌리며 다시 보이게)
-  await animate(2000, (t) => {
-    const k = easeInOutSine(t);
-    const h = lerp(endH, startH, k);
+    const k = easeInOutSine(t);               // 0→1
+    const h = lerp(startH_top, endH_bottom, k);
     sweepPlane.constant = -h;
     viewer.setCutPlanes([...originalPlanes, sweepPlane]);
     viewer.impl.sceneUpdated(true);
   });
 
-  // 컷플레인 원복
+  await delay(1000); // 1초 대기
+
+  // 하→상 2초: 다시 나타남(Bottom→Top)
+  await animate(2000, (t) => {
+    const k = easeInOutSine(t);
+    const h = lerp(endH_bottom, startH_top, k);
+    sweepPlane.constant = -h;
+    viewer.setCutPlanes([...originalPlanes, sweepPlane]);
+    viewer.impl.sceneUpdated(true);
+  });
+
+  // 원복
   viewer.setCutPlanes(originalPlanes);
   viewer.impl.sceneUpdated(true);
 
-  // isolate 해제(간단 처리: 전체 표시)
   if (ISOLATE_SELECTION) {
+    // 간단 복원: 전체 표시 (필요 시 prevIsolated 복구 로직으로 변경)
     viewer.isolate([]);
-    // 필요하면 prevIsolated 복원 로직 추가 가능
   }
 }
 
-// ================= Helpers =================
+/* ============== Helpers ============== */
 
 function getSelectionSmart(viewer) {
-  // 집계 선택(멀티 모델) 우선
   const agg = viewer.getAggregateSelection?.();
   if (agg && agg.length > 0) {
     const a = agg[0];
     const ids = (a.selection || []).slice();
     return ids.length ? { model: a.model, dbIds: ids, aggregate: true } : null;
   }
-  // 일반 선택
   const ids = viewer.getSelection?.() || [];
   return (ids && ids.length) ? { model: viewer.model, dbIds: ids, aggregate: false } : null;
 }
 
 function getFragList(viewer, model) {
-  if (model?.getFragmentList) return model.getFragmentList();                  // 표준
-  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();   // 대체
+  if (model?.getFragmentList) return model.getFragmentList();
+  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();
   return null;
 }
 
@@ -148,15 +139,16 @@ function computeSelectionBBox(viewer, model, dbIds) {
       fragList.getWorldBounds(fid, tmp);
       if (!init) { box.copy(tmp); init = true; }
       else { box.union(tmp); }
-    } catch (_) {}
+    } catch(_) {}
   }
   return init ? box : null;
 }
 
+/* timing & easing */
+
 function lerp(a, b, t) { return a + (b - a) * t; }
 function delay(ms) { return new Promise((res) => setTimeout(res, ms)); }
 
-// 시각적으로 고르게 보이는 S-커브
 function easeInOutSine(t){ return 0.5 - 0.5 * Math.cos(Math.PI * t); }
 
 function animate(duration, step) {

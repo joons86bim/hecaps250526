@@ -1,58 +1,60 @@
-// REPLACE the whole buildStatusSetsFromTasks function
+// REPLACE the whole function
 function buildStatusSetsFromTasks(tasks) {
-  const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
+  // 최종 상태를 dbId 단위로 “하나”만 남기는 맵
+  const stateById = new Map();
 
-  // 상태 문자열을 C/T/D/TD로 표준화
+  // 상태 문자열 표준화: 한글/영문/별칭 모두 수용
   const norm = (raw) => {
     if (!raw) return "";
     const s = String(raw).trim().toUpperCase();
-
-    // 한글 매핑 (확장 가능)
+    // 한글/별칭 매핑
     if (s.includes("시공") || s === "완료") return "C";
     if (s.includes("가설") || s === "진행" || s === "임시") return "T";
     if (s.includes("철거") || s === "해체") return "D";
     if (s === "TD" || s.includes("동시") || s.includes("복합")) return "TD";
-
-    // 영문/한글 혼용 대응
+    // 영문 약어
     if (s.startsWith("C")) return "C";
     if (s.startsWith("T")) return "T";
     if (s.startsWith("D")) return "D";
-    if (s.startsWith("X")) return "TD";
+    if (s.startsWith("X")) return "TD"; // 예: 'X'를 TD로 사용한 경우
     return "";
   };
 
-  (function walk(arr){
-    (arr||[]).forEach(t=>{
-      // 태스크 레벨 상태
-      let s = norm(t.status || t.selectedOption);
+  // 우선순위: C(3) > TD(2) > D(1) > T(0)
+  const prio = { C:3, TD:2, D:1, T:0, "":-1 };
 
-      (t.linkedObjects||[]).forEach(o=>{
-        // 링크 객체에 상태 필드가 있다면 우선(없으면 부모 상태 상속)
-        const os = norm(o.status || o.phase || s);
-        const id = o.dbId;
-        if (os==="C") S.C.add(id);
-        else if (os==="T") S.T.add(id);
-        else if (os==="D") S.D.add(id);
-        else if (os==="TD") S.TD.add(id);
+  // dbId에 상태를 갱신(합의)하는 함수
+  function apply(id, sNew) {
+    if (!id || !sNew) return;
+    const cur = stateById.get(id);
+    if (!cur) { stateById.set(id, sNew); return; }
+
+    // T와 D가 섞이면 TD로 승격
+    if ((cur === "T" && sNew === "D") || (cur === "D" && sNew === "T")) {
+      stateById.set(id, "TD");
+      return;
+    }
+
+    // 더 높은 우선순위가 이긴다
+    stateById.set(id, prio[sNew] > prio[cur] ? sNew : cur);
+  }
+
+  // 태스크 트리를 돌며 상태 합의 진행
+  (function walk(arr, inherited="") {
+    (arr || []).forEach(t => {
+      const sTask = norm(t.status || t.selectedOption || inherited);
+      (t.linkedObjects || []).forEach(o => {
+        const sObj = norm(o.status || o.phase || sTask);
+        apply(o.dbId, sObj);
       });
-
-      if (t.children) walk(t.children);
+      if (t.children) walk(t.children, sTask);
     });
   })(tasks);
 
+  // 최종 세트 만들기 (dbId 1개 = 상태 1개)
+  const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
+  for (const [id, s] of stateById.entries()) {
+    if (s && S[s]) S[s].add(id);
+  }
   return S;
 }
-
-
-// 1) 브릿지 여부
-__WBS_DEBUG && typeof __WBS_DEBUG.getCounts === "function" && !!__WBS_DEBUG.__patchedForFallback
-
-// 2) 폴백 맵 키 수
-Object.keys(window.__FA_FALLBACK_BY_KEY||{}).length
-
-// 3) 루트 한 개 검사 (구조벽)
-(() => {
-  const D = __WBS_DEBUG;
-  const K = D?.toKey ? D.toKey(["구조벽"]) : toKey(["구조벽"]);
-  return { cur: D.getCounts(K), fb: window.__FA_FALLBACK_BY_KEY[K] };
-})()

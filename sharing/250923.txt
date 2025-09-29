@@ -1,4 +1,4 @@
-// /wwwroot/js/main.js — 첫 프레임 0 방지 + 상태 매핑 고정 + 폴백 브리지
+// /wwwroot/js/main.js  — WBS 카운팅/색칠 첫 프레임 0 방지 (FINAL, debug.getCounts까지 브릿지)
 
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
@@ -24,23 +24,22 @@ import {
   initWbsPanelWithFancytree,
 } from "./sidebar/index.js";
 
-/* ====================================================== */
-/* 전역 디버그 노출 */
+// === 디버그용 전역 노출
 try {
   window.__WBS_DEBUG = window.__WBS_DEBUG || {};
-  window.getCounts = getCounts;                 // 콘솔 사용/브리지용
+  window.getCounts = getCounts;
   window.markTasksChanged = markTasksChanged;
 } catch (e) {
   console.warn("[debug expose] failed:", e);
 }
 
-/* ====================================================== */
+/* ============================== */
 /* 레이아웃 / 공통 설정 */
 const SIDEBAR_MIN = 360;
 const SIDEBAR_DEFAULT = 900;
 const PREVIEW_MIN = 520;
 
-// 폴백 맵 전역
+// 전역 폴백 저장소
 window.__FA_FALLBACK_BY_KEY = Object.create(null);
 
 function initSidebarWidth() {
@@ -78,7 +77,7 @@ function resetViewerInputAndCamera(viewer) {
   }
 }
 
-/* ====================================================== */
+/* ============================== */
 /* 뷰어 준비 대기 유틸 */
 function onceViewer(viewer, type) {
   return new Promise((resolve) => {
@@ -150,7 +149,7 @@ async function focusCameraAndWait(viewer) {
   });
 }
 
-/* ====================================================== */
+/* ============================== */
 /* 태스크/URN 유틸 */
 function safeUrn(urn) { return urn.replace(/[^a-zA-Z0-9]/g, "_"); }
 function fillUrnRecursive(task, defaultUrn) {
@@ -176,14 +175,12 @@ function persistTasksSnapshot(tasks) {
   }
 }
 
-/* ====================================================== */
-/* WBS 경로/DBID 준비 */
-
+/* ============================== */
+/* WBS 키/맵 사전구축 + 집계 싱크 */
 async function seedDbIdMappings(provider, { maxDepth = 3, cap = 6000 } = {}) {
   const roots = await provider.roots().catch(() => []) || [];
   const q = roots.map(r => ({ path: [r.text], depth: 0 }));
   let visited = 0;
-
   while (q.length && visited < cap) {
     const { path, depth } = q.shift();
     try { provider.getDbIdsForPath?.(path, { includeDescendants: true, allowUnbuilt: true }); } catch {}
@@ -204,7 +201,6 @@ async function collectKeysForRoots(provider, { maxDepth = 3, cap = 6000 } = {}) 
   const q = roots.map(r => ({ path: [r.text], depth: 0 }));
   const keys = new Set();
   let seen = 0;
-
   while (q.length && seen < cap) {
     const { path, depth } = q.shift();
     keys.add(toKey(path));
@@ -221,59 +217,23 @@ async function collectKeysForRoots(provider, { maxDepth = 3, cap = 6000 } = {}) 
   return Array.from(keys);
 }
 
-async function collectAllPathKeysFrom(provider, startPath, { maxDepth = 99, cap = 50000 } = {}) {
-  const q = [{ path: startPath, depth: 0 }];
-  const out = [];
-  let seen = 0;
-
-  while (q.length && seen < cap) {
-    const { path, depth } = q.shift();
-    out.push(toKey(path));
-    if (depth < maxDepth) {
-      let kids = [];
-      try { kids = await provider.childrenByPath(path) || []; } catch {}
-      seen += kids.length;
-      for (const ch of kids) q.push({ path: (ch.__path || [...path, ch.text]), depth: depth+1 });
-    }
-  }
-  return out;
-}
-
-/* ====================================================== */
-/* 상태 매핑/집계 ─ 핵심 수정 */
-
-function toStatusCode(raw) {
-  const s = String(raw ?? "").trim();
-  if (!s) return "";
-  const u = s.toUpperCase();
-
-  // 영문/약어
-  if (u === "C" || u.startsWith("COMP")) return "C";
-  if (u === "T" || u.startsWith("TEMP")) return "T";
-  if (u === "D" || u.startsWith("DEMO")) return "D";
-  if (u === "TD" || u === "X") return "TD";
-
-  // 한글
-  if (s.includes("시공")) return "C";
-  if (s.includes("가설")) return "T";
-  if (s.includes("철거")) return "D";
-  if (s.includes("동시") || s.includes("동시공정")) return "TD";
-
-  return "";
-}
-
+// === 폴백 계산기
 function buildStatusSetsFromTasks(tasks) {
   const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
   (function walk(arr){
-    (arr || []).forEach(t=>{
-      const sTask = toStatusCode(t.status || t.selectedOption);
-      (t.linkedObjects || []).forEach(o=>{
-        const sObj = toStatusCode(o.status) || sTask;
-        if (!sObj) return;
-        if (sObj === "C") S.C.add(o.dbId);
-        else if (sObj === "T") S.T.add(o.dbId);
-        else if (sObj === "D") S.D.add(o.dbId);
-        else if (sObj === "TD") S.TD.add(o.dbId);
+    (arr||[]).forEach(t=>{
+      const raw = (t.status || t.selectedOption || "").toString().toUpperCase();
+      const s = raw.startsWith("C") ? "C"
+            : raw.startsWith("T") ? "T"
+            : raw.startsWith("D") ? "D"
+            : raw.startsWith("X") ? "TD"
+            : raw; // 필요 시 한글→영문 매핑 지점
+      (t.linkedObjects||[]).forEach(o=>{
+        const id = o.dbId;
+        if (s==="C") S.C.add(id);
+        else if (s==="T") S.T.add(id);
+        else if (s==="D") S.D.add(id);
+        else if (s==="TD") S.TD.add(id);
       });
       if (t.children) walk(t.children);
     });
@@ -298,8 +258,10 @@ function calcCountsForPath(provider, path, S) {
   return { total:set.size, c,t,d,td };
 }
 
-/* ====================================================== */
-/* 폴백 빌드 + 브리지 */
+function keyFromPath(path) {
+  const D = window.__WBS_DEBUG;
+  return (D?.toKey ? D.toKey(path) : toKey(path));
+}
 
 async function buildFallbackMap(provider, { maxDepth=3, cap=6000 } = {}) {
   window.__FA_FALLBACK_BY_KEY = Object.create(null);
@@ -312,23 +274,40 @@ async function buildFallbackMap(provider, { maxDepth=3, cap=6000 } = {}) {
 
   while (q.length && seen < cap) {
     const { path, depth } = q.shift();
-    const key = toKey(path);
+    const key = keyFromPath(path);
     window.__FA_FALLBACK_BY_KEY[key] = calcCountsForPath(provider, path, S);
 
     let kids = [];
     try { kids = await provider.childrenByPath(path) || []; } catch {}
     seen += kids.length;
-
     if (depth < maxDepth) {
       for (const ch of kids) q.push({ path: (ch.__path || [...path, ch.text]), depth: depth+1 });
     }
   }
-  console.log("[FA] fallback map ready (keys =", Object.keys(window.__FA_FALLBACK_BY_KEY).length, ")");
+  console.log("[FA] fallback map ready (keys =",
+              Object.keys(window.__FA_FALLBACK_BY_KEY).length, ")");
 }
 
+// === ★ 핵심: getCounts를 (글로벌 + __WBS_DEBUG) 모두 폴백 참조로 브릿지
 function patchGetCountsToUseFallback() {
-  // 디버그 네임스페이스에 getCounts가 노출되어 있으면 그걸 패치
   const D = window.__WBS_DEBUG;
+  const fbMap = () => window.__FA_FALLBACK_BY_KEY || Object.create(null);
+
+  // patch global getCounts (존재하지 않아도 무해)
+  if (!window.__FA_BRIDGED_GLOBAL) {
+    const origGlobal = window.getCounts;
+    window.getCounts = function (k) {
+      const r = origGlobal ? (origGlobal(k) || {}) : {};
+      const sum = ((r.c|0)+(r.t|0)+(r.d|0)+(r.td|0));
+      if (sum > 0) return r;
+      const fb = fbMap()[k];
+      if (fb) { const total = Math.max((r.total|0), (fb.total|0)); return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 }; }
+      return r;
+    };
+    window.__FA_BRIDGED_GLOBAL = true;
+  }
+
+  // patch __WBS_DEBUG.getCounts (실제 렌더/로그는 이걸 씀)
   if (D?.getCounts && !D.__patchedForFallback) {
     const orig = D.getCounts.bind(D);
     D.__origGetCounts = orig;
@@ -336,36 +315,14 @@ function patchGetCountsToUseFallback() {
       const r = orig(k) || {};
       const sum = ((r.c|0)+(r.t|0)+(r.d|0)+(r.td|0));
       if (sum > 0) return r;
-      const fb = window.__FA_FALLBACK_BY_KEY?.[k];
-      if (fb) {
-        const total = Math.max((r.total|0), (fb.total|0));
-        return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 };
-      }
+      const fb = fbMap()[k];
+      if (fb) { const total = Math.max((r.total|0), (fb.total|0)); return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 }; }
       return r;
     };
     D.__patchedForFallback = true;
-    console.log("[FA] getCounts bridged (debug)");
   }
 
-  // 전역 window.getCounts도 브리지(콘솔/기타 참조용)
-  if (!window.__GETCOUNTS_BRIDGED) {
-    const origG = window.getCounts;
-    window.getCounts = function (k) {
-      try {
-        const r = origG?.(k) || {};
-        const sum = ((r.c|0)+(r.t|0)+(r.d|0)+(r.td|0));
-        if (sum > 0) return r;
-        const fb = window.__FA_FALLBACK_BY_KEY?.[k];
-        if (fb) {
-          const total = Math.max((r.total|0), (fb.total|0));
-          return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 };
-        }
-        return r;
-      } catch { return {}; }
-    };
-    window.__GETCOUNTS_BRIDGED = true;
-    console.log("[FA] getCounts bridged (global)");
-  }
+  console.log("[FA] getCounts bridged (global+debug)");
 }
 
 async function installFallbackCounts(tree, provider) {
@@ -379,9 +336,8 @@ async function installFallbackCounts(tree, provider) {
     const counts = calcCountsForPath(provider, path, S);
     node.data = node.data || {};
     node.data.__aggCounts = counts;
-    const k = toKey(path);
+    const k = keyFromPath(path);
     window.__FA_FALLBACK_BY_KEY[k] = counts;
-
     (node.children||[]).forEach(ch => {
       const next = ch.data?.__path || [...path, ch.title];
       visit(ch, next);
@@ -396,35 +352,9 @@ async function installFallbackCounts(tree, provider) {
   console.log("[FA] fallback counts installed");
 }
 
-/* ====================================================== */
-/* 매트릭스 준비 대기 */
-
-async function waitForMatrixPrimed(provider, timeoutMs = 2500) {
-  const roots = (await provider.roots().catch(()=>[])) || [];
-  const keys  = roots.map(r => toKey([r.text]));
-  const t0 = performance.now();
-  while (performance.now() - t0 < timeoutMs) {
-    const ready = keys.some(k => {
-      const c = getCounts?.(k);
-      return c && ((c.c|0)+(c.t|0)+(c.d|0)+(c.td|0)) > 0;
-    });
-    if (ready) return true;
-    await new Promise(r => requestAnimationFrame(r));
-  }
-  return false;
-}
-
-async function ensureMatrixFromTasks(provider) {
-  try { markTasksChanged(); } catch {}
-  const ok = await waitForMatrixPrimed(provider, 2500);
-  if (!ok) console.warn("[matrix] priming timed out (counts may be zero on first frame)");
-}
-
-/* ====================================================== */
-/* 하드 싱크 (디버그 의존 없이 동작) */
-
 async function hardSyncCountsForRoots(tree, provider, { cap = 12000 } = {}) {
-  if (!tree || !provider) return;
+  if (!tree || !provider || !window.__WBS_DEBUG) return;
+  const D = window.__WBS_DEBUG;
 
   const roots = tree.getRootNode().children || [];
   if (!roots.length) return;
@@ -433,26 +363,26 @@ async function hardSyncCountsForRoots(tree, provider, { cap = 12000 } = {}) {
   for (const r of roots) {
     const p = r.data?.__path || [r.title];
     try {
-      const ks = await collectAllPathKeysFrom(provider, p, { cap });
+      const ks = await D.collectAllPathKeys(provider, p, cap);
       all.push(...ks);
     } catch (e) {
-      console.warn("[hardSync] collectAllPathKeysFrom failed for", p, e);
+      console.warn("[hardSync] collectAllPathKeys failed for", p, e);
     }
   }
   const uniq = Array.from(new Set(all));
   if (!uniq.length) return;
 
   try {
-    await bulkEnsureForVisible(uniq);
-    uniq.forEach(computePathState);
+    await D.bulkEnsureForVisible(uniq);
+    uniq.forEach(D.computePathState);
   } catch (e) {
     console.warn("[hardSync] ensure/compute failed:", e);
   }
 
   try {
     for (const r of roots) {
-      const k = r.data?.pathKey || toKey([r.title]);
-      const c = getCounts?.(k);
+      const k = r.data?.pathKey;
+      const c = k && D.getCounts?.(k);
       console.log("[hardSync] root:", r.title, "counts=", c);
     }
   } catch {}
@@ -465,9 +395,8 @@ async function hardSyncCountsForRoots(tree, provider, { cap = 12000 } = {}) {
   }
 }
 
-/* ====================================================== */
+/* ============================== */
 /* 태스크 로딩 (API) */
-
 const SAMPLE_TASK_DATA = [
   {
     no: "1",
@@ -487,7 +416,7 @@ const SAMPLE_TASK_DATA = [
       },
     ],
   },
-  { no: "2", title: "Task B", selectedOption: "가설", start: "", end: "", linkedObjects: [] },
+  { no: "2", title: "Task B", selectedOption: "시공", start: "", end: "", linkedObjects: [] },
 ];
 
 async function fetchTaskDataForCurrentModel() {
@@ -505,7 +434,7 @@ async function fetchTaskDataForCurrentModel() {
   return SAMPLE_TASK_DATA.map(x => structuredClone(x));
 }
 
-/* ====================================================== */
+/* ============================== */
 /* resize */
 window.addEventListener("resize", _.throttle(() => {
   try {
@@ -517,7 +446,7 @@ window.addEventListener("resize", _.throttle(() => {
   }
 }, 120));
 
-/* ====================================================== */
+/* ============================== */
 /* main */
 (async function () {
   try {
@@ -580,20 +509,21 @@ window.addEventListener("resize", _.throttle(() => {
 
     // 4) 모델 선택
     initTree("#tree", async (versionId) => {
-      const urn = window.btoa(versionId).replace(/=/g, "");
+      const urn = window.btoa(versionId).replace(/=/g, ""); // RAW
       window.CURRENT_MODEL_URN = urn;
       window.CURRENT_MODEL_SAFE_URN = safeUrn(urn);
 
+      // 기존 WBS 파괴
       try { $.ui.fancytree.getTree("#wbs-tree")?.destroy(); } catch {}
       $("#wbs-group-content").empty();
 
-      // A) 모델 로드 & 안정화
+      // (A) 모델 로드 & 안정화
       await loadModel(viewer, urn);
       await waitViewerReady(viewer);
       await focusCameraAndWait(viewer);
       viewer.resize();
 
-      // B) WBS Provider
+      // (B) WBS Provider 생성
       let wbsProvider = null;
       try {
         const PRIMARY = ["HEC.WBS","HEC.Level","HEC.Zone"];
@@ -613,30 +543,27 @@ window.addEventListener("resize", _.throttle(() => {
         window.WBS_PROVIDER = wbsProvider;
       }
 
-      // C) 태스크 로드 → URN 통일 → 스냅샷 저장
+      // (C) 태스크 로드 → URN 통일 → 스냅샷 영속
       const taskData = await fetchTaskDataForCurrentModel();
       taskData.forEach((t) => fillUrnRecursive(t, urn));
-      persistTasksSnapshot(taskData); // RAW/SAFE + __SAVED_TASKS
+      persistTasksSnapshot(taskData);
 
-      // D) provider 맵 워밍업 → 매트릭스 초기화 → 태스크 주입
+      // (D) provider 맵 사전 구축 → 매트릭스 초기화 → 태스크 주입
       await seedDbIdMappings(wbsProvider, { maxDepth: 3, cap: 6000 });
       await initMatrix({ primaryOrder:["HEC.WBS","HEC.Level","HEC.Zone"], provider: wbsProvider });
       setSavedTaskData(taskData);
       console.log("[reply] setSavedTaskData done");
 
-      // E) 폴백 맵 미리 구축 + getCounts 브리지
+      // (E) 폴백 맵 준비 + getCounts 브릿지(★ 반드시 선행)
       await buildFallbackMap(wbsProvider, { maxDepth:3, cap:6000 });
-      patchGetCountsToUseFallback();
+      patchGetCountsToUseFallback(); // global + __WBS_DEBUG 모두
 
-      // F) 태스크→매트릭스 반영 대기(최대 2.5s)
-      await ensureMatrixFromTasks(wbsProvider);
-
-      // G) 루트~깊이3 키 보장/계산
+      // (F) 선계산: 루트~깊이3 키 보장/계산 → 이때부터 폴백 경유로 c/t/d/td가 나온다
       const preKeys = await collectKeysForRoots(wbsProvider, { maxDepth: 3, cap: 6000 });
       await bulkEnsureForVisible(preKeys);
       preKeys.forEach(computePathState);
 
-      // H) 선행 집계 로그
+      // (G) 확인 로그
       try {
         const roots = (await wbsProvider.roots()) || [];
         console.log("[precompute] roots=", roots.length);
@@ -646,20 +573,21 @@ window.addEventListener("resize", _.throttle(() => {
         });
       } catch {}
 
-      // I) FancyTree 초기화 → 폴백 적용 → 하드싱크
+      // (H) FancyTree 초기화 → 폴백 주입 → 하드싱크
       try {
         await initWbsPanelWithFancytree(wbsProvider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
         console.log("[STEP 5] WBS fancytree init OK");
-        const tree = $.ui.fancytree.getTree("#wbs-tree");
 
-        await installFallbackCounts(tree, wbsProvider); // 첫 프레임 보정
+        const tree = $.ui.fancytree.getTree("#wbs-tree");
+        await installFallbackCounts(tree, wbsProvider);
+
         await waitIdle(60);
-        await hardSyncCountsForRoots(tree, wbsProvider, { cap: 12000 }); // 실제 매트릭스 값으로 수복
+        await hardSyncCountsForRoots(tree, wbsProvider, { cap: 12000 });
       } catch (e) {
         console.warn("[STEP 5] WBS fancytree init failed:", e);
       }
 
-      // 기타 패널들
+      // 나머지 패널들
       try {
         bindPanel2Resizer(viewer);
         console.log("[STEP 6] panel2 resizer bound");
@@ -689,19 +617,31 @@ window.addEventListener("resize", _.throttle(() => {
   }
 })();
 
-/* ====================================================== */
+/* ============================== */
 /* 디버그 유틸 */
 window.DEBUG_WBS = window.DEBUG_WBS || {};
-
 window.DEBUG_WBS.dumpExpectedVsCurrent = async function () {
   try {
     const provider = window.WBS_PROVIDER;
+    const D = window.__WBS_DEBUG;
     const tasks = window.__SAVED_TASKS || [];
     if (!provider) { console.warn("WBS_PROVIDER 없음"); return; }
 
-    const S = buildStatusSetsFromTasks(tasks);
-    const roots = await provider.roots();
+    const dbC = new Set(), dbT = new Set(), dbD = new Set(), dbTD = new Set();
+    (function walk(arr){
+      (arr || []).forEach(t => {
+        const s = (t.status || t.selectedOption || "").toUpperCase().slice(0,1);
+        (t.linkedObjects||[]).forEach(o => {
+          if (s === "C") dbC.add(o.dbId);
+          else if (s === "T") dbT.add(o.dbId);
+          else if (s === "D") dbD.add(o.dbId);
+          else if (s === "X") dbTD.add(o.dbId);
+        });
+        if (t.children) walk(t.children);
+      });
+    })(tasks);
 
+    const roots = await provider.roots();
     const rows = [];
     for (const r of roots) {
       const path = [r.text];
@@ -709,13 +649,13 @@ window.DEBUG_WBS.dumpExpectedVsCurrent = async function () {
       const set = new Set(ids);
       const exp = { root: r.text, total: ids.length, c: 0, t: 0, d: 0, td: 0 };
       for (const id of set) {
-        if (S.C.has(id)) exp.c++;
-        if (S.T.has(id)) exp.t++;
-        if (S.D.has(id)) exp.d++;
-        if (S.TD.has(id)) exp.td++;
+        if (dbC.has(id)) exp.c++;
+        if (dbT.has(id)) exp.t++;
+        if (dbD.has(id)) exp.d++;
+        if (dbTD.has(id)) exp.td++;
       }
-      const key = toKey(path);
-      const cur = getCounts?.(key) || {};
+      const key = D?.toKey ? D.toKey(path) : toKey(path);
+      const cur = D?.getCounts?.(key) || {};
       rows.push({
         root: r.text,
         expected: { total: exp.total, c: exp.c, t: exp.t, d: exp.d, td: exp.td },
@@ -769,4 +709,3 @@ window.DEBUG_WBS.lsInfo = function () {
   const memLen = (window.__SAVED_TASKS||[]).length;
   console.log("[LS] RAW/SAFE:", { RAW, SAFE, hasRaw, hasSafe, memLen });
 };
-```0

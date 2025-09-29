@@ -1,14 +1,15 @@
 // /wwwroot/js/task-wbs/task-buttons.js
-// Test 버튼: 선택 해제 → Z+5m로 2초 이동 + 페이드아웃(불투명도) + 컬러 폴백 → 1초 정지 → 2초 복귀 + 페이드인
-// ※ 모델 단위가 m이 아니면 MOVE_Z 값을 조정하세요.
+// Test 버튼: 선택 해제 → Z+5m 2초 이동 + 페이드아웃(머티리얼 불투명도) + 테마컬러 폴백 → 1초 정지 → 2초 복귀 + 페이드인
+// ※ 모델 단위가 m이 아니면 MOVE_Z 값을 조정하세요(예: mm 모델이면 5000).
 
 export function initTaskWbsButtons(viewer) {
-  const btn = document.getElementById('btn-test');
+  let btn = document.getElementById('btn-test');
   if (!btn || !viewer) return;
 
-  // 중복 바인딩 방지
-  if (btn.dataset.testBound === '1') return;
-  btn.dataset.testBound = '1';
+  // 기존 리스너 제거(클론 교체)
+  const clone = btn.cloneNode(true);
+  btn.parentNode.replaceChild(clone, btn);
+  btn = clone;
 
   btn.addEventListener('click', async () => {
     try {
@@ -22,102 +23,102 @@ export function initTaskWbsButtons(viewer) {
 async function runTestAnimation(viewer) {
   const sel = getSelectionSmart(viewer);
   if (!sel || !sel.model || !sel.dbIds.length) {
-    // 선택 없을 때만 경고
-    console.warn('[test-btn] 먼저 객체를 선택하세요.');
+    console.warn('[test-btn] 먼저 객체를 선택하세요.'); // 선택 없을 때만 찍힘
     return;
   }
 
   const { model, dbIds } = sel;
 
-  // 1) 선택 해제(애니메이션 중 실수 클릭 방지)
+  // 선택 해제(애니메이션 중 오동작 방지)
   viewer.clearSelection();
 
-  // 2) 대상 프래그먼트 수집
+  // 프래그먼트 수집
   const fragIds = collectFragIds(model, dbIds);
   if (!fragIds.length) return;
 
-  // 3) 상태 준비(위치/머티리얼 클론/원본 색상 저장)
+  // 상태 준비: 위치 + 머티리얼 교체 준비
   const store = prepareFragStates(viewer, model, fragIds);
 
-  // --- 파라미터 ---
-  const MOVE_Z_M = 5.0;  // 모델 단위 m 기준. mm 모델이면 5000 등으로 조정
-  const D1 = 2000;       // 2초 이동 + 페이드아웃
-  const HOLD = 1000;     // 1초 정지
-  const D2 = 2000;       // 2초 복귀 + 페이드인
+  // 파라미터
+  const MOVE_Z = 5.0;   // m 기준
+  const D1 = 2000;      // 2초: 이동 + 페이드아웃
+  const HOLD = 1000;    // 1초 정지
+  const D2 = 2000;      // 2초: 복귀 + 페이드인
 
-  // 페이드가 안 먹는 환경을 대비한 컬러 폴백(오렌지)
   const THREE = window.THREE || Autodesk.Viewing.THREE;
-  const FALLBACK_COLOR = new THREE.Color(1.0, 0.45, 0.0); // #FF7300 근처
+  const FALLBACK = new THREE.Color(1.0, 0.45, 0.0); // #FF7300 근처(테마컬러 폴백)
 
-  // 4) Z+5m & 서서히 투명화(+ 컬러 폴백으로 가시 변화 보장)
+  // OUT: Z+ → opacity 1→0, 테마컬러 0→1
   await animate(D1, (t) => {
-    const dz = lerp(0, MOVE_Z_M, t);
-    const alphaOut = 1 - t; // 1→0
+    const dz = lerp(0, MOVE_Z, t);
+    const alpha = 1 - t;
+
     for (const f of store) {
       // 위치
       f.proxy.position.z = f.startPos.z + dz;
       f.proxy.updateAnimTransform();
 
-      // 페이드(머티리얼 불투명도) + 폴백(컬러 변화)
-      if (f.clonedMat) {
-        f.clonedMat.opacity = alphaOut;
-        f.clonedMat.needsUpdate = true;
+      // 페이드(머티리얼)
+      if (f.cloneMat) {
+        f.cloneMat.opacity = alpha;
+        f.cloneMat.transparent = true;
+        f.cloneMat.needsUpdate = true;
+      }
 
-        // 폴백: 원래 색 → 오렌지로 서서히 변경 (페이드가 안 보이는 환경에서도 변화 체감)
-        if (f.clonedMat.color && f.originalColor) {
-          // out 단계: 원색(0) → 폴백(1)
-          f.clonedMat.color.copy(f.originalColor).lerp(FALLBACK_COLOR, t);
-        }
+      // 폴백: 테마컬러 보간(원색→주황)
+      if (f.themingSupported) {
+        const c = f.origColor ? f.origColor.clone().lerp(FALLBACK, t) : FALLBACK.clone();
+        viewer.setThemingColor(f.dbId, c, model, false);
       }
     }
-    viewer.impl.invalidate(true, true, true);
+    viewer.impl.sceneUpdated(true);
   });
 
-  // 5) 1초 정지(사라진 상태)
+  // 정지
   await delay(HOLD);
 
-  // 6) 원위치 복귀 & 서서히 불투명화(+ 컬러 복귀)
+  // IN: Z- → opacity 0→1, 테마컬러 1→0
   await animate(D2, (t) => {
-    const dz = lerp(MOVE_Z_M, 0, t);
-    const alphaIn = t; // 0→1
+    const dz = lerp(MOVE_Z, 0, t);
+    const alpha = t;
+
     for (const f of store) {
       f.proxy.position.z = f.startPos.z + dz;
       f.proxy.updateAnimTransform();
 
-      if (f.clonedMat) {
-        f.clonedMat.opacity = alphaIn;
-        f.clonedMat.needsUpdate = true;
+      if (f.cloneMat) {
+        f.cloneMat.opacity = alpha;
+        f.cloneMat.transparent = true;
+        f.cloneMat.needsUpdate = true;
+      }
 
-        // in 단계: 오렌지(0) → 원색(1)
-        if (f.clonedMat.color && f.originalColor) {
-          f.clonedMat.color.copy(FALLBACK_COLOR).lerp(f.originalColor, t);
-        }
+      if (f.themingSupported) {
+        // 주황→원색
+        const c = (f.origColor ? FALLBACK.clone().lerp(f.origColor, t) : null) || null;
+        if (c) viewer.setThemingColor(f.dbId, c, model, false);
       }
     }
-    viewer.impl.invalidate(true, true, true);
+    viewer.impl.sceneUpdated(true);
   });
 
-  // 7) 상태 복구(위치/머티리얼)
+  // 복구(머티리얼/테마/위치)
   restoreFragStates(viewer, store);
 }
 
 // ----------------- Helpers -----------------
 
 function getSelectionSmart(viewer) {
-  // 단일 모델 선택
-  let dbIds = viewer.getSelection();
-  let model = viewer.model;
-
-  // 집계 선택(멀티 모델) 보강
-  if (!dbIds || dbIds.length === 0) {
-    const agg = viewer.getAggregateSelection?.() || [];
-    if (agg.length > 0) {
-      model = agg[0].model;
-      dbIds = agg[0].selection || [];
-    }
+  // 집계 선택 우선
+  const agg = viewer.getAggregateSelection?.();
+  if (agg && agg.length > 0) {
+    // 다중 모델일 경우 첫 모델만 사용(요구사항 단일 동작 기준)
+    const a = agg[0];
+    const dbIds = (a.selection || []).slice();
+    return dbIds.length ? { model: a.model, dbIds, aggregate: true } : null;
   }
-  if (!dbIds || dbIds.length === 0) return null;
-  return { model, dbIds };
+  // 일반 선택
+  const dbIds = viewer.getSelection();
+  return (dbIds && dbIds.length) ? { model: viewer.model, dbIds, aggregate: false } : null;
 }
 
 function collectFragIds(model, dbIds) {
@@ -131,7 +132,17 @@ function collectFragIds(model, dbIds) {
 
 function prepareFragStates(viewer, model, fragIds) {
   const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const matman = viewer.impl.matman();
+  const fragList = viewer.impl.getFragmentList();
   const store = [];
+
+  // dbId 역조회: fragId -> dbId
+  const fragToDb = {};
+  const it = model.getData().instanceTree;
+  fragIds.forEach((fragId) => {
+    const dbId = fragList.getDbId(fragId);
+    fragToDb[fragId] = dbId;
+  });
 
   for (const fragId of fragIds) {
     const proxy = viewer.impl.getFragmentProxy(model, fragId);
@@ -139,42 +150,83 @@ function prepareFragStates(viewer, model, fragIds) {
     const startPos = new THREE.Vector3(proxy.position.x, proxy.position.y, proxy.position.z);
 
     const rp = viewer.impl.getRenderProxy(model, fragId);
+    const originalMat = rp?.material || null;
 
-    let clonedMat = null, originalMat = null, originalColor = null;
-    if (rp && rp.material) {
-      originalMat = rp.material;
+    // 원래 색상(머티리얼 기반) 보관
+    let origColor = null;
+    if (originalMat && originalMat.color) origColor = originalMat.color.clone();
 
-      // 원래 색상 보관(폴백용)
-      if (originalMat.color) originalColor = originalMat.color.clone();
+    // 머티리얼 클론(공유 방지) → 공식 경로로 바인딩
+    let cloneMat = null;
+    if (originalMat) {
+      // matman.cloneMaterial을 쓰면 내부 상태까지 안전하게 복제됨
+      cloneMat = (matman?.cloneMaterial) ? matman.cloneMaterial(originalMat) : originalMat.clone();
+      cloneMat.transparent = true;
+      cloneMat.opacity = 1.0;
+      cloneMat.depthWrite = false;
+      cloneMat.needsUpdate = true;
 
-      // 공유 머티리얼 대비 → 클론해서 이 프래그먼트만 조작
-      clonedMat = originalMat.clone();
-      clonedMat.transparent = true;     // 불투명도 활성
-      clonedMat.depthWrite = false;     // 투명 패스에서 Z-fighting 최소화
-      clonedMat.opacity = 1.0;
-      // 컬러는 out/in 단계에서 보간함
-      rp.material = clonedMat;
-      rp.material.needsUpdate = true;
+      // 핵심: impl.setMaterial(model, fragId, cloneMat) 로 바인딩해야 실제 반영됨
+      if (viewer.impl.setMaterial) {
+        viewer.impl.setMaterial(model, fragId, cloneMat);
+      } else if (fragList?.setMaterial) {
+        // 일부 버전
+        fragList.setMaterial(fragId, cloneMat);
+      } else if (viewer.impl.setFragmentMaterial) {
+        // 레거시
+        viewer.impl.setFragmentMaterial(fragId, cloneMat);
+      }
     }
 
-    store.push({ fragId, proxy, startPos, renderProxy: rp, originalMat, clonedMat, originalColor });
+    // 테마컬러 폴백 활성화 여부(항상 가능)
+    const dbId = fragToDb[fragId];
+    const themingSupported = Number.isInteger(dbId);
+
+    store.push({
+      fragId, dbId, proxy, startPos,
+      renderProxy: rp,
+      originalMat, cloneMat,
+      origColor, themingSupported
+    });
   }
+  viewer.impl.sceneUpdated(true);
   return store;
 }
 
 function restoreFragStates(viewer, store) {
+  const byModel = {}; // 모델 단위 테마컬러 제거용
+
   for (const f of store) {
     // 위치 원복
     f.proxy.position.copy(f.startPos);
     f.proxy.updateAnimTransform();
 
     // 머티리얼 원복
-    if (f.renderProxy && f.originalMat) {
-      f.renderProxy.material = f.originalMat;
+    if (f.originalMat) {
+      if (viewer.impl.setMaterial) {
+        viewer.impl.setMaterial(viewer.model, f.fragId, f.originalMat);
+      } else if (viewer.impl.getFragmentList?.().setMaterial) {
+        viewer.impl.getFragmentList().setMaterial(f.fragId, f.originalMat);
+      } else if (viewer.impl.setFragmentMaterial) {
+        viewer.impl.setFragmentMaterial(f.fragId, f.originalMat);
+      }
     }
-    if (f.clonedMat?.dispose) f.clonedMat.dispose();
+    if (f.cloneMat?.dispose) f.cloneMat.dispose();
+
+    // 테마컬러 제거
+    if (f.themingSupported) {
+      byModel[viewer.model?.id || 0] ||= [];
+      byModel[viewer.model?.id || 0].push(f.dbId);
+    }
   }
-  viewer.impl.invalidate(true, true, true);
+
+  // 테마컬러 일괄 제거
+  Object.keys(byModel).forEach((k) => {
+    const ids = byModel[k];
+    ids.forEach((dbId) => viewer.clearThemingColor(dbId, viewer.model));
+  });
+
+  viewer.impl.sceneUpdated(true);
 }
 
 function lerp(a, b, t) { return a + (b - a) * t; }

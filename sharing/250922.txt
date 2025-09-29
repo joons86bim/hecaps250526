@@ -1,52 +1,142 @@
-highlight.js:4 [hec] wbs/highlight.js loaded
-endpoints.js:236  getCdnRedirectUrl is deprecated and will be removed soon
-endp.getCdnRedirectUrl @ endpoints.js:236
-initializeCDN @ envinit.js:640
-Initializer @ envinit.js:759
-(anonymous) @ init-viewer.js:18
-initViewer @ init-viewer.js:17
-(anonymous) @ main.js:504
-await in (anonymous)
-(anonymous) @ main.js:591
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-(index):1 Autofocus processing was blocked because a document already has a focused element.
-GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
-GeometryList.js:345 Number of meshes: 23
-GeometryList.js:346 Num Meshes on GPU: 26
-GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:548 [WBS] roots: 3
-main.js:148 [persistTasksSnapshot] saved. count = 3
-main.js:276 [FA] fallback map ready (keys = 24 )
-main.js:310 [FA] getCounts bridged
-main.js:576 [STEP 5] WBS fancytree init OK
-main.js:582 [STEP 6] panel2 resizer bound
-main.js:583 [STEP 1] Task panel OK
-main.js:584 [STEP 2] panel2-ready dispatched
-gantt-view.js:171 [gantt-view] google loaded
-CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
-GeometryList.js:345 Number of meshes: 23
-GeometryList.js:346 Num Meshes on GPU: 26
-GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:548 [WBS] roots: 3
-main.js:148 [persistTasksSnapshot] saved. count = 3
-main.js:276 [FA] fallback map ready (keys = 24 )
-main.js:310 [FA] getCounts bridged
-main.js:576 [STEP 5] WBS fancytree init OK
-main.js:582 [STEP 6] panel2 resizer bound
-main.js:583 [STEP 1] Task panel OK
-main.js:584 [STEP 2] panel2-ready dispatched
+// /wwwroot/js/task-wbs/task-buttons.js
+// Test 버튼: 선택 객체의 선택을 해제하고 Z축 +5m로 2초 이동하며 서서히 투명화 → 1초 정지 → 2초간 원위치로 복귀 & 서서히 불투명화
+// Forge/APS Viewer v7+ 기준. 모델 단위가 미터가 아닐 경우 MOVE_Z를 조정하세요.
+
+export function initTaskWbsButtons(viewer) {
+  const btn = document.getElementById('btn-test');
+  if (!btn || !viewer) return;
+  btn.addEventListener('click', () => runTestAnimation(viewer).catch(console.error));
+}
+
+async function runTestAnimation(viewer) {
+  const model = viewer?.model;
+  if (!model) return;
+
+  const dbIds = viewer.getSelection();
+  if (!dbIds || dbIds.length === 0) {
+    // 필요하면 토스트 등으로 교체
+    console.warn('[test] 먼저 객체를 선택하세요.');
+    return;
+  }
+
+  // 1) 선택 해제
+  viewer.clearSelection();
+
+  // 2) 대상 조각(frags) 수집
+  const fragIds = collectFragIds(model, dbIds);
+  if (fragIds.length === 0) return;
+
+  // 3) 프래그먼트 상태 준비(시작 위치, 머티리얼 클론 등)
+  const store = prepareFragStates(viewer, model, fragIds);
+
+  // 이동/페이드 파라미터
+  const MOVE_Z = 5.0; // 모델 단위가 m일 때 5m. (mm 모델이면 5000 등으로 조정)
+  const D1 = 2000; // 왕복 1단계(이동+페이드아웃) 2초
+  const HOLD = 1000; // 정지 1초
+  const D2 = 2000; // 복귀(이동+페이드인) 2초
+
+  // 4) Z+5m 이동 & 서서히 투명화
+  await animate(D1, (t) => {
+    const dz = lerp(0, MOVE_Z, t);
+    const alpha = lerp(1, 0, t);
+    for (const f of store) {
+      f.proxy.position.z = f.startPos.z + dz;
+      f.proxy.updateAnimTransform();
+      if (f.clonedMat) f.clonedMat.opacity = alpha;
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+
+  // 5) 1초 정지 (완전 투명/숨김 상태)
+  await delay(HOLD);
+
+  // 6) 원위치 복귀 & 서서히 불투명화
+  await animate(D2, (t) => {
+    const dz = lerp(MOVE_Z, 0, t);
+    const alpha = lerp(0, 1, t);
+    for (const f of store) {
+      f.proxy.position.z = f.startPos.z + dz;
+      f.proxy.updateAnimTransform();
+      if (f.clonedMat) f.clonedMat.opacity = alpha;
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+
+  // 7) 상태 복구 (원래 머티리얼/위치로)
+  restoreFragStates(viewer, store);
+}
+
+// --- Helpers ---------------------------------------------------------------
+
+function collectFragIds(model, dbIds) {
+  const it = model.getData().instanceTree;
+  const fragIds = [];
+  dbIds.forEach((dbId) => {
+    it.enumNodeFragments(dbId, (fragId) => fragIds.push(fragId), true);
+  });
+  return fragIds;
+}
+
+function prepareFragStates(viewer, model, fragIds) {
+  const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const store = [];
+
+  for (const fragId of fragIds) {
+    const proxy = viewer.impl.getFragmentProxy(model, fragId);
+    proxy.getAnimTransform(); // position/scale/quaternion 읽어오기
+    const startPos = new THREE.Vector3(proxy.position.x, proxy.position.y, proxy.position.z);
+
+    // 프래그의 렌더 프록시/머티리얼 확보 및 클론(투명도 제어용)
+    const rp = viewer.impl.getRenderProxy(model, fragId);
+    let clonedMat = null, originalMat = null;
+    if (rp && rp.material) {
+      originalMat = rp.material;
+      // 머티리얼이 공유될 수 있으므로 반드시 clone해서 투명도만 이 프래그에 적용
+      clonedMat = originalMat.clone();
+      clonedMat.transparent = true;
+      clonedMat.opacity = 1.0;
+      clonedMat.side = originalMat.side; // 기존 렌더링 특성 유지
+      rp.material = clonedMat;
+    }
+
+    store.push({ fragId, proxy, startPos, renderProxy: rp, originalMat, clonedMat });
+  }
+
+  return store;
+}
+
+function restoreFragStates(viewer, store) {
+  for (const f of store) {
+    // 위치 원복
+    f.proxy.position.copy(f.startPos);
+    f.proxy.updateAnimTransform();
+
+    // 머티리얼 원복
+    if (f.renderProxy && f.originalMat) {
+      f.renderProxy.material = f.originalMat;
+    }
+    if (f.clonedMat && typeof f.clonedMat.dispose === 'function') {
+      f.clonedMat.dispose();
+    }
+  }
+  viewer.impl.invalidate(true, true, true);
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function animate(duration, step) {
+  return new Promise((resolve) => {
+    const start = performance.now();
+    function frame(now) {
+      const t = Math.min(1, (now - start) / duration);
+      step(t);
+      if (t < 1) requestAnimationFrame(frame);
+      else resolve();
+    }
+    requestAnimationFrame(frame);
+  });
+}

@@ -1,72 +1,124 @@
 // /wwwroot/js/task-wbs/task-buttons.js
-// Test 버튼: 선택 객체의 선택을 해제하고 Z축 +5m로 2초 이동하며 서서히 투명화 → 1초 정지 → 2초간 원위치로 복귀 & 서서히 불투명화
-// Forge/APS Viewer v7+ 기준. 모델 단위가 미터가 아닐 경우 MOVE_Z를 조정하세요.
+// Test 버튼: 선택 해제 → Z+5m로 2초 이동 + 페이드아웃(불투명도) + 컬러 폴백 → 1초 정지 → 2초 복귀 + 페이드인
+// ※ 모델 단위가 m이 아니면 MOVE_Z 값을 조정하세요.
 
 export function initTaskWbsButtons(viewer) {
   const btn = document.getElementById('btn-test');
   if (!btn || !viewer) return;
-  btn.addEventListener('click', () => runTestAnimation(viewer).catch(console.error));
+
+  // 중복 바인딩 방지
+  if (btn.dataset.testBound === '1') return;
+  btn.dataset.testBound = '1';
+
+  btn.addEventListener('click', async () => {
+    try {
+      await runTestAnimation(viewer);
+    } catch (e) {
+      console.error('[test-btn] error:', e);
+    }
+  });
 }
 
 async function runTestAnimation(viewer) {
-  const model = viewer?.model;
-  if (!model) return;
-
-  const dbIds = viewer.getSelection();
-  if (!dbIds || dbIds.length === 0) {
-    // 필요하면 토스트 등으로 교체
-    console.warn('[test] 먼저 객체를 선택하세요.');
+  const sel = getSelectionSmart(viewer);
+  if (!sel || !sel.model || !sel.dbIds.length) {
+    // 선택 없을 때만 경고
+    console.warn('[test-btn] 먼저 객체를 선택하세요.');
     return;
   }
 
-  // 1) 선택 해제
+  const { model, dbIds } = sel;
+
+  // 1) 선택 해제(애니메이션 중 실수 클릭 방지)
   viewer.clearSelection();
 
-  // 2) 대상 조각(frags) 수집
+  // 2) 대상 프래그먼트 수집
   const fragIds = collectFragIds(model, dbIds);
-  if (fragIds.length === 0) return;
+  if (!fragIds.length) return;
 
-  // 3) 프래그먼트 상태 준비(시작 위치, 머티리얼 클론 등)
+  // 3) 상태 준비(위치/머티리얼 클론/원본 색상 저장)
   const store = prepareFragStates(viewer, model, fragIds);
 
-  // 이동/페이드 파라미터
-  const MOVE_Z = 5.0; // 모델 단위가 m일 때 5m. (mm 모델이면 5000 등으로 조정)
-  const D1 = 2000; // 왕복 1단계(이동+페이드아웃) 2초
-  const HOLD = 1000; // 정지 1초
-  const D2 = 2000; // 복귀(이동+페이드인) 2초
+  // --- 파라미터 ---
+  const MOVE_Z_M = 5.0;  // 모델 단위 m 기준. mm 모델이면 5000 등으로 조정
+  const D1 = 2000;       // 2초 이동 + 페이드아웃
+  const HOLD = 1000;     // 1초 정지
+  const D2 = 2000;       // 2초 복귀 + 페이드인
 
-  // 4) Z+5m 이동 & 서서히 투명화
+  // 페이드가 안 먹는 환경을 대비한 컬러 폴백(오렌지)
+  const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const FALLBACK_COLOR = new THREE.Color(1.0, 0.45, 0.0); // #FF7300 근처
+
+  // 4) Z+5m & 서서히 투명화(+ 컬러 폴백으로 가시 변화 보장)
   await animate(D1, (t) => {
-    const dz = lerp(0, MOVE_Z, t);
-    const alpha = lerp(1, 0, t);
+    const dz = lerp(0, MOVE_Z_M, t);
+    const alphaOut = 1 - t; // 1→0
     for (const f of store) {
+      // 위치
       f.proxy.position.z = f.startPos.z + dz;
       f.proxy.updateAnimTransform();
-      if (f.clonedMat) f.clonedMat.opacity = alpha;
+
+      // 페이드(머티리얼 불투명도) + 폴백(컬러 변화)
+      if (f.clonedMat) {
+        f.clonedMat.opacity = alphaOut;
+        f.clonedMat.needsUpdate = true;
+
+        // 폴백: 원래 색 → 오렌지로 서서히 변경 (페이드가 안 보이는 환경에서도 변화 체감)
+        if (f.clonedMat.color && f.originalColor) {
+          // out 단계: 원색(0) → 폴백(1)
+          f.clonedMat.color.copy(f.originalColor).lerp(FALLBACK_COLOR, t);
+        }
+      }
     }
     viewer.impl.invalidate(true, true, true);
   });
 
-  // 5) 1초 정지 (완전 투명/숨김 상태)
+  // 5) 1초 정지(사라진 상태)
   await delay(HOLD);
 
-  // 6) 원위치 복귀 & 서서히 불투명화
+  // 6) 원위치 복귀 & 서서히 불투명화(+ 컬러 복귀)
   await animate(D2, (t) => {
-    const dz = lerp(MOVE_Z, 0, t);
-    const alpha = lerp(0, 1, t);
+    const dz = lerp(MOVE_Z_M, 0, t);
+    const alphaIn = t; // 0→1
     for (const f of store) {
       f.proxy.position.z = f.startPos.z + dz;
       f.proxy.updateAnimTransform();
-      if (f.clonedMat) f.clonedMat.opacity = alpha;
+
+      if (f.clonedMat) {
+        f.clonedMat.opacity = alphaIn;
+        f.clonedMat.needsUpdate = true;
+
+        // in 단계: 오렌지(0) → 원색(1)
+        if (f.clonedMat.color && f.originalColor) {
+          f.clonedMat.color.copy(FALLBACK_COLOR).lerp(f.originalColor, t);
+        }
+      }
     }
     viewer.impl.invalidate(true, true, true);
   });
 
-  // 7) 상태 복구 (원래 머티리얼/위치로)
+  // 7) 상태 복구(위치/머티리얼)
   restoreFragStates(viewer, store);
 }
 
-// --- Helpers ---------------------------------------------------------------
+// ----------------- Helpers -----------------
+
+function getSelectionSmart(viewer) {
+  // 단일 모델 선택
+  let dbIds = viewer.getSelection();
+  let model = viewer.model;
+
+  // 집계 선택(멀티 모델) 보강
+  if (!dbIds || dbIds.length === 0) {
+    const agg = viewer.getAggregateSelection?.() || [];
+    if (agg.length > 0) {
+      model = agg[0].model;
+      dbIds = agg[0].selection || [];
+    }
+  }
+  if (!dbIds || dbIds.length === 0) return null;
+  return { model, dbIds };
+}
 
 function collectFragIds(model, dbIds) {
   const it = model.getData().instanceTree;
@@ -83,25 +135,30 @@ function prepareFragStates(viewer, model, fragIds) {
 
   for (const fragId of fragIds) {
     const proxy = viewer.impl.getFragmentProxy(model, fragId);
-    proxy.getAnimTransform(); // position/scale/quaternion 읽어오기
+    proxy.getAnimTransform();
     const startPos = new THREE.Vector3(proxy.position.x, proxy.position.y, proxy.position.z);
 
-    // 프래그의 렌더 프록시/머티리얼 확보 및 클론(투명도 제어용)
     const rp = viewer.impl.getRenderProxy(model, fragId);
-    let clonedMat = null, originalMat = null;
+
+    let clonedMat = null, originalMat = null, originalColor = null;
     if (rp && rp.material) {
       originalMat = rp.material;
-      // 머티리얼이 공유될 수 있으므로 반드시 clone해서 투명도만 이 프래그에 적용
+
+      // 원래 색상 보관(폴백용)
+      if (originalMat.color) originalColor = originalMat.color.clone();
+
+      // 공유 머티리얼 대비 → 클론해서 이 프래그먼트만 조작
       clonedMat = originalMat.clone();
-      clonedMat.transparent = true;
+      clonedMat.transparent = true;     // 불투명도 활성
+      clonedMat.depthWrite = false;     // 투명 패스에서 Z-fighting 최소화
       clonedMat.opacity = 1.0;
-      clonedMat.side = originalMat.side; // 기존 렌더링 특성 유지
+      // 컬러는 out/in 단계에서 보간함
       rp.material = clonedMat;
+      rp.material.needsUpdate = true;
     }
 
-    store.push({ fragId, proxy, startPos, renderProxy: rp, originalMat, clonedMat });
+    store.push({ fragId, proxy, startPos, renderProxy: rp, originalMat, clonedMat, originalColor });
   }
-
   return store;
 }
 
@@ -115,18 +172,13 @@ function restoreFragStates(viewer, store) {
     if (f.renderProxy && f.originalMat) {
       f.renderProxy.material = f.originalMat;
     }
-    if (f.clonedMat && typeof f.clonedMat.dispose === 'function') {
-      f.clonedMat.dispose();
-    }
+    if (f.clonedMat?.dispose) f.clonedMat.dispose();
   }
   viewer.impl.invalidate(true, true, true);
 }
 
 function lerp(a, b, t) { return a + (b - a) * t; }
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+function delay(ms) { return new Promise((res) => setTimeout(res, ms)); }
 
 function animate(duration, step) {
   return new Promise((resolve) => {

@@ -1,120 +1,101 @@
 /* ==============================
-   WBS 셀 배지/색상 렌더러
+   WBS FancyTree 셀 색칠(첫 로딩 보장)
    ============================== */
 
-// 배지 색상 팔레트(트리용)
-const __WBS_BADGE_COLORS = {
-  C:  "#0a9d5a", // 시공/완료
-  T:  "#f2c14e", // 가설/진행
-  D:  "#d72638", // 철거
-  TD: "#7a5cff"  // 동시/복합
+// 1) 셀 색 팔레트
+const __WBS_COLOR = {
+  C:  "#10b981", // 시공/완료
+  T:  "#f59e0b", // 가설/진행
+  D:  "#ef4444", // 철거/해체
+  TD: "#7c3aed"  // 동시/복합
 };
 
-// (1) CSS 주입
-function injectWbsBadgeCss() {
-  if (document.getElementById("wbs-badge-style")) return;
+// 2) CSS 주입 (행/타이틀 배경 + 좌측 보더)
+function injectWbsCellCss() {
+  if (document.getElementById("wbs-cell-style")) return;
   const css = `
-    .wbs-badges { display:inline-flex; gap:6px; margin-left:8px; vertical-align:middle; }
-    .wbs-badge {
-      display:inline-block; min-width:18px; padding:0 6px; height:18px; line-height:18px;
-      font-size:11px; font-weight:600; border-radius:9px; color:#fff; text-align:center;
-      box-shadow:inset 0 -1px rgba(0,0,0,0.15);
+    .fancytree-node .fancytree-title {
+      border-left: 4px solid transparent;
+      padding-left: 8px;
+      border-radius: 6px;
+      transition: background-color .15s ease, border-color .15s ease;
     }
-    .wbs-badge.hidden { display:none; }
-    .wbs-badge.C  { background:${__WBS_BADGE_COLORS.C}; }
-    .wbs-badge.T  { background:${__WBS_BADGE_COLORS.T}; color:#333; }
-    .wbs-badge.D  { background:${__WBS_BADGE_COLORS.D}; }
-    .wbs-badge.TD { background:${__WBS_BADGE_COLORS.TD}; }
+    .wbsCell--C  .fancytree-title { background: ${__WBS_COLOR.C}1a; border-left-color: ${__WBS_COLOR.C}; }
+    .wbsCell--T  .fancytree-title { background: ${__WBS_COLOR.T}1a; border-left-color: ${__WBS_COLOR.T}; }
+    .wbsCell--D  .fancytree-title { background: ${__WBS_COLOR.D}1a; border-left-color: ${__WBS_COLOR.D}; }
+    .wbsCell--TD .fancytree-title { background: ${__WBS_COLOR.TD}1a; border-left-color: ${__WBS_COLOR.TD}; }
   `.trim();
   const s = document.createElement("style");
-  s.id = "wbs-badge-style";
+  s.id = "wbs-cell-style";
   s.textContent = css;
   document.head.appendChild(s);
 }
 
-// (2) 노드 → 경로 계산
-function getPathForNode(node) {
-  // fancytree root는 표시노드가 아니니 제외
-  const path = [];
-  let n = node;
-  while (n && !n.isRoot()) {
-    path.unshift(n.title);
-    n = n.parent;
-  }
-  // initWbsPanelWithFancytree에서 __path를 심어줬다면 그걸 우선 사용
-  return node.data?.__path || path;
-}
-
-// (3) 카운트 가져오기 (브릿지된 getCounts 사용)
-function getCountsForPath(path) {
+// 3) 노드 → 경로/키 → 카운트
+function __wbs_countsForNode(node) {
   const D = window.__WBS_DEBUG || {};
-  const k = (D.toKey ? D.toKey(path) : (window.toKey ? window.toKey(path) : null));
-  if (!k) return { total:0, c:0, t:0, d:0, td:0 };
+  // __path를 심어뒀으면 우선 사용
+  const path = node.data?.__path || node.getKeyPath().split("/").filter(Boolean);
+  const k = D.toKey ? D.toKey(path) : (window.toKey ? window.toKey(path) : null);
+  if (!k) return { total:0,c:0,t:0,d:0,td:0 };
   const c = D.getCounts ? D.getCounts(k) : {};
-  return {
-    total: c.total|0, c: c.c|0, t: c.t|0, d: c.d|0, td: c.td|0
-  };
+  return { total: c.total|0, c:c.c|0, t:c.t|0, d:c.d|0, td:c.td|0 };
 }
 
-// (4) 노드 하나의 배지 UI를 만들거나 갱신
-function ensureNodeBadges(node) {
+// 4) 셀 클래스 계산(가장 많은 상태 우선, td>0이면 TD 우선)
+function __wbs_classForCounts(cnt) {
+  if (!cnt) return null;
+  if ((cnt.td|0) > 0) return "wbsCell--TD";
+  const pairs = [
+    ["wbsCell--C",  cnt.c|0],
+    ["wbsCell--T",  cnt.t|0],
+    ["wbsCell--D",  cnt.d|0],
+  ];
+  pairs.sort((a,b)=>b[1]-a[1]);
+  return pairs[0][1] > 0 ? pairs[0][0] : null;
+}
+
+// 5) 노드 하나 색칠
+function __wbs_colorizeNode(node) {
   const $ = window.jQuery || window.$;
-  if (!$ || !node || !node.span) return;
+  if (!$ || !node || !node.span || node.isRoot?.()) return;
 
-  const path = getPathForNode(node);
-  const counts = getCountsForPath(path);
+  const $li = $(node.li);
+  const classes = ["wbsCell--C","wbsCell--T","wbsCell--D","wbsCell--TD"];
+  $li.removeClass(classes.join(" "));
 
-  const $span = $(node.span);                   // .fancytree-node
-  const $title = $span.find(".fancytree-title");// 타이틀 스팬
-  if ($title.length === 0) return;
-
-  let $badges = $span.find(".wbs-badges");
-  if ($badges.length === 0) {
-    $badges = $("<span class='wbs-badges'/>").insertAfter($title);
-    // 배지 4종 생성(C/T/D/TD)
-    $badges.append("<span class='wbs-badge C'  data-k='c'>0</span>");
-    $badges.append("<span class='wbs-badge T'  data-k='t'>0</span>");
-    $badges.append("<span class='wbs-badge D'  data-k='d'>0</span>");
-    $badges.append("<span class='wbs-badge TD' data-k='td'>0</span>");
-  }
-
-  const setVal = (k, v) => {
-    const b = $badges.find(`.wbs-badge.${k}`);
-    if (b.length) {
-      b.text(v|0);
-      b.toggleClass("hidden", (v|0) === 0);
-    }
-  };
-
-  setVal("C", counts.c);
-  setVal("T", counts.t);
-  setVal("D", counts.d);
-  setVal("TD", counts.td);
+  const cnt = __wbs_countsForNode(node);
+  const cls = __wbs_classForCounts(cnt);
+  if (cls) $li.addClass(cls);
 }
 
-// (5) 트리 전체 리프레시
-function colorizeWbsTree(tree) {
+// 6) 트리 전체 색칠
+function __wbs_colorizeTree(tree) {
   if (!tree) return;
-  tree.visit(node => ensureNodeBadges(node));
+  tree.visit(__wbs_colorizeNode);
 }
 
-// (6) 렌더 훅 설치(트리 리렌더 때마다 자동 갱신)
-function installWbsBadgeRenderer(tree) {
-  if (!tree) return;
-  injectWbsBadgeCss();
+// 7) Fancytree 렌더 훅 설치(첫 로딩 프레임 보장)
+function installWbsCellColorizer(tree) {
+  if (!tree || tree.__wbsCellColorizerInstalled) return;
+  injectWbsCellCss();
 
-  // renderNode 훅 덮어쓰기(기존 훅이 있으면 체이닝)
+  // renderNode 체이닝
   const prev = tree.options.renderNode;
   tree.$div.fancytree("option", "renderNode", function(event, data) {
     if (typeof prev === "function") prev.call(this, event, data);
-    // 각 노드 타이틀 렌더 후 배지 갱신
-    try { ensureNodeBadges(data.node); } catch {}
+    try { __wbs_colorizeNode(data.node); } catch {}
   });
 
-  // 초기 2회 강제 갱신(첫 프레임/비동기 안전)
-  try { colorizeWbsTree(tree); } catch {}
-  requestAnimationFrame(() => { try { colorizeWbsTree(tree); } catch {} });
+  // 첫 프레임 2회 보장(렌더 직후 + 다음 프레임)
+  try { __wbs_colorizeTree(tree); } catch {}
+  requestAnimationFrame(() => { try { __wbs_colorizeTree(tree); } catch {} });
+
+  // 디버그 버튼
+  window.DEBUG_WBS = window.DEBUG_WBS || {};
+  window.DEBUG_WBS.repaint = () => {
+    try { __wbs_colorizeTree($.ui.fancytree.getTree("#wbs-tree")); } catch {}
+  };
+
+  tree.__wbsCellColorizerInstalled = true;
 }
-
-
-

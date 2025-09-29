@@ -58,3 +58,18 @@ function buildStatusSetsFromTasks(tasks) {
   }
   return S;
 }
+
+
+
+// a) 브릿지 살아있나?
+__WBS_DEBUG && typeof __WBS_DEBUG.getCounts === "function" && !!__WBS_DEBUG.__patchedForFallback
+
+// b) 폴백 맵 키 수 (0 아니어야 함)
+Object.keys(window.__FA_FALLBACK_BY_KEY||{}).length
+
+// c) 루트 한 개(보) 확인: cur과 fb가 같은지, 그리고 T/D 동시가 아닌지
+(() => {
+  const D = __WBS_DEBUG;
+  const k = D?.toKey ? D.toKey(["보"]) : toKey(["보"]);
+  return { cur: D.getCounts(k), fb: window.__FA_FALLBACK_BY_KEY[k] };
+})()

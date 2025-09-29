@@ -2932,9 +2932,7 @@ export function initTaskListButtons() {
 
   // TEST 버튼
   $("#btn-test").off("click").on("click", async function() {
-    const viewer = window.viewer;
-    if (!viewer) return alert('뷰어가 초기화되지 않았습니다.');
-    alert('테스트 훅 자리입니다.');
+    initTaskWbsButtons(window.viewer);
   });
 }
 
@@ -2972,7 +2970,255 @@ function getCurrentTaskDataFromTree() {
   }
   return tree.getRootNode().children.map(nodeToData);
 }
-```
+
+
+// /wwwroot/js/task-wbs/task-buttons.js
+// Test 버튼: (선택 해제) → Z+5m 2초 이동 + 부드러운 페이드아웃 → 1초 정지 → 2초 복귀 + 페이드인
+// - 페이드는 시각적으로 균일하게 보이도록 S-커브(easeInOutSine) 적용
+// - 모델 단위가 m이 아니면 MOVE_Z 값을 조정하세요. (mm 모델이면 5000 등)
+
+export function initTaskWbsButtons(viewer) {
+  let btn = document.getElementById('btn-test');
+  if (!btn || !viewer) return;
+
+  // 기존 리스너 중복 방지: 클론 교체
+  const clone = btn.cloneNode(true);
+  btn.parentNode.replaceChild(clone, btn);
+  btn = clone;
+
+  btn.addEventListener('click', async () => {
+    try {
+      await runTestAnimation(viewer);
+    } catch (e) {
+      console.error('[test-btn] error:', e);
+    }
+  });
+}
+
+async function runTestAnimation(viewer) {
+  const sel = getSelectionSmart(viewer);
+  if (!sel || !sel.model || !sel.dbIds.length) {
+    console.warn('[test-btn] 먼저 객체를 선택하세요.');
+    return;
+  }
+
+  const { model, dbIds } = sel;
+
+  // 애니메이션 중 오동작 방지
+  viewer.clearSelection();
+
+  const fragIds = collectFragIds(model, dbIds);
+  if (!fragIds.length) return;
+
+  const store = prepareFragStates(viewer, model, fragIds);
+
+  // -------- 파라미터 --------
+  const MOVE_Z = 5.0; // m 기준
+  const D1 = 2000;    // 2초: 이동 + 페이드아웃
+  const HOLD = 1000;  // 1초 정지
+  const D2 = 2000;    // 2초: 복귀 + 페이드인
+
+  const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const FALLBACK_COLOR = new THREE.Color(1.0, 0.45, 0.0); // #FF7300 근처(색 보간 폴백용)
+
+  // -------- OUT(사라짐) 단계 --------
+  await animate(D1, (t) => {
+    // 시각 균일 S-커브
+    const k = easeInOutSine(t);      // 0 -> 1 (초/말 느림, 중간 빠름)
+    const alphaOut = 1 - k;          // 1 -> 0
+    const dz = lerp(0, MOVE_Z, k);   // 위치도 같은 이징으로 보간
+
+    for (const f of store) {
+      // 위치 이동
+      f.proxy.position.z = f.startPos.z + dz;
+      f.proxy.updateAnimTransform();
+
+      // 불투명도(페이드)
+      if (f.cloneMat) {
+        f.cloneMat.opacity = alphaOut;
+        f.cloneMat.transparent = true;
+        f.cloneMat.needsUpdate = true;
+
+        // 색 폴백(원색 -> 주황) : 일부 머티리얼에서 투명이 약할 때 변화 체감용
+        if (f.cloneMat.color && f.originalColor) {
+          f.cloneMat.color.copy(f.originalColor).lerp(FALLBACK_COLOR, k);
+        }
+      }
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+
+  // -------- HOLD(정지) --------
+  await delay(HOLD);
+
+  // -------- IN(복귀) 단계 --------
+  await animate(D2, (t) => {
+    const k = easeInOutSine(t);     // 0 -> 1
+    const alphaIn = k;              // 0 -> 1
+    const dz = lerp(MOVE_Z, 0, k);  // Z 복귀
+
+    for (const f of store) {
+      f.proxy.position.z = f.startPos.z + dz;
+      f.proxy.updateAnimTransform();
+
+      if (f.cloneMat) {
+        f.cloneMat.opacity = alphaIn;
+        f.cloneMat.transparent = true;
+        f.cloneMat.needsUpdate = true;
+
+        // 색 복귀(주황 -> 원색)
+        if (f.cloneMat.color && f.originalColor) {
+          f.cloneMat.color.copy(FALLBACK_COLOR).lerp(f.originalColor, k);
+        }
+      }
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+
+  // -------- 상태 복구 --------
+  restoreFragStates(viewer, store);
+}
+
+// ================= Helpers =================
+
+function getSelectionSmart(viewer) {
+  // 집계 선택(멀티 모델) 우선
+  const agg = viewer.getAggregateSelection?.();
+  if (agg && agg.length > 0) {
+    const a = agg[0];
+    const ids = (a.selection || []).slice();
+    return ids.length ? { model: a.model, dbIds: ids, aggregate: true } : null;
+  }
+  // 일반 선택
+  const ids = viewer.getSelection?.() || [];
+  return (ids && ids.length) ? { model: viewer.model, dbIds: ids, aggregate: false } : null;
+}
+
+function collectFragIds(model, dbIds) {
+  const it = model.getData().instanceTree;
+  const fragIds = [];
+  dbIds.forEach((dbId) => {
+    it.enumNodeFragments(dbId, (fragId) => fragIds.push(fragId), true);
+  });
+  return fragIds;
+}
+
+// cross-version FragmentList getter
+function getFragList(viewer, model) {
+  if (model?.getFragmentList) return model.getFragmentList();                  // 표준
+  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();   // 대체
+  // 구버전: viewer.impl.getFragmentList()가 있을 수도 있으나 현재 환경엔 없음
+  return null;
+}
+
+function prepareFragStates(viewer, model, fragIds) {
+  const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const matman = viewer.impl.matman ? viewer.impl.matman() : null;
+  const fragList = getFragList(viewer, model);
+  const store = [];
+
+  // fragId -> dbId 매핑
+  const fragToDb = {};
+  if (fragList) {
+    fragIds.forEach((fragId) => {
+      try { fragToDb[fragId] = fragList.getDbId(fragId); } catch (_) {}
+    });
+  } else {
+    console.warn('[test-btn] FragmentList not available.');
+  }
+
+  for (const fragId of fragIds) {
+    const proxy = viewer.impl.getFragmentProxy(model, fragId);
+    proxy.getAnimTransform();
+    const startPos = new THREE.Vector3(proxy.position.x, proxy.position.y, proxy.position.z);
+
+    const rp = viewer.impl.getRenderProxy(model, fragId);
+    const originalMat = rp?.material || null;
+
+    // 원래 색상 저장(폴백용)
+    let originalColor = null;
+    if (originalMat && originalMat.color) originalColor = originalMat.color.clone();
+
+    // 머티리얼 클론(공유 차단) + 투명 세팅
+    let cloneMat = null;
+    if (originalMat) {
+      cloneMat = (matman && matman.cloneMaterial) ? matman.cloneMaterial(originalMat) : originalMat.clone();
+      cloneMat.transparent = true;
+      cloneMat.opacity = 1.0;
+      cloneMat.depthWrite = false;
+      cloneMat.side = originalMat.side;
+      cloneMat.needsUpdate = true;
+
+      // 핵심: 공식 경로로 바인딩
+      if (viewer.impl.setMaterial) {
+        viewer.impl.setMaterial(model, fragId, cloneMat);
+      } else if (fragList?.setMaterial) {
+        fragList.setMaterial(fragId, cloneMat);
+      } else if (viewer.impl.setFragmentMaterial) {
+        viewer.impl.setFragmentMaterial(fragId, cloneMat); // 레거시
+      }
+    }
+
+    store.push({
+      model, fragId,
+      dbId: fragToDb[fragId],
+      proxy, startPos,
+      renderProxy: rp,
+      originalMat, cloneMat,
+      originalColor
+    });
+  }
+  viewer.impl.invalidate(true, true, true);
+  return store;
+}
+
+function restoreFragStates(viewer, store) {
+  if (!store.length) return;
+  const model = store[0].model;
+  const fragList = getFragList(viewer, model);
+
+  for (const f of store) {
+    // 위치 원복
+    f.proxy.position.copy(f.startPos);
+    f.proxy.updateAnimTransform();
+
+    // 머티리얼 원복
+    if (f.originalMat) {
+      if (viewer.impl.setMaterial) {
+        viewer.impl.setMaterial(f.model, f.fragId, f.originalMat);
+      } else if (fragList?.setMaterial) {
+        fragList.setMaterial(f.fragId, f.originalMat);
+      } else if (viewer.impl.setFragmentMaterial) {
+        viewer.impl.setFragmentMaterial(f.fragId, f.originalMat);
+      }
+    }
+    if (f.cloneMat?.dispose) f.cloneMat.dispose();
+  }
+
+  viewer.impl.invalidate(true, true, true);
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function delay(ms) { return new Promise((res) => setTimeout(res, ms)); }
+
+function animate(duration, step) {
+  return new Promise((resolve) => {
+    const start = performance.now();
+    function frame(now) {
+      const t = Math.min(1, (now - start) / duration);
+      step(t);
+      if (t < 1) requestAnimationFrame(frame);
+      else resolve();
+    }
+    requestAnimationFrame(frame);
+  });
+}
+
+// 시각적으로 고르게 보이는 S-커브
+function easeInOutSine(t){ return 0.5 - 0.5 * Math.cos(Math.PI * t); }
+
+// (옵션) 감마 기반 보정이 필요하면 아래를 사용해도 됩니다.
+// function easeGamma(t, gamma = 0.45) { return 1 - Math.pow(1 - t, gamma); }```
 
 ---
 

@@ -974,69 +974,46 @@ body.resizing-x { cursor: ew-resize; user-select: none; }
 ## `wwwroot/js/main.js`
 
 ```javascript
-// /wwwroot/js/main.js  — SAFE MODE: Tasks/WBS/Gantt 모두 차단하여 프리즈 원인 격리
+// /wwwroot/js/main.js — 첫 로딩 WBS 셀 색칠 보장 (배지 제거/최적화)
 
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
 import { initViewer, loadModel } from "./viewer/init-viewer.js";
 import { buildWbsProviderLazy } from "./sidebar/task-wbs/wbs/loader.js";
 import { bindPanel2Resizer } from "./sidebar/task-wbs/layout/panel-resizer.js";
-import { 
-  initTaskPanel, 
-  initTaskListButtons, 
-  setSavedTaskData, 
-  disableViewerEscReset, 
-  initWbsPanelWithFancytree 
+
+import {
+  initMatrix,
+  bulkEnsureForVisible,
+  computePathState,
+  getCounts as _getCountsImported,   // 로컬 import는 디버그 브릿지 대상 아님(참고용)
+  markTasksChanged,
+} from "./sidebar/task-wbs/core/matrix-index.js";
+
+import { toKey } from "./sidebar/task-wbs/core/path-key.js";
+
+import {
+  initTaskPanel,
+  initTaskListButtons,
+  setSavedTaskData,
+  disableViewerEscReset,
+  initWbsPanelWithFancytree,
 } from "./sidebar/index.js";
 
-// ✅ SAFE MODE: 패널2(Tasks/WBS/간트) 관련 초기화 전부 막기
-const SAFE_MODE = true;
+/* ──────────────────────────────────────────────────────────────
+   전역/기본 설정
+────────────────────────────────────────────────────────────── */
+try {
+  window.__WBS_DEBUG = window.__WBS_DEBUG || {};
+  window.getCounts = _getCountsImported;
+  window.markTasksChanged = markTasksChanged;
+} catch {}
 
-/* ============================== */
 const SIDEBAR_MIN = 360;
 const SIDEBAR_DEFAULT = 900;
 const PREVIEW_MIN = 520;
 
-function onceViewer(viewer, type) {
-  return new Promise((resolve) => {
-    const h = () => { viewer.removeEventListener(type, h); resolve(); };
-    viewer.addEventListener(type, h);
-  });
-}
-function hasObjectTree(viewer) {
-  return !!viewer.model?.getData?.()?.instanceTree;
-}
-async function waitObjectTree(viewer) {
-  if (hasObjectTree(viewer)) return;
-  await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
-}
-async function waitGeometry(viewer, timeoutMs = 180000) {
-  await new Promise((resolve) => {
-    let done = false;
-    const h = () => {
-      if (done) return;
-      done = true;
-      try { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h); } catch {}
-      resolve();
-    };
-    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h, { once: true });
-    setTimeout(h, timeoutMs);
-  });
-}
-function waitIdle(timeout = 60) {
-  return new Promise((resolve) => {
-    if (typeof window.requestIdleCallback === "function") {
-      window.requestIdleCallback(() => resolve(), { timeout });
-    } else {
-      setTimeout(resolve, timeout);
-    }
-  });
-}
-async function waitViewerReady(viewer) {
-  await waitObjectTree(viewer);
-  await waitGeometry(viewer);
-  await waitIdle(60);
-}
+window.__FA_FALLBACK_BY_KEY = Object.create(null); // 폴백 count 저장소
 
 function initSidebarWidth() {
   const root = document.documentElement;
@@ -1068,80 +1045,416 @@ function resetViewerInputAndCamera(viewer) {
       }
     }
     viewer.fitToView?.();
-  } catch (e) {
-    console.warn("[init] resetViewerInputAndCamera failed:", e);
-  }
+  } catch {}
 }
 
-/* ============================== */
-window.__ALLOW_WBS_UPDATE = false;
+/* ──────────────────────────────────────────────────────────────
+   뷰어 대기 유틸
+────────────────────────────────────────────────────────────── */
+function onceViewer(viewer, type) {
+  return new Promise((resolve) => {
+    const h = () => { try { viewer.removeEventListener(type, h); } catch {} ; resolve(); };
+    viewer.addEventListener(type, h);
+  });
+}
+function hasObjectTree(viewer) {
+  return !!viewer.model?.getData?.()?.instanceTree;
+}
+async function waitObjectTree(viewer) {
+  if (hasObjectTree(viewer)) return;
+  await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
+}
+async function waitGeometry(viewer, timeoutMs = 180000) {
+  await new Promise((resolve) => {
+    let done = false;
+    const h = () => { if (done) return; done = true; try { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h); } catch {} ; resolve(); };
+    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h, { once: true });
+    setTimeout(h, timeoutMs);
+  });
+}
+async function waitPropertyDb(viewer, timeoutMs = 120000) {
+  try { if (viewer?.model?.getPropertyDb?.()) return; } catch {}
+  await new Promise((resolve) => {
+    let done = false;
+    const h = () => { if (done) return; done = true; try { viewer.removeEventListener(Autodesk.Viewing.PROPERTY_DB_CREATED_EVENT, h); } catch {} ; resolve(); };
+    viewer.addEventListener(Autodesk.Viewing.PROPERTY_DB_CREATED_EVENT, h, { once: true });
+    setTimeout(h, timeoutMs);
+  });
+}
+function waitIdle(timeout = 60) {
+  return new Promise((resolve) => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => resolve(), { timeout });
+    } else setTimeout(resolve, timeout);
+  });
+}
+async function waitViewerReady(viewer) {
+  await Promise.all([ waitObjectTree(viewer), waitPropertyDb(viewer), waitGeometry(viewer) ]);
+  await waitIdle(60);
+}
+async function focusCameraAndWait(viewer) {
+  return new Promise((resolve) => {
+    const onCam = () => { try { viewer.removeEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam); } catch {}; requestAnimationFrame(() => resolve()); };
+    viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam, { once: true });
+    resetViewerInputAndCamera(viewer);
+  });
+}
 
-const login = document.getElementById("login");
-let taskData = [];
-
-const SAMPLE_TASK_DATA = [
-  {
-    no: "1",
-    selectOptions: ["시공", "가설", "철거"],
-    selectedOption: "시공",
-    title: "Task A",
-    start: "2024-06-25",
-    end: "2024-07-01",
-    linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1001, text: "벽체1" }],
-    children: [
-      {
-        no: "1.1",
-        selectOptions: ["시공", "가설", "철거"],
-        selectedOption: "시공",
-        title: "Subtask A1",
-        start: "2024-06-26",
-        end: "2024-06-30",
-        linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1002, text: "벽체2" }],
-      },
-    ],
-  },
-  { no: "2", selectOptions: ["시공", "가설", "철거"], selectedOption: "시공", title: "Task B", start: "", end: "", linkedObjects: [] },
-];
-
+/* ──────────────────────────────────────────────────────────────
+   태스크/URN 유틸
+────────────────────────────────────────────────────────────── */
 function safeUrn(urn) { return urn.replace(/[^a-zA-Z0-9]/g, "_"); }
 function fillUrnRecursive(task, defaultUrn) {
   if (Array.isArray(task.linkedObjects)) {
-    task.linkedObjects.forEach((obj) => { if (!obj.urn) obj.urn = defaultUrn || window.CURRENT_MODEL_URN; });
+    task.linkedObjects.forEach((o) => { if (!o.urn) o.urn = defaultUrn || window.CURRENT_MODEL_URN; });
   }
   if (Array.isArray(task.children)) {
     task.children.forEach((child) => fillUrnRecursive(child, defaultUrn));
   }
 }
+function persistTasksSnapshot(tasks) {
+  const RAW  = window.CURRENT_MODEL_URN;
+  const SAFE = window.CURRENT_MODEL_SAFE_URN;
+  if (!RAW || !SAFE) return;
+  try {
+    const json = JSON.stringify(tasks || []);
+    localStorage.setItem(`hec:tasks:${RAW}`, json);
+    localStorage.setItem(`hec:tasks:${SAFE}`, json);
+    window.__SAVED_TASKS = (tasks || []);
+    console.log("[persistTasksSnapshot] saved. count =", window.__SAVED_TASKS.length);
+  } catch (e) {
+    console.warn("[persistTasksSnapshot] failed:", e);
+  }
+}
 
-/* ============================== */
+/* ──────────────────────────────────────────────────────────────
+   Provider 워밍업 / 폴백 집계
+────────────────────────────────────────────────────────────── */
+async function seedDbIdMappings(provider, { maxDepth = 3, cap = 6000 } = {}) {
+  const roots = await provider.roots().catch(() => []) || [];
+  const q = roots.map(r => ({ path: [r.text], depth: 0 }));
+  let visited = 0;
+  while (q.length && visited < cap) {
+    const { path, depth } = q.shift();
+    try { provider.getDbIdsForPath?.(path, { includeDescendants: true, allowUnbuilt: true }); } catch {}
+    if (depth < maxDepth) {
+      let kids = [];
+      try { kids = await provider.childrenByPath(path) || []; } catch {}
+      visited += kids.length;
+      for (const ch of kids) {
+        const np = ch.__path || [...path, ch.text];
+        q.push({ path: np, depth: depth + 1 });
+      }
+    }
+  }
+}
+
+async function collectKeysForRoots(provider, { maxDepth = 3, cap = 6000 } = {}) {
+  const roots = (await provider.roots().catch(() => [])) || [];
+  const q = roots.map(r => ({ path: [r.text], depth: 0 }));
+  const keys = new Set();
+  let seen = 0;
+
+  while (q.length && seen < cap) {
+    const { path, depth } = q.shift();
+    keys.add(toKey(path));
+
+    let kids = [];
+    try { kids = await provider.childrenByPath(path) || []; } catch {}
+    seen += kids.length;
+
+    if (depth < maxDepth) {
+      for (const ch of kids) {
+        const np = ch.__path || [...path, ch.text];
+        q.push({ path: np, depth: depth + 1 });
+      }
+    }
+  }
+  return Array.from(keys);
+}
+
+// 태스크 → 상태별 dbId 세트
+function buildStatusSetsFromTasks(tasks) {
+  const stateById = new Map();
+  const norm = (raw) => {
+    if (!raw) return "";
+    const s = String(raw).trim();
+    const S = s.toUpperCase();
+    if (s.includes("시공") || S.startsWith("C")) return "C";
+    if (s.includes("가설") || S.startsWith("T")) return "T";
+    if (s.includes("철거") || s.includes("해체") || S.startsWith("D")) return "D";
+    if (S === "TD" || s.includes("동시") || s.includes("복합") || S.startsWith("X")) return "TD";
+    return "";
+  };
+  const prio = { C:3, TD:2, D:1, T:0, "":-1 };
+  function apply(id, sNew) {
+    if (!id || !sNew) return;
+    const cur = stateById.get(id);
+    if (!cur) { stateById.set(id, sNew); return; }
+    if ((cur === "T" && sNew === "D") || (cur === "D" && sNew === "T")) { stateById.set(id, "TD"); return; }
+    stateById.set(id, prio[sNew] > prio[cur] ? sNew : cur);
+  }
+  (function walk(arr, inherited="") {
+    (arr||[]).forEach(t => {
+      const sTask = norm(t.status || t.selectedOption || inherited);
+      (t.linkedObjects||[]).forEach(o => apply(o.dbId, norm(o.status || o.phase || sTask)));
+      if (t.children) walk(t.children, sTask);
+    });
+  })(tasks);
+  const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
+  for (const [id, s] of stateById.entries()) if (S[s]) S[s].add(id);
+  return S;
+}
+
+function calcCountsForPath(provider, path, S) {
+  let ids = [];
+  try {
+    ids = provider.getDbIdsForPath(path, { includeDescendants:true, allowUnbuilt:true }) || [];
+  } catch {}
+  if (!ids.length) return { total:0, c:0, t:0, d:0, td:0 };
+  const set = new Set(ids);
+  let c=0,t=0,d=0,td=0;
+  for (const id of set) {
+    if (S.C.has(id)) c++;
+    if (S.T.has(id)) t++;
+    if (S.D.has(id)) d++;
+    if (S.TD.has(id)) td++;
+  }
+  return { total:set.size, c,t,d,td };
+}
+
+function keyFromPath(path) {
+  const D = window.__WBS_DEBUG;
+  return (D?.toKey ? D.toKey(path) : toKey(path));
+}
+
+async function buildFallbackMap(provider, { maxDepth=3, cap=6000 } = {}) {
+  window.__FA_FALLBACK_BY_KEY = Object.create(null);
+  const tasks = window.__SAVED_TASKS || [];
+  const S = buildStatusSetsFromTasks(tasks);
+
+  const roots = (await provider.roots().catch(()=>[])) || [];
+  const q = roots.map(r => ({ path:[r.text], depth:0 }));
+  let seen = 0;
+
+  while (q.length && seen < cap) {
+    const { path, depth } = q.shift();
+    const key = keyFromPath(path);
+    window.__FA_FALLBACK_BY_KEY[key] = calcCountsForPath(provider, path, S);
+
+    let kids = [];
+    try { kids = await provider.childrenByPath(path) || []; } catch {}
+    seen += kids.length;
+    if (depth < maxDepth) {
+      for (const ch of kids) q.push({ path: (ch.__path || [...path, ch.text]), depth: depth+1 });
+    }
+  }
+  console.log("[FA] fallback map ready (keys =", Object.keys(window.__FA_FALLBACK_BY_KEY).length, ")");
+}
+
+function patchGetCountsToUseFallback() {
+  const D = window.__WBS_DEBUG;
+  const fbMap = () => window.__FA_FALLBACK_BY_KEY || Object.create(null);
+
+  if (!window.__FA_BRIDGED_GLOBAL) {
+    const origGlobal = window.getCounts;
+    window.getCounts = function (k) {
+      const r = origGlobal ? (origGlobal(k) || {}) : {};
+      const sum = ((r.c|0)+(r.t|0)+(r.d|0)+(r.td|0));
+      if (sum > 0) return r;
+      const fb = fbMap()[k];
+      if (fb) { const total = Math.max((r.total|0), (fb.total|0)); return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 }; }
+      return r;
+    };
+    window.__FA_BRIDGED_GLOBAL = true;
+  }
+
+  if (D?.getCounts && !D.__patchedForFallback) {
+    const orig = D.getCounts.bind(D);
+    D.__origGetCounts = orig;
+    D.getCounts = function (k) {
+      const r = orig(k) || {};
+      const sum = ((r.c|0)+(r.t|0)+(r.d|0)+(r.td|0));
+      if (sum > 0) return r;
+      const fb = fbMap()[k];
+      if (fb) { const total = Math.max((r.total|0), (fb.total|0)); return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 }; }
+      return r;
+    };
+    D.__patchedForFallback = true;
+  }
+
+  console.log("[FA] getCounts bridged");
+}
+
+/* ──────────────────────────────────────────────────────────────
+   WBS FancyTree 셀 색칠 (배지 제거)
+────────────────────────────────────────────────────────────── */
+const CELL_COLOR = {
+  C:  "#ef4444", // 시공(빨강)
+  T:  "#f59e0b", // 가설(주황)
+  D:  "#6b7280", // 철거(회색)
+  TD: "#2563eb"  // 가설+철거(파랑)
+};
+
+function injectWbsCellCss() {
+  if (document.getElementById("wbs-cell-style")) return;
+  const css = `
+    .fancytree-node .fancytree-title {
+      border-left: 4px solid transparent;
+      padding-left: 8px;
+      border-radius: 6px;
+      transition: background-color .15s ease, border-color .15s ease;
+    }
+    .wbsCell--C  .fancytree-title  { background: ${CELL_COLOR.C}1a;  border-left-color: ${CELL_COLOR.C}; }
+    .wbsCell--T  .fancytree-title  { background: ${CELL_COLOR.T}1a;  border-left-color: ${CELL_COLOR.T}; }
+    .wbsCell--D  .fancytree-title  { background: ${CELL_COLOR.D}1a;  border-left-color: ${CELL_COLOR.D}; }
+    .wbsCell--TD .fancytree-title  { background: ${CELL_COLOR.TD}1a; border-left-color: ${CELL_COLOR.TD}; }
+  `.trim();
+  const s = document.createElement("style");
+  s.id = "wbs-cell-style";
+  s.textContent = css;
+  document.head.appendChild(s);
+}
+
+function countsForPath(path) {
+  const D = window.__WBS_DEBUG || {};
+  const k = (D.toKey ? D.toKey(path) : (window.toKey ? window.toKey(path) : null));
+  if (!k) return { total:0, c:0, t:0, d:0, td:0 };
+  const c = D.getCounts ? D.getCounts(k) : {};
+  return { total:c.total|0, c:c.c|0, t:c.t|0, d:c.d|0, td:c.td|0 };
+}
+function classForCounts(c) {
+  if (!c) return null;
+  if ((c.td|0) > 0) return "wbsCell--TD";
+  if ((c.c|0)  > 0) return "wbsCell--C";
+  if ((c.t|0)  > 0) return "wbsCell--T";
+  if ((c.d|0)  > 0) return "wbsCell--D";
+  return null;
+}
+
+function repaintNode(node) {
+  const $ = window.jQuery || window.$;
+  if (!$ || !node || !node.span || node.isRoot?.()) return;
+
+  // __path가 없으면 아직 매핑 전 → 이번 프레임 스킵 (재시도 루프가 다시 칠함)
+  const path = node.data?.__path;
+  if (!path) return;
+
+  const counts = countsForPath(path);
+  const $li = $(node.li);
+  $li.removeClass("wbsCell--C wbsCell--T wbsCell--D wbsCell--TD");
+  const cls = classForCounts(counts);
+  if (cls) $li.addClass(cls);
+}
+
+function repaintTree(tree) {
+  if (!tree) return;
+  tree.visit(repaintNode);
+}
+
+// 첫 로딩 셀 칠하기 재시도 루프(최대 1초)
+function startFirstPaintRetry(tree) {
+  let tries = 0;
+  const maxTries = 10;
+  const step = () => {
+    tries++;
+    repaintTree(tree);
+    if (tries >= maxTries) return;
+    setTimeout(step, 100);
+  };
+  setTimeout(step, 0);
+}
+
+function installWbsDecorators(tree) {
+  const $ = window.jQuery || window.$;
+  if (!tree) tree = $.ui?.fancytree?.getTree("#wbs-tree");
+  if (!tree) return;
+
+  injectWbsCellCss();
+
+  // 기존 훅 체이닝
+  const prevRenderNode = tree.options.renderNode;
+  tree.$div.fancytree("option", "renderNode", function(event, data) {
+    try { if (typeof prevRenderNode === "function") prevRenderNode.call(this, event, data); } catch {}
+    try { repaintNode(data.node); } catch {}
+  });
+  tree.$div.fancytree("option", "createNode", function(_ev, data) {
+    try { repaintNode(data.node); } catch {}
+  });
+  tree.$div.fancytree("option", "expand", function(_ev, data) {
+    if (data.node?.expanded) setTimeout(() => { try { repaintTree(tree); } catch {} }, 0);
+  });
+
+  // 초기 두 프레임 + 재시도 루프
+  try { repaintTree(tree); } catch {}
+  requestAnimationFrame(() => { try { repaintTree(tree); } catch {} });
+  startFirstPaintRetry(tree);
+
+  // 디버그 훅
+  tree.__wbsHelpers = tree.__wbsHelpers || {};
+  tree.__wbsHelpers.repaintTree = () => { try { repaintTree(tree); } catch {} };
+}
+
+/* ──────────────────────────────────────────────────────────────
+   태스크 로드(API 대체 샘플)
+────────────────────────────────────────────────────────────── */
+const SAMPLE_TASK_DATA = [
+  {
+    no: "1", title: "Task A", selectedOption: "시공",
+    start: "2024-06-25", end: "2024-07-01",
+    linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1001, text: "벽체1" }],
+    children: [
+      { no: "1.1", title: "Subtask A1", selectedOption: "시공",
+        start: "2024-06-26", end: "2024-06-30",
+        linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1002, text: "벽체2" }] }
+    ],
+  },
+  { no: "2", title: "Task B", selectedOption: "가설", start: "", end: "", linkedObjects: [] },
+];
+
+async function fetchTaskDataForCurrentModel() {
+  try {
+    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
+    const url = `/api/tasks?urn=${safeUrnVal}`;
+    const resp = await fetch(url, { credentials: "include" });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch (err) {
+    console.warn("task 데이터를 불러오지 못했습니다. 샘플로 대체:", err);
+  }
+  return SAMPLE_TASK_DATA.map(x => structuredClone(x));
+}
+
+/* ──────────────────────────────────────────────────────────────
+   리사이즈
+────────────────────────────────────────────────────────────── */
 window.addEventListener("resize", _.throttle(() => {
   try {
     initSidebarWidth();
     window.viewer?.resize?.();
     window.viewer?.impl?.invalidate?.(true, true, true);
-    // SAFE_MODE: 간트/WBS 렌더링 호출 없음
-  } catch (e) {
-    console.warn("[resize] redraw failed", e);
-  }
+  } catch (e) { console.warn("[resize] redraw failed", e); }
 }, 120));
 
-/* ============================== */
+/* ──────────────────────────────────────────────────────────────
+   main
+────────────────────────────────────────────────────────────── */
 (async function () {
   try {
     // 1) 로그인
     const resp = await fetch("/api/auth/profile", { credentials: "include" });
     if (!resp.ok) { window.location.replace("/api/auth/login"); return; }
     const user = await resp.json();
+    const login = document.getElementById("login");
     login.innerText = `Logout (${user.name})`;
     login.onclick = () => {
       const iframe = document.createElement("iframe");
       iframe.style.visibility = "hidden";
       iframe.src = "https://accounts.autodesk.com/Authentication/LogOut";
       document.body.appendChild(iframe);
-      iframe.onload = () => {
-        window.location.replace("/api/auth/logout");
-        document.body.removeChild(iframe);
-      };
+      iframe.onload = () => { window.location.replace("/api/auth/logout"); document.body.removeChild(iframe); };
     };
 
     // 2) 레이아웃
@@ -1168,18 +1481,9 @@ window.addEventListener("resize", _.throttle(() => {
     window.viewer = viewer;
     disableViewerEscReset(viewer);
 
-    // ProgressOverlay 관련은 모두 제외(주석)
-    // ensureCss('/css/05-hec-progress-overlay.css'); await import('./viewer/hec.ProgressOverlay.js'); ...
-
-    // panel2 리사이저도 잠시 제외 (레이아웃 루프 가능성 차단)
-    // bindPanel2Resizer(viewer);
-
-    // 입력/카메라 보정
     viewer.resize();
     viewer.impl?.invalidate?.(true, true, true);
-    requestAnimationFrame(() => {
-      try { viewer.resize(); viewer.impl?.invalidate?.(true, true, true); } catch {}
-    });
+    requestAnimationFrame(() => { try { viewer.resize(); viewer.impl?.invalidate?.(true, true, true); } catch {} });
     resetViewerInputAndCamera(viewer);
 
     requestAnimationFrame(() => {
@@ -1193,141 +1497,74 @@ window.addEventListener("resize", _.throttle(() => {
 
     // 4) 모델 선택
     initTree("#tree", async (versionId) => {
-      // destroyTaskPanel() 호출도 생략: 패널2 건드리지 않음
       const urn = window.btoa(versionId).replace(/=/g, "");
       window.CURRENT_MODEL_URN = urn;
       window.CURRENT_MODEL_SAFE_URN = safeUrn(urn);
 
-      // Task 데이터 로딩은 하되, 패널은 만들지 않음
-      taskData.length = 0;
-      setSavedTaskData([]);
-      await loadTaskDataIfExists();
-      taskData.forEach((t) => fillUrnRecursive(t, urn));
-
-      await loadModel(viewer, urn);
-      await waitViewerReady(viewer);
-
-      resetViewerInputAndCamera(viewer);
-      viewer.resize();
-      
-      // ─────────────────────────────────────────────
-      // [STEP 3~6] ← 여기(모델 로드 완료 직후)로 이동
-      // 기존 WBS 트리 있으면 파괴 후 비우기
+      // 기존 WBS 파괴
       try { $.ui.fancytree.getTree("#wbs-tree")?.destroy(); } catch {}
       $("#wbs-group-content").empty();
 
-      // STEP 3: provider 생성 (모델 기반으로!)
-      let wbsProvider = null;
+      // (A) 모델 로드 & 안정화
+      await loadModel(viewer, urn);
+      await waitViewerReady(viewer);
+      await focusCameraAndWait(viewer);
+      viewer.resize();
+
+      // (B) WBS Provider 생성
+      let provider = null;
       try {
         const PRIMARY = ["HEC.WBS","HEC.Level","HEC.Zone"];
-        const { provider } = await buildWbsProviderLazy(viewer, {
-          primaryOrder: PRIMARY,
-          source: "all",
-          bucketThreshold: 400,
-          bucketSize: 200
+        const { provider: p } = await buildWbsProviderLazy(viewer, {
+          primaryOrder: PRIMARY, source: "all", bucketThreshold: 400, bucketSize: 200,
         });
-        wbsProvider = provider;
-        window.WBS_PROVIDER = provider; // 콘솔에서 확인 가능
-        try {
-          const roots = await provider.roots();
-          console.log("[WBS] roots:", Array.isArray(roots) ? roots.length : roots);
-        } catch (e) {
-          console.warn("[WBS] roots() failed:", e);
-        }
+        provider = p;
+        window.WBS_PROVIDER = provider;
+        const roots = await provider.roots();
+        console.log("[WBS] roots:", Array.isArray(roots) ? roots.length : roots);
       } catch (e) {
-        console.warn("[STEP 3] WBS provider failed:", e);
-        wbsProvider = { __provider:true, roots:async()=>[], childrenByPath:async()=>[] };
+        console.warn("[WBS] provider failed:", e);
+        provider = { __provider:true, roots:async()=>[], childrenByPath:async()=>[] };
+        window.WBS_PROVIDER = provider;
       }
 
-      // STEP 4: 워밍업 (아주 작게)
-      try {
-        if (wbsProvider) {
-          const roots = await wbsProvider.roots();
-          let q = roots.map(r => ({ path: [r.text], depth: 1 }));
-          let c = 0;
-          while (q.length && c < 200) {
-            const { path, depth } = q.shift();
-            if (depth >= 2) continue;
-            const kids = await wbsProvider.childrenByPath(path);
-            c += kids.length;
-            kids.forEach(k => q.push({ path: [...path, k.text], depth: depth + 1 }));
-          }
-          console.log("[STEP 4] WBS warmup OK (depth<=2, cap<=200)");
-        }
-      } catch (e) {
-        console.warn("[STEP 4] WBS warmup failed:", e);
-      }
+      // (C) 태스크 로드/정규화/영속
+      const tasks = await fetchTaskDataForCurrentModel();
+      tasks.forEach((t) => fillUrnRecursive(t, urn));
+      persistTasksSnapshot(tasks);
 
-      // STEP 5: Fancytree 초기화
-      try {
-        await initWbsPanelWithFancytree(wbsProvider, {
-          primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"]
-        });
-        console.log("[STEP 5] WBS fancytree init OK");
-      } catch (e) {
-        console.warn("[STEP 5] WBS fancytree init failed:", e);
-      }
+      // (D) provider 맵 워밍업 → 매트릭스 초기화 → 태스크 데이터 UI로 공유
+      await seedDbIdMappings(provider, { maxDepth: 3, cap: 6000 });
+      await initMatrix({ primaryOrder:["HEC.WBS","HEC.Level","HEC.Zone"], provider });
+      setSavedTaskData(tasks);
 
-      // STEP 6: 패널2 리사이저 바인딩 (필요시)
-      try {
-        bindPanel2Resizer(viewer);
-        console.log("[STEP 6] panel2 resizer bound");
-      } catch (e) {
-        console.warn("[STEP 6] resizer bind failed:", e);
-      }
-      // ─────────────────────────────────────────────
+      // (E) 폴백맵 준비 & getCounts 브릿지
+      await buildFallbackMap(provider, { maxDepth:3, cap:6000 });
+      patchGetCountsToUseFallback();
 
-      // Task 패널 (SAFE MODE 유지 시 현 상태로 OK)
-      try {
-        initTaskPanel(taskData);
-        initTaskListButtons();
-        console.log("[STEP 1] Task panel OK");
-      } catch (e) {
-        console.warn("[STEP 1] Task init failed:", e);
-      }
+      // (F) 선계산(루트~깊이3)
+      const preKeys = await collectKeysForRoots(provider, { maxDepth: 3, cap: 6000 });
+      await bulkEnsureForVisible(preKeys);
+      preKeys.forEach(computePathState);
 
-      try {
-        window.dispatchEvent(new Event("panel2-ready"));
-        console.log("[STEP 2] panel2-ready dispatched");
-      } catch (e) {
-        console.warn("[STEP 2] panel2-ready failed:", e);
-      }
+      // (G) 트리 init → 핸들 확보 → 데코레이터 설치 → 첫 칠하기 재시도
+      await initWbsPanelWithFancytree(provider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
+      console.log("[STEP 5] WBS fancytree init OK");
+
+      const tree = $.ui.fancytree.getTree("#wbs-tree");
+      installWbsDecorators(tree); // ★ 셀 색칠 전용(배지 없음)
+
+      // (H) 나머지
+      try { bindPanel2Resizer(viewer); console.log("[STEP 6] panel2 resizer bound"); } catch {}
+      try { initTaskPanel(tasks); initTaskListButtons(); console.log("[STEP 1] Task panel OK"); } catch {}
+      try { window.dispatchEvent(new Event("panel2-ready")); console.log("[STEP 2] panel2-ready dispatched"); } catch {}
     });
 
   } catch (err) {
     alert("Could not initialize the application. See console for more details.");
     console.error(err);
   }
-})();
-
-/* ============================== */
-async function loadTaskDataIfExists() {
-  try {
-    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
-    const url = `/api/tasks?urn=${safeUrnVal}`;
-    const resp = await fetch(url, { credentials: "include" });
-    if (resp.ok) {
-      const data = await resp.json();
-      taskData.length = 0;
-      if (Array.isArray(data) && data.length > 0) {
-        data.forEach((item) => taskData.push(item));
-        setSavedTaskData(taskData);
-      } else {
-        SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-        setSavedTaskData(taskData);
-      }
-    } else {
-      taskData.length = 0;
-      SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-      setSavedTaskData(taskData);
-    }
-  } catch (err) {
-    taskData.length = 0;
-    SAMPLE_TASK_DATA.forEach((item) => taskData.push(structuredClone(item)));
-    setSavedTaskData(taskData);
-    console.warn("task 데이터를 불러오지 못했습니다. 샘플로 초기화:", err);
-  }
-}```
+})();```
 
 ---
 
@@ -3628,19 +3865,148 @@ function debounce(fn, ms){
 //wwwroot/js/sidebar/task-wbs/ui/fancy-tree-init.js
 import { toKey } from "../core/path-key.js";
 import {
-  initMatrix, bulkEnsureForVisible,
-  computePathState, getPathState, getCounts,
+  initMatrix, 
+  bulkEnsureForVisible,
+  computePathState, 
+  //getPathState, 
+  getCounts,
   markTasksChanged
 } from "../core/matrix-index.js";
-import { formatObjectLabel } from "../core/element-id.js";
+//import { formatObjectLabel } from "../core/element-id.js";
 //import e from "express";
 
 const HIDDEN_KEYS = new Set();
+const _subtreeBusy = new Set();
+// --- 현황 계산 헬퍼 ---
+function keyDepth(k){ return (k?.split("¦") || []).length; }
+
+function addCounts(dst, src){
+  if (!src) return;
+  dst.c = (dst.c || 0) + Number(src.c || 0);
+  dst.t = (dst.t || 0) + Number(src.t || 0);
+  dst.d = (dst.d || 0) + Number(src.d || 0);
+}
+
+// 화면 표시용으로 td를 T/D에 반영
+function toDisplayCounts(raw){
+  if (!raw) return null;
+  const td = Number(raw.td || 0);
+  return {
+    c: Number(raw.c || 0),
+    t: Number(raw.t || 0) + td,
+    d: Number(raw.d || 0) + td,
+  };
+}
+
+// “데이터가 있나?” 판정할 때 td도 포함해야 함
+function sum3(x){
+  return Number(x?.c || 0) + Number(x?.t || 0) + Number(x?.d || 0) + Number(x?.td || 0);
+}
+function calcStateByCounts(counts) {
+  if (!counts) return "";
+  if ((counts.t || 0) > 0 && (counts.d || 0) > 0) return "TD";
+  if ((counts.c || 0) > 0) return "C";
+  if ((counts.t || 0) > 0) return "T";
+  if ((counts.d || 0) > 0) return "D";
+  return "";
+}
+
+async function ensureCountsForNode(node){
+  const key = node?.data?.pathKey;
+  if (!key) return;
+  // 이미 계산돼 있으면 스킵
+  if (getCounts(key)) return;
+  await bulkEnsureForVisible([key]);
+  computePathState(key);
+}
+
+function normalizeSeg(s) {
+  //문자열화
+  let x = (s ?? "").toString();
+  //좌우 공백 제거 + 내부 연속 공백 1칸으로
+  x = x.replace(/\s+/g, " ").trim();
+  //유사 하이픈 (ㅡ - 등) → 일반 하이픈(-)으로 통일
+  x = x.replace(/[\u2010-\u2015\u2212\u2043]/g, "-");
+  //눈에 안보이는 제어문자 제거
+  x = x.replace(/[\u200B-\u200D\uFEFF]/g, "");
+  return x;
+}
+
+function normalizePath(pathArr) {
+  return (pathArr || []).map(normalizeSeg);
+}
+
+// 브랜치(자기+자식) 보장+계산 후, 그 브랜치만 리렌더
+async function ensureCountsForSubtree(provider, node){
+  const key  = node?.data?.pathKey;
+  const path = node?.data?.__path || buildPathFromNode(node);
+  if (!key || !path) return;
+
+  if (_subtreeBusy.has(key)) return; // 중복 실행 방지
+  _subtreeBusy.add(key);
+
+  try {
+    const keys = await collectAllPathKeys(provider, path);
+    const uniq = Array.from(new Set(keys.length ? keys : [key]));
+
+    if (uniq.length) {
+      // 1) 보장 + 상태계산
+      await bulkEnsureForVisible(uniq);
+      uniq.forEach(k => computePathState(k));
+
+      // 2) 가장 깊은 레벨의 counts만 모아서 합산 (중복합산 방지)
+      const levels = new Map(); // depth -> rawCounts[]
+      for (const k of uniq){
+        const c = getCounts(k);
+        if (c && sum3(c) > 0){
+          const d = keyDepth(k);
+          if (!levels.has(d)) levels.set(d, []);
+          levels.get(d).push(c);
+        }
+      }
+
+      let totals = { c: 0, t: 0, d: 0 };
+      if (levels.size){
+        const depths = Array.from(levels.keys()).sort((a,b)=>a-b);
+        const deepest = depths[depths.length - 1];
+
+        // 화며 표시 기준: td를 T/D 양쪽에 더해준다
+        for (const raw of (levels.get(deepest) || [])) {
+          const disp = toDisplayCounts(raw);
+          addCounts(totals, disp);
+        }
+      }
+      node.data.__aggCounts = totals; // 폴백 합계 저장
+    }
+
+    try { node.render(true); } catch {}
+  } finally {
+    setTimeout(() => _subtreeBusy.delete(key), 50);
+  }
+}
+
+async function ensureCountsForAllRoots(tree, provider){
+  const roots = tree.getRootNode().children || [];
+  const all = [];
+  for (const r of roots){
+    const p = r.data?.__path || [r.title];
+    const ks = await collectAllPathKeys(provider, p);
+    all.push(...ks);
+  }
+  const uniq = Array.from(new Set(all));
+  if (uniq.length) {
+    await bulkEnsureForVisible(uniq);
+    uniq.forEach(k => computePathState(k));
+  }
+  try { tree.render(true, true); } catch {}
+}
+
+// -----------------------------------------------------------------------------------
 
 // 서브트리 pathKey 전부 수집 (트리 확장 여부와 무관)
 async function collectAllPathKeys(provider, startPath, cap = 20000) {
   const keys = [];
-  const q = [startPath];
+  const q = [normalizePath(startPath)];
   const seen = new Set();
   while (q.length && cap > 0) {
     const p = q.shift();
@@ -3652,7 +4018,7 @@ async function collectAllPathKeys(provider, startPath, cap = 20000) {
     try { children = await provider.childrenByPath(p) || []; } catch {}
     cap -= children.length;
     for (const ch of children) {
-      const cp = ch.__path || [...p, ch.text];
+      const cp = ch.__path ? normalizePath(ch.__path) : [...p, normalizeSeg(ch.text)];
       q.push(cp);
     }
   }
@@ -3728,7 +4094,10 @@ function updateEyeDom(n) {
 function buildPathFromNode(node){
   const out = [];
   let cur = node;
-  while (cur && !cur.isRoot()) { out.unshift(cur.title); cur = cur.parent; }
+  while (cur && !cur.isRoot()) {
+     out.unshift(normalizeSeg(cur.title));
+     cur = cur.parent; 
+  }
   return out;
 }
 function stateToClass(st){
@@ -3789,11 +4158,10 @@ function calcEyeStateForNode(node){
 }
 
 export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
-  await initMatrix({ primaryOrder, provider });
-
-  // const tree = $.ui.fancytree.getTree("#wbs-tree");
-  // window.wbsTree = tree;
-
+  if(!window.__MATRIX_READY) {
+    await initMatrix({ primaryOrder, provider });
+    window.__MATRIX_READY = true;
+  }
   // 테이블 뼈대(개수 가운데 정렬: th에 text-center)
   const host = document.getElementById("wbs-group-content");
   host.innerHTML = `
@@ -3825,17 +4193,20 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
       try{
         asPromise(provider?.roots?.()).then((nodes) => {
           const arr = Array.isArray(nodes) ? nodes : [];
-          d.resolve(arr.map(ch => ({
-            title: ch.text,
-            lazy: ch.children === true,
-            data: {
-              __path: ch.__path || [ch.text],
-              pathKey: toKey(ch.__path || [ch.text]),
-              leafCount: ch.leafCount || 0,
-              dbId: ch.dbId,
-              elementId: ch.elementId
+          d.resolve(arr.map(ch => {
+            const basePath = ch.__path ? normalizePath(ch.__path) : [normalizeSeg(ch.text)];
+            return {
+              title: ch.text,
+              lazy: ch.children === true,
+              data: {
+                __path: basePath,
+                pathKey: toKey(basePath),
+                leafCount: ch.leafCount || 0,
+                dbId: ch.dbId,
+                elementId: ch.elementId
+              }
             }
-          })));
+          }));
         }).catch(() => d.resolve([]));
       } catch {
         d.resolve([]);
@@ -3852,9 +4223,10 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
         asPromise(provider?.childrenByPath?.(path)).then((children)=>{
           const arr = Array.isArray(children) ? children : [];
           d.resolve(arr.map(ch => {
-            const __path = ch.__path || [...path, ch.text];
+            const seg    = normalizeSeg(ch.text);
+            const __path = ch.__path ? normalizePath(ch.__path) : [...path, seg];
             return {
-              title: ch.text,
+              title: seg,
               lazy: ch.children === true,
               data: {
                 __path,
@@ -3872,15 +4244,18 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
       data.result = d.promise();
     },
 
-    loadChildren: function(event, data){
+    loadChildren: async function(event, data){
       try {
-        const keys = [];
-        data.node.visit(n => { if (n.data?.pathKey) keys.push(n.data.pathKey); });
-        bulkEnsureForVisible(keys).then(() => {
-          keys.forEach(k => computePathState(k));
-          //해당 브랜치만 안전 재랜더
-          setTimeout(() => { try { data.node.render(true); } catch {} }, 0);
-        })
+        // const rootPath = data.node.data?.__path || buildPathFromNode(data.node);
+        // //브랜치 전체 (본인+자손)의 pathKey 수집
+        // const allKeys = await collectAllPathKeys(provider, rootPath, 8000);
+        // await bulkEnsureForVisible(allKeys);
+        // allKeys.forEach(k => computePathState(k));
+        // setTimeout(() => {
+        //   try { data.node.render(true); } catch {}
+        // }
+        // , 0);
+        await ensureCountsForSubtree(provider, data.node);
       } catch (e) {
         console.warn("[WBS] loadChildren compute failed:", e);
       }
@@ -3929,34 +4304,63 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
       // 2) 현황 칼럼: 값만 표시, 계산은 expand/초기 배치에서
       const $statusCell = $tds.eq(2);
       if (node.data?.dbId != null) {
-        $statusCell.text("");
-          // formatObjectLabel({ elementId: node.data.elementId, dbId: node.data.dbId })
-      
+        $statusCell.text(""); // 말단은 빈칸
       } else {
-        // 현재 계산된 값이 있으면 클래스/숫자 적용
-        const st   = getPathState(node.data?.pathKey);
-        const cls  = stateToClass(st);
+        const key = node.data?.pathKey;
+      
+        // 2-0 숫자 확보: getCounts의 {total,c,t,d,td} → 화면표시용 {c,t,d}로 변환
+        //  - td(가설&철거 동시)는 T/D 양쪽에 더해 표기
+        const raw = key && getCounts(key);        // { total, c, t, d, td }
+        let counts = toDisplayCounts(raw);         // { c, t, d } (td가 t/d에 반영됨)
+      
+        // 부모 직접값이 0이면 서브트리 집계(__aggCounts)로 폴백
+        if ((!counts || sum3(counts) === 0) && node.data?.__aggCounts) {
+          counts = node.data.__aggCounts;          // __aggCounts는 이미 {c,t,d}
+        }
+      
+        // 2-1 상태(색칠): counts 기준 (t>0 && d>0 → 'TD')
+        const st  = calcStateByCounts(counts);
+        const cls = stateToClass(st);
         $(node.tr).removeClass("wbs-c wbs-t wbs-d wbs-td");
         if (cls) $(node.tr).addClass(cls);
-        // if (cls) {
-        //   $(node.tr).removeClass("wbs-c wbs-t wbs-d wbs-td").addClass(cls);
-        // }
-
-        const counts = getCounts(node.data?.pathKey);
-        if (counts) {
+      
+        // 2-2 숫자 렌더
+        if (counts && (typeof counts.c === "number" || typeof counts.t === "number" || typeof counts.d === "number")) {
           $statusCell
-          .addClass("text-center")
-          .html(`
-            <div class="wbs-status" style="justify-content: center;">
-              <div class="nums">
-                <span class="b c" title="시공">${counts.c ?? 0}</span>
-                <span class="b t" title="가설">${counts.t ?? 0}</span>
-                <span class="b d" title="철거">${counts.d ?? 0}</span>
+            .addClass("text-center")
+            .html(`
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">${counts.c ?? 0}</span>
+                  <span class="b t" title="가설">${counts.t ?? 0}</span>
+                  <span class="b d" title="철거">${counts.d ?? 0}</span>
+                </div>
               </div>
-            </div>
-          `);
+            `);
         } else {
           $statusCell.text("…");
+          if (!node.data.__countsRequested && key) {
+            node.data.__countsRequested = true;
+            ensureCountsForNode(node)
+              .then(() => { try { node.render(true); } catch {} })
+              .finally(() => { node.data.__countsRequested = false; });
+          }
+        }
+      
+        // 2-3 숫자/상태 불일치 자동 복구 (1회)
+        if (key) {
+          const totalShown = (counts?.c || 0) + (counts?.t || 0) + (counts?.d || 0);
+          const likelyWrong =
+            ((node.data?.leafCount || 0) > 0) &&
+            totalShown === 0 &&
+            !node.data.__countsRepairOnce;
+      
+          if (likelyWrong) {
+            node.data.__countsRepairOnce = true;
+            ensureCountsForSubtree(provider, node)
+              .then(() => { try { node.render(true); } catch {} })
+              .finally(() => { node.data.__countsRepairOnce = false; });
+          }
         }
       }
     },
@@ -3964,16 +4368,9 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
     // 확장할 때만: 보이는 경로들 계산 → 테이블 전체 1회 리렌더
     expand: async function(event, data) {
       try {
-        const keys = [];
-        data.node.visit(n => { if (n.data?.pathKey && n.lazy !== false) keys.push(n.data.pathKey); });
-        await bulkEnsureForVisible(keys);
-        keys.forEach(k => computePathState(k));
+        await ensureCountsForSubtree(provider, data.node);
       } catch(e) {
         console.warn("[WBS] expand compute failed:", e);
-      } finally {
-        setTimeout(() => {
-          try { data.node.render(true); } catch {}
-        }, 0);
       }
     },
 
@@ -4015,22 +4412,41 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
     init: function(event, data){
       setTimeout(async () => {
         try {
-          const tree = data.tree;
-          const keys = [];
-          tree.getRootNode().children?.forEach(n => { if (n.data?.pathKey) keys.push(n.data.pathKey); });
-          if (keys.length) {
-            await bulkEnsureForVisible(keys);
-            keys.forEach(k => computePathState(k));
-            tree.render(true, true);
-          }
+          // 루트들 전체 서브트리 키를 provider 통해 수집해서 한번에 보장/계산
+          await ensureCountsForAllRoots(data.tree, provider);
         } catch(e) {
           console.warn("[WBS] initial compute failed:", e);
         }
       }, 0);
+    },
+
+    select: function(event, data){
+      //선택 토글 후, 현재 노드 + 상위 경로만 재렌더해서 상태 클래스(wbs-*)를 즉시 복구
+      setTimeout(() => {
+        try { data.node.render(true);} catch {}
+        try {
+          const parents = data.node.getParentList(false, true) || [];
+          parents.forEach(p => { try { p.render(true);} catch {}})
+        } catch {}
+      }, 0);
     }
+
   });
 
   window.wbsTree = $.ui.fancytree.getTree("#wbs-tree");
+
+  //디버깅
+  window.__WBS_DEBUG = {
+    tree: () => $.ui.fancytree.getTree("#wbs-tree"),
+    provider,
+    getCounts,
+    computePathState,
+    bulkEnsureForVisible,
+    collectAllPathKeys,
+    ensureCountsForSubtree,
+    ensureCountsForNode,
+    toKey
+  };
 
   // 눈알 토글: 위임
   $("#wbs-tree").on("click", ".eye-toggle", async (e) => {

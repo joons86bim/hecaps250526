@@ -1,100 +1,176 @@
 // /wwwroot/js/task-wbs/task-buttons.js
-// Test: 선택 객체만 대상으로 컷플레인 스윕
-// 2s 상→하 스윕(사라짐) → 1s 대기 → 2s 하→상 스윕(등장)
+// Test 버튼: (A) 이동+페이드(2s OUT → 1s HOLD → 2s IN) 수행 후,
+//            (B) 선택 객체만 대상의 "컷플레인 스윕풍" 연출(2s 사라짐 → 1s 대기 → 2s 등장)
+//  - 실제 전역 CutPlanes는 쓰지 않고, 선택 객체 프래그먼트의 opacity를 "이동하는 Z-밴드"로 제어하여
+//    Synchro 4D의 진행면 같은 효과를 선택 객체에만 적용합니다.
 
 export function initTaskWbsButtons(viewer) {
   let btn = document.getElementById('btn-test');
   if (!btn || !viewer) return;
 
+  // 중복 리스너 제거
   const clone = btn.cloneNode(true);
   btn.parentNode.replaceChild(clone, btn);
   btn = clone;
 
   btn.addEventListener('click', async () => {
     try {
-      await runTestCutSweep(viewer);
+      await runTestComposite(viewer);
     } catch (e) {
       console.error('[test-btn] error:', e);
     }
   });
 }
 
-async function runTestCutSweep(viewer) {
+async function runTestComposite(viewer) {
   const sel = getSelectionSmart(viewer);
-  if (!sel || !sel.model || !sel.dbIds.length) {
+  if (!sel || !sel.model || !sel.dbIds?.length) {
     console.warn('[test-btn] 먼저 객체를 선택하세요.');
     return;
   }
   const { model, dbIds } = sel;
 
-  // 선택만 보이도록(선택 객체만 애니메이션 대상)
-  const ISOLATE_SELECTION = true;
-  let prevIsolated = null;
-  if (ISOLATE_SELECTION) {
-    try { prevIsolated = viewer.getIsolatedNodes?.() || null; } catch(_) {}
-    viewer.isolate(dbIds);
-  }
-  viewer.clearSelection();
+  // 선택 프래그먼트 수집 + 상태 준비(머티리얼 클론/원복 정보 등)
+  const fragIds = collectFragIds(model, dbIds);
+  if (!fragIds.length) return;
 
-  // 선택 bbox 계산
   const bbox = computeSelectionBBox(viewer, model, dbIds);
-  if (!bbox) {
-    console.warn('[test-btn] 바운딩박스를 계산할 수 없습니다.');
-    if (ISOLATE_SELECTION) viewer.isolate([]);
-    return;
-  }
+  if (!bbox) return;
 
-  // 기존 컷플레인 백업
-  const originalPlanes = viewer.getCutPlanes ? (viewer.getCutPlanes().slice()) : [];
+  const store = prepareFragStates(viewer, model, fragIds); // cloneMat 등 준비 + centerZ 사전계산
+  try {
+    // ---------------- A) 기존 "이동+페이드" ----------------
+    await phaseMoveFade(viewer, store, {
+      moveZ: 5.0,      // m 기준 (단위 다르면 조정)
+      dOut: 2000,      // 2s fade-out + move +
+      hold: 1000,      // 1s
+      dIn: 2000        // 2s fade-in + move back
+    });
 
-  const THREE = window.THREE || Autodesk.Viewing.THREE;
-  // 컷 방향: Z+
-  const dir = new THREE.Vector3(0, 0, 1);
+    // ---------------- B) "컷플레인 스윕풍" ----------------
+    // 선택 bbox 기준으로 위→아래(사라짐), 아래→위(등장) 밴드 이동
+    await phaseZSweep(viewer, store, bbox, {
+      dOut: 2000,      // 2s 사라짐 (Top -> Bottom)
+      hold: 1000,      // 1s 대기
+      dIn: 2000,       // 2s 등장 (Bottom -> Top)
+      bandRatio: 0.08  // 밴드 두께(선택 높이의 비율, 0.05~0.15 권장)
+    });
 
-  const minZ = bbox.min.z;
-  const maxZ = bbox.max.z;
-  const range = Math.max(1e-6, maxZ - minZ);
-  const margin = range * 0.05;
-
-  // ★ 핵심: 시작을 '천장 위'로 잡아 처음 프레임에서 아무 것도 잘리지 않게 함
-  const startH_top = maxZ + margin;
-  const endH_bottom = minZ - margin;
-
-  // THREE.Plane: n·p + c = 0, 뷰어는 양/음 중 한쪽을 클립함
-  // 여기서는 start를 위쪽으로 잡고 ↓로 이동시키며 점차 클립되도록 설정
-  const sweepPlane = new THREE.Plane(dir.clone(), -startH_top);
-
-  // 상→하 2초: 점점 사라짐(Top→Bottom)
-  await animate(2000, (t) => {
-    const k = easeInOutSine(t);               // 0→1
-    const h = lerp(startH_top, endH_bottom, k);
-    sweepPlane.constant = -h;
-    viewer.setCutPlanes([...originalPlanes, sweepPlane]);
-    viewer.impl.sceneUpdated(true);
-  });
-
-  await delay(1000); // 1초 대기
-
-  // 하→상 2초: 다시 나타남(Bottom→Top)
-  await animate(2000, (t) => {
-    const k = easeInOutSine(t);
-    const h = lerp(endH_bottom, startH_top, k);
-    sweepPlane.constant = -h;
-    viewer.setCutPlanes([...originalPlanes, sweepPlane]);
-    viewer.impl.sceneUpdated(true);
-  });
-
-  // 원복
-  viewer.setCutPlanes(originalPlanes);
-  viewer.impl.sceneUpdated(true);
-
-  if (ISOLATE_SELECTION) {
-    // 간단 복원: 전체 표시 (필요 시 prevIsolated 복구 로직으로 변경)
-    viewer.isolate([]);
+  } finally {
+    // 상태 원복(머티리얼/위치/테마 등)
+    restoreFragStates(viewer, store);
   }
 }
 
-/* ============== Helpers ============== */
+/* ================== A) 이동+페이드 ================== */
+async function phaseMoveFade(viewer, store, { moveZ, dOut, hold, dIn }) {
+  const MOVE_Z = moveZ ?? 5.0;
+  const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const FALLBACK_COLOR = new THREE.Color(1.0, 0.45, 0.0); // 주황 폴백
+
+  // OUT: Z+ 이동하면서 α:1→0 (S-커브)
+  await animate(dOut, (t) => {
+    const k = easeInOutSine(t);
+    const alphaOut = 1 - k;
+    const dz = lerp(0, MOVE_Z, k);
+
+    for (const f of store) {
+      // 위치 이동
+      f.proxy.position.z = f.startPos.z + dz;
+      f.proxy.updateAnimTransform();
+
+      // 머티리얼 페이드 + 색 폴백
+      if (f.cloneMat) {
+        f.cloneMat.opacity = alphaOut;
+        f.cloneMat.transparent = true;
+        f.cloneMat.needsUpdate = true;
+
+        if (f.cloneMat.color && f.originalColor) {
+          f.cloneMat.color.copy(f.originalColor).lerp(FALLBACK_COLOR, k);
+        }
+      }
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+
+  await delay(hold);
+
+  // IN: Z- 복귀하면서 α:0→1 (S-커브)
+  await animate(dIn, (t) => {
+    const k = easeInOutSine(t);
+    const alphaIn = k;
+    const dz = lerp(MOVE_Z, 0, k);
+
+    for (const f of store) {
+      f.proxy.position.z = f.startPos.z + dz;
+      f.proxy.updateAnimTransform();
+
+      if (f.cloneMat) {
+        f.cloneMat.opacity = alphaIn;
+        f.cloneMat.transparent = true;
+        f.cloneMat.needsUpdate = true;
+
+        if (f.cloneMat.color && f.originalColor) {
+          f.cloneMat.color.copy(FALLBACK_COLOR).lerp(f.originalColor, k);
+        }
+      }
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+}
+
+/* ================== B) Z 스윕풍(선택만) ================== */
+async function phaseZSweep(viewer, store, bbox, { dOut, hold, dIn, bandRatio }) {
+  const range = Math.max(1e-6, bbox.max.z - bbox.min.z);
+  const margin = range * 0.05;
+  const band = Math.max(range * (bandRatio ?? 0.08), 1e-6);
+
+  // 스윕은 프래그먼트별 centerZ 대비 '이동하는 높이 h'에 따라 opacity를
+  // alpha = smoothstep(centerZ - band/2, centerZ + band/2, h) 로 부여.
+  // - OUT(Top->Bottom): h를 top→bottom으로 내려서 alpha 1→0
+  // - IN (Bottom->Top): h를 bottom→top으로 올려서 alpha 0→1
+
+  const startTop = bbox.max.z + margin;
+  const endBottom = bbox.min.z - margin;
+
+  // OUT: 위→아래 (사라짐)
+  await animate(dOut, (t) => {
+    const k = easeInOutSine(t);
+    const h = lerp(startTop, endBottom, k);
+
+    for (const f of store) {
+      if (!f.cloneMat) continue;
+      const edge0 = f.centerZ - band * 0.5;
+      const edge1 = f.centerZ + band * 0.5;
+      const alpha = smoothstep(edge0, edge1, h); // h가 내려가며 1→0
+      f.cloneMat.opacity = alpha;
+      f.cloneMat.transparent = true;
+      f.cloneMat.needsUpdate = true;
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+
+  await delay(hold);
+
+  // IN: 아래→위 (등장)
+  await animate(dIn, (t) => {
+    const k = easeInOutSine(t);
+    const h = lerp(endBottom, startTop, k);
+
+    for (const f of store) {
+      if (!f.cloneMat) continue;
+      const edge0 = f.centerZ - band * 0.5;
+      const edge1 = f.centerZ + band * 0.5;
+      const alpha = smoothstep(edge0, edge1, h); // h가 올라가며 0→1
+      f.cloneMat.opacity = alpha;
+      f.cloneMat.transparent = true;
+      f.cloneMat.needsUpdate = true;
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+}
+
+/* ================== 공통 Helpers ================== */
 
 function getSelectionSmart(viewer) {
   const agg = viewer.getAggregateSelection?.();
@@ -107,12 +183,6 @@ function getSelectionSmart(viewer) {
   return (ids && ids.length) ? { model: viewer.model, dbIds: ids, aggregate: false } : null;
 }
 
-function getFragList(viewer, model) {
-  if (model?.getFragmentList) return model.getFragmentList();
-  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();
-  return null;
-}
-
 function collectFragIds(model, dbIds) {
   const it = model.getData().instanceTree;
   const fragIds = [];
@@ -120,6 +190,12 @@ function collectFragIds(model, dbIds) {
     it.enumNodeFragments(dbId, (fragId) => fragIds.push(fragId), true);
   });
   return fragIds;
+}
+
+function getFragList(viewer, model) {
+  if (model?.getFragmentList) return model.getFragmentList();
+  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();
+  return null;
 }
 
 function computeSelectionBBox(viewer, model, dbIds) {
@@ -144,13 +220,96 @@ function computeSelectionBBox(viewer, model, dbIds) {
   return init ? box : null;
 }
 
-/* timing & easing */
+function prepareFragStates(viewer, model, fragIds) {
+  const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const matman = viewer.impl.matman ? viewer.impl.matman() : null;
+  const fragList = getFragList(viewer, model);
+  const store = [];
 
+  const tmp = new THREE.Box3();
+
+  for (const fragId of fragIds) {
+    const proxy = viewer.impl.getFragmentProxy(model, fragId);
+    proxy.getAnimTransform();
+    const startPos = new THREE.Vector3(proxy.position.x, proxy.position.y, proxy.position.z);
+
+    const rp = viewer.impl.getRenderProxy(model, fragId);
+    const originalMat = rp?.material || null;
+
+    // 원래 색상 보관
+    let originalColor = null;
+    if (originalMat?.color) originalColor = originalMat.color.clone();
+
+    // 프래그 월드 바운딩박스 → centerZ 사전 계산(스윕용)
+    let centerZ = 0;
+    if (fragList) {
+      try {
+        fragList.getWorldBounds(fragId, tmp);
+        centerZ = 0.5 * (tmp.min.z + tmp.max.z);
+      } catch(_) {}
+    }
+
+    // 머티리얼 클론 & 투명 활성
+    let cloneMat = null;
+    if (originalMat) {
+      cloneMat = (matman?.cloneMaterial) ? matman.cloneMaterial(originalMat) : originalMat.clone();
+      cloneMat.transparent = true;
+      cloneMat.opacity = 1.0;
+      cloneMat.depthWrite = false;
+      cloneMat.side = originalMat.side;
+      cloneMat.needsUpdate = true;
+
+      // 안전한 바인딩 경로
+      if (viewer.impl.setMaterial) {
+        viewer.impl.setMaterial(model, fragId, cloneMat);
+      } else if (fragList?.setMaterial) {
+        fragList.setMaterial(fragId, cloneMat);
+      } else if (viewer.impl.setFragmentMaterial) {
+        viewer.impl.setFragmentMaterial(fragId, cloneMat);
+      }
+    }
+
+    store.push({
+      model, fragId, proxy, startPos,
+      renderProxy: rp,
+      originalMat, cloneMat,
+      originalColor,
+      centerZ
+    });
+  }
+  viewer.impl.invalidate(true, true, true);
+  return store;
+}
+
+function restoreFragStates(viewer, store) {
+  if (!store?.length) return;
+  const model = store[0].model;
+  const fragList = getFragList(viewer, model);
+
+  for (const f of store) {
+    // 위치 원복
+    f.proxy.position.copy(f.startPos);
+    f.proxy.updateAnimTransform();
+
+    // 머티리얼 원복
+    if (f.originalMat) {
+      if (viewer.impl.setMaterial) {
+        viewer.impl.setMaterial(f.model, f.fragId, f.originalMat);
+      } else if (fragList?.setMaterial) {
+        fragList.setMaterial(f.fragId, f.originalMat);
+      } else if (viewer.impl.setFragmentMaterial) {
+        viewer.impl.setFragmentMaterial(f.fragId, f.originalMat);
+      }
+    }
+    if (f.cloneMat?.dispose) f.cloneMat.dispose();
+  }
+  viewer.impl.invalidate(true, true, true);
+}
+
+/* 수학/타이밍 유틸 */
 function lerp(a, b, t) { return a + (b - a) * t; }
 function delay(ms) { return new Promise((res) => setTimeout(res, ms)); }
-
 function easeInOutSine(t){ return 0.5 - 0.5 * Math.cos(Math.PI * t); }
-
 function animate(duration, step) {
   return new Promise((resolve) => {
     const start = performance.now();
@@ -162,4 +321,8 @@ function animate(duration, step) {
     }
     requestAnimationFrame(frame);
   });
+}
+function smoothstep(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / Math.max(1e-9, edge1 - edge0)));
+  return t * t * (3 - 2 * t);
 }

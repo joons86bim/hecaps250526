@@ -1,4 +1,4 @@
-// /wwwroot/js/main.js — 첫 로딩 WBS 셀 색/배지 보장 (정리/최적화판)
+// /wwwroot/js/main.js — 첫 로딩 WBS 셀 색칠 보장 (배지 제거/최적화)
 
 import { initTabs } from "./sidebar/init-tabs.js";
 import { initTree } from "./sidebar/init-tree.js";
@@ -10,7 +10,7 @@ import {
   initMatrix,
   bulkEnsureForVisible,
   computePathState,
-  getCounts,
+  getCounts as _getCountsImported,   // 로컬 import는 디버그 브릿지 대상 아님(참고용)
   markTasksChanged,
 } from "./sidebar/task-wbs/core/matrix-index.js";
 
@@ -29,7 +29,7 @@ import {
 ────────────────────────────────────────────────────────────── */
 try {
   window.__WBS_DEBUG = window.__WBS_DEBUG || {};
-  window.getCounts = getCounts;
+  window.getCounts = _getCountsImported;
   window.markTasksChanged = markTasksChanged;
 } catch {}
 
@@ -37,8 +37,7 @@ const SIDEBAR_MIN = 360;
 const SIDEBAR_DEFAULT = 900;
 const PREVIEW_MIN = 520;
 
-// 폴백 count 저장소
-window.__FA_FALLBACK_BY_KEY = Object.create(null);
+window.__FA_FALLBACK_BY_KEY = Object.create(null); // 폴백 count 저장소
 
 function initSidebarWidth() {
   const root = document.documentElement;
@@ -198,13 +197,12 @@ async function collectKeysForRoots(provider, { maxDepth = 3, cap = 6000 } = {}) 
   return Array.from(keys);
 }
 
-// 태스크 → 상태별 dbId 세트 (시공/가설/철거/복합)
+// 태스크 → 상태별 dbId 세트
 function buildStatusSetsFromTasks(tasks) {
   const stateById = new Map();
   const norm = (raw) => {
     if (!raw) return "";
     const s = String(raw).trim();
-    // 한글도 지원
     const S = s.toUpperCase();
     if (s.includes("시공") || S.startsWith("C")) return "C";
     if (s.includes("가설") || S.startsWith("T")) return "T";
@@ -217,10 +215,7 @@ function buildStatusSetsFromTasks(tasks) {
     if (!id || !sNew) return;
     const cur = stateById.get(id);
     if (!cur) { stateById.set(id, sNew); return; }
-    // T + D 동시 → TD 승격
-    if ((cur === "T" && sNew === "D") || (cur === "D" && sNew === "T")) {
-      stateById.set(id, "TD"); return;
-    }
+    if ((cur === "T" && sNew === "D") || (cur === "D" && sNew === "T")) { stateById.set(id, "TD"); return; }
     stateById.set(id, prio[sNew] > prio[cur] ? sNew : cur);
   }
   (function walk(arr, inherited="") {
@@ -230,7 +225,6 @@ function buildStatusSetsFromTasks(tasks) {
       if (t.children) walk(t.children, sTask);
     });
   })(tasks);
-
   const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
   for (const [id, s] of stateById.entries()) if (S[s]) S[s].add(id);
   return S;
@@ -317,14 +311,13 @@ function patchGetCountsToUseFallback() {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   WBS FancyTree 셀/배지 렌더
+   WBS FancyTree 셀 색칠 (배지 제거)
 ────────────────────────────────────────────────────────────── */
-// 색 규칙: C(시공)=빨강, TD(가설+철거)=파랑, T=주황, D=회색
 const CELL_COLOR = {
-  C:  "#ef4444", // red
-  T:  "#f59e0b", // amber
-  D:  "#6b7280", // gray
-  TD: "#2563eb"  // blue
+  C:  "#ef4444", // 시공(빨강)
+  T:  "#f59e0b", // 가설(주황)
+  D:  "#6b7280", // 철거(회색)
+  TD: "#2563eb"  // 가설+철거(파랑)
 };
 
 function injectWbsCellCss() {
@@ -340,15 +333,6 @@ function injectWbsCellCss() {
     .wbsCell--T  .fancytree-title  { background: ${CELL_COLOR.T}1a;  border-left-color: ${CELL_COLOR.T}; }
     .wbsCell--D  .fancytree-title  { background: ${CELL_COLOR.D}1a;  border-left-color: ${CELL_COLOR.D}; }
     .wbsCell--TD .fancytree-title  { background: ${CELL_COLOR.TD}1a; border-left-color: ${CELL_COLOR.TD}; }
-    .wbs-badges { display:inline-flex; gap:6px; margin-left:8px; vertical-align:middle; }
-    .wbs-badge  { display:inline-block; min-width:18px; padding:0 6px; height:18px; line-height:18px;
-                  font-size:11px; font-weight:600; border-radius:9px; color:#fff; text-align:center;
-                  box-shadow:inset 0 -1px rgba(0,0,0,0.15) }
-    .wbs-badge.hidden{ display:none; }
-    .wbs-badge.C  { background:${CELL_COLOR.C}; }
-    .wbs-badge.T  { background:${CELL_COLOR.T}; color:#111; }
-    .wbs-badge.D  { background:${CELL_COLOR.D}; }
-    .wbs-badge.TD { background:${CELL_COLOR.TD}; }
   `.trim();
   const s = document.createElement("style");
   s.id = "wbs-cell-style";
@@ -372,46 +356,37 @@ function classForCounts(c) {
   return null;
 }
 
-function ensureBadges(node, counts) {
-  const $ = window.jQuery || window.$;
-  const $span = $(node.span);
-  const $title = $span.find(".fancytree-title");
-  if ($title.length === 0) return;
-  let $badges = $span.find(".wbs-badges");
-  if ($badges.length === 0) {
-    $badges = $("<span class='wbs-badges'/>").insertAfter($title);
-    $badges.append("<span class='wbs-badge C'  data-k='c'>0</span>");
-    $badges.append("<span class='wbs-badge T'  data-k='t'>0</span>");
-    $badges.append("<span class='wbs-badge D'  data-k='d'>0</span>");
-    $badges.append("<span class='wbs-badge TD' data-k='td'>0</span>");
-  }
-  const setVal = (k, v) => {
-    const b = $badges.find(`.wbs-badge.${k}`);
-    if (b.length) { b.text(v|0); b.toggleClass("hidden", (v|0)===0); }
-  };
-  setVal("C", counts.c);
-  setVal("T", counts.t);
-  setVal("D", counts.d);
-  setVal("TD", counts.td);
-}
-
 function repaintNode(node) {
   const $ = window.jQuery || window.$;
   if (!$ || !node || !node.span || node.isRoot?.()) return;
-  const path = node.data?.__path || node.getKeyPath().split("/").filter(Boolean);
-  const counts = countsForPath(path);
 
+  // __path가 없으면 아직 매핑 전 → 이번 프레임 스킵 (재시도 루프가 다시 칠함)
+  const path = node.data?.__path;
+  if (!path) return;
+
+  const counts = countsForPath(path);
   const $li = $(node.li);
   $li.removeClass("wbsCell--C wbsCell--T wbsCell--D wbsCell--TD");
   const cls = classForCounts(counts);
   if (cls) $li.addClass(cls);
-
-  ensureBadges(node, counts);
 }
 
 function repaintTree(tree) {
   if (!tree) return;
   tree.visit(repaintNode);
+}
+
+// 첫 로딩 셀 칠하기 재시도 루프(최대 1초)
+function startFirstPaintRetry(tree) {
+  let tries = 0;
+  const maxTries = 10;
+  const step = () => {
+    tries++;
+    repaintTree(tree);
+    if (tries >= maxTries) return;
+    setTimeout(step, 100);
+  };
+  setTimeout(step, 0);
 }
 
 function installWbsDecorators(tree) {
@@ -421,21 +396,27 @@ function installWbsDecorators(tree) {
 
   injectWbsCellCss();
 
-  // renderNode 체이닝
-  const prev = tree.options.renderNode;
+  // 기존 훅 체이닝
+  const prevRenderNode = tree.options.renderNode;
   tree.$div.fancytree("option", "renderNode", function(event, data) {
-    try { if (typeof prev === "function") prev.call(this, event, data); } catch {}
+    try { if (typeof prevRenderNode === "function") prevRenderNode.call(this, event, data); } catch {}
     try { repaintNode(data.node); } catch {}
   });
+  tree.$div.fancytree("option", "createNode", function(_ev, data) {
+    try { repaintNode(data.node); } catch {}
+  });
+  tree.$div.fancytree("option", "expand", function(_ev, data) {
+    if (data.node?.expanded) setTimeout(() => { try { repaintTree(tree); } catch {} }, 0);
+  });
 
-  // 유틸 노출(방어적)
-  tree.__wbsHelpers = tree.__wbsHelpers || {};
-  tree.__wbsHelpers.repaintTree = () => { try { repaintTree(tree); } catch {} };
-  tree.__wbsHelpers.repaintNode = (n) => { try { repaintNode(n); } catch {} };
-
-  // 초기 두 프레임 강제 칠하기
+  // 초기 두 프레임 + 재시도 루프
   try { repaintTree(tree); } catch {}
   requestAnimationFrame(() => { try { repaintTree(tree); } catch {} });
+  startFirstPaintRetry(tree);
+
+  // 디버그 훅
+  tree.__wbsHelpers = tree.__wbsHelpers || {};
+  tree.__wbsHelpers.repaintTree = () => { try { repaintTree(tree); } catch {} };
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -590,56 +571,14 @@ window.addEventListener("resize", _.throttle(() => {
       await bulkEnsureForVisible(preKeys);
       preKeys.forEach(computePathState);
 
-      // (G) 트리 init → 트리 핸들 확보 → 데코레이터/폴백 반영
+      // (G) 트리 init → 핸들 확보 → 데코레이터 설치 → 첫 칠하기 재시도
       await initWbsPanelWithFancytree(provider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
       console.log("[STEP 5] WBS fancytree init OK");
 
-      const tree = $.ui.fancytree.getTree("#wbs-tree");     // ★ 반드시 먼저!
-      await (async function installFallbackCounts(treeInst, providerInst) {
-        const tasksSnap = window.__SAVED_TASKS || [];
-        if (!treeInst || !providerInst || !tasksSnap.length) return;
-        const S = buildStatusSetsFromTasks(tasksSnap);
-        const visit = (node, path) => {
-          const counts = calcCountsForPath(providerInst, path, S);
-          node.data = node.data || {};
-          node.data.__aggCounts = counts;
-          const k = keyFromPath(path);
-          window.__FA_FALLBACK_BY_KEY[k] = counts;
-          (node.children||[]).forEach(ch => {
-            const next = ch.data?.__path || [...path, ch.title];
-            visit(ch, next);
-          });
-        };
-        const root = treeInst.getRootNode();
-        (root.children||[]).forEach(n => visit(n, n.data?.__path || [n.title]));
-      })(tree, provider);
+      const tree = $.ui.fancytree.getTree("#wbs-tree");
+      installWbsDecorators(tree); // ★ 셀 색칠 전용(배지 없음)
 
-      // 데코레이터 설치(셀 색/배지) — tree 확보 후!
-      installWbsDecorators(tree);
-
-      // (H) 하드 싱크(있으면 사용, 없으면 스킵)
-      try {
-        if (window.__WBS_DEBUG?.collectAllPathKeys) {
-          const D = window.__WBS_DEBUG;
-          const roots = tree.getRootNode().children || [];
-          const all = [];
-          for (const r of roots) {
-            const p = r.data?.__path || [r.title];
-            const ks = await D.collectAllPathKeys(provider, p, 12000);
-            all.push(...ks);
-          }
-          const uniq = Array.from(new Set(all));
-          await D.bulkEnsureForVisible(uniq);
-          uniq.forEach(D.computePathState);
-          roots.forEach(r => {
-            const k = r.data?.pathKey;
-            const c = k && D.getCounts?.(k);
-            console.log("[hardSync] root:", r.title, "counts=", c);
-          });
-        }
-      } catch (e) { console.warn("[hardSync] skipped/failed:", e); }
-
-      // 나머지 패널들
+      // (H) 나머지
       try { bindPanel2Resizer(viewer); console.log("[STEP 6] panel2 resizer bound"); } catch {}
       try { initTaskPanel(tasks); initTaskListButtons(); console.log("[STEP 1] Task panel OK"); } catch {}
       try { window.dispatchEvent(new Event("panel2-ready")); console.log("[STEP 2] panel2-ready dispatched"); } catch {}

@@ -5,9 +5,9 @@ initializeCDN @ envinit.js:640
 Initializer @ envinit.js:759
 (anonymous) @ init-viewer.js:18
 initViewer @ init-viewer.js:17
-(anonymous) @ main.js:513
+(anonymous) @ main.js:529
 await in (anonymous)
-(anonymous) @ main.js:652
+(anonymous) @ main.js:668
 WebGLRenderer.js:29 THREE.WebGLRenderer 71
 WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
 WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
@@ -22,52 +22,37 @@ GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
 GeometryList.js:345 Number of meshes: 23
 GeometryList.js:346 Num Meshes on GPU: 26
 GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:562 [WBS] roots: 3
+main.js:578 [WBS] roots: 3
 main.js:173 [persistTasksSnapshot] saved to RAW & SAFE keys. count = 3
-main.js:578 [reply] setSavedTaskData done
-main.js:310 [FA] fallback map ready (keys = 24 )
-main.js:348 [FA] getCounts bridged (global+debug)
-main.js:594 [precompute] roots= 3
-main.js:597 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
-main.js:597 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
-main.js:597 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
-main.js:604 [STEP 5] WBS fancytree init OK
-main.js:348 [FA] getCounts bridged (global+debug)
-main.js:356 [FA] sets size = {C: 11, T: 12, D: 12, TD: 0}
-main.js:375 [FA] fallback counts installed
-main.js:348 [FA] getCounts bridged (global+debug)
-main.js:409 [hardSync] root: 구조벽 counts= {total: 8, c: 8, t: 0, d: 0, td: 0}
-main.js:409 [hardSync] root: 보 counts= {total: 12, c: 0, t: 12, d: 12, td: 0}
-main.js:409 [hardSync] root: 슬라브 counts= {total: 3, c: 3, t: 0, d: 0, td: 0}
-main.js:348 [FA] getCounts bridged (global+debug)
-main.js:627 [STEP 6] panel2 resizer bound
-main.js:635 [STEP 1] Task panel OK
-main.js:642 [STEP 2] panel2-ready dispatched
+main.js:594 [reply] setSavedTaskData done
+main.js:326 [FA] fallback map ready (keys = 24 )
+main.js:364 [FA] getCounts bridged (global+debug)
+main.js:610 [precompute] roots= 3
+main.js:613 [precompute after MARK] 구조벽 {total: 8, c: 0, t: 0, d: 0, td: 0}
+main.js:613 [precompute after MARK] 보 {total: 12, c: 0, t: 0, d: 0, td: 0}
+main.js:613 [precompute after MARK] 슬라브 {total: 3, c: 0, t: 0, d: 0, td: 0}
+main.js:620 [STEP 5] WBS fancytree init OK
+main.js:364 [FA] getCounts bridged (global+debug)
+main.js:372 [FA] sets size = {C: 11, T: 0, D: 0, TD: 12}
+main.js:391 [FA] fallback counts installed
+main.js:364 [FA] getCounts bridged (global+debug)
+main.js:425 [hardSync] root: 구조벽 counts= {total: 8, c: 8, t: 0, d: 0, td: 0}
+main.js:425 [hardSync] root: 보 counts= {total: 12, c: 0, t: 0, d: 0, td: 12}
+main.js:425 [hardSync] root: 슬라브 counts= {total: 3, c: 3, t: 0, d: 0, td: 0}
+main.js:364 [FA] getCounts bridged (global+debug)
+main.js:643 [STEP 6] panel2 resizer bound
+main.js:651 [STEP 1] Task panel OK
+main.js:658 [STEP 2] panel2-ready dispatched
+main.js:364 [FA] getCounts bridged (global+debug)
+main.js:364 [FA] getCounts bridged (global+debug)
 gantt-view.js:171 [gantt-view] google loaded
-main.js:348 [FA] getCounts bridged (global+debug)
-main.js:348 [FA] getCounts bridged (global+debug)
-// 1) 브릿지 여부
-__WBS_DEBUG && typeof __WBS_DEBUG.getCounts === "function" && !!__WBS_DEBUG.__patchedForFallback
-
-// 2) 폴백 맵 키 수
-Object.keys(window.__FA_FALLBACK_BY_KEY||{}).length
-
-// 3) 루트 한 개 검사 (구조벽)
-(() => {
-  const D = __WBS_DEBUG;
-  const K = D?.toKey ? D.toKey(["구조벽"]) : toKey(["구조벽"]);
-  return { cur: D.getCounts(K), fb: window.__FA_FALLBACK_BY_KEY[K] };
-})()
-VM10465:5 Uncaught TypeError: Object.keys(...).length is not a function
-    at <anonymous>:5:46
-(anonymous) @ VM10465:5
 __WBS_DEBUG && typeof __WBS_DEBUG.getCounts === "function" && !!__WBS_DEBUG.__patchedForFallback
 true
 Object.keys(window.__FA_FALLBACK_BY_KEY||{}).length
 25
 (() => {
   const D = __WBS_DEBUG;
-  const K = D?.toKey ? D.toKey(["구조벽"]) : toKey(["구조벽"]);
-  return { cur: D.getCounts(K), fb: window.__FA_FALLBACK_BY_KEY[K] };
+  const k = D?.toKey ? D.toKey(["보"]) : toKey(["보"]);
+  return { cur: D.getCounts(k), fb: window.__FA_FALLBACK_BY_KEY[k] };
 })()
-{cur: {…}, fb: {…}}cur: {total: 8, c: 8, t: 0, d: 0, td: 0}fb: {total: 8, c: 8, t: 0, d: 0, td: 0}[[Prototype]]: Object
+{cur: {…}, fb: {…}}cur: {total: 12, c: 0, t: 0, d: 0, td: 12}c: 0d: 0t: 0td: 12total: 12[[Prototype]]: Objectfb: {total: 12, c: 0, t: 0, d: 0, td: 12}c: 0d: 0t: 0td: 12total: 12[[Prototype]]: Object[[Prototype]]: Object

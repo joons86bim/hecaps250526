@@ -1,19 +1,148 @@
 //wwwroot/js/sidebar/task-wbs/ui/fancy-tree-init.js
 import { toKey } from "../core/path-key.js";
 import {
-  initMatrix, bulkEnsureForVisible,
-  computePathState, getPathState, getCounts,
+  initMatrix, 
+  bulkEnsureForVisible,
+  computePathState, 
+  //getPathState, 
+  getCounts,
   markTasksChanged
 } from "../core/matrix-index.js";
-import { formatObjectLabel } from "../core/element-id.js";
+//import { formatObjectLabel } from "../core/element-id.js";
 //import e from "express";
 
 const HIDDEN_KEYS = new Set();
+const _subtreeBusy = new Set();
+// --- 현황 계산 헬퍼 ---
+function keyDepth(k){ return (k?.split("¦") || []).length; }
+
+function addCounts(dst, src){
+  if (!src) return;
+  dst.c = (dst.c || 0) + Number(src.c || 0);
+  dst.t = (dst.t || 0) + Number(src.t || 0);
+  dst.d = (dst.d || 0) + Number(src.d || 0);
+}
+
+// 화면 표시용으로 td를 T/D에 반영
+function toDisplayCounts(raw){
+  if (!raw) return null;
+  const td = Number(raw.td || 0);
+  return {
+    c: Number(raw.c || 0),
+    t: Number(raw.t || 0) + td,
+    d: Number(raw.d || 0) + td,
+  };
+}
+
+// “데이터가 있나?” 판정할 때 td도 포함해야 함
+function sum3(x){
+  return Number(x?.c || 0) + Number(x?.t || 0) + Number(x?.d || 0) + Number(x?.td || 0);
+}
+function calcStateByCounts(counts) {
+  if (!counts) return "";
+  if ((counts.t || 0) > 0 && (counts.d || 0) > 0) return "TD";
+  if ((counts.c || 0) > 0) return "C";
+  if ((counts.t || 0) > 0) return "T";
+  if ((counts.d || 0) > 0) return "D";
+  return "";
+}
+
+async function ensureCountsForNode(node){
+  const key = node?.data?.pathKey;
+  if (!key) return;
+  // 이미 계산돼 있으면 스킵
+  if (getCounts(key)) return;
+  await bulkEnsureForVisible([key]);
+  computePathState(key);
+}
+
+function normalizeSeg(s) {
+  //문자열화
+  let x = (s ?? "").toString();
+  //좌우 공백 제거 + 내부 연속 공백 1칸으로
+  x = x.replace(/\s+/g, " ").trim();
+  //유사 하이픈 (ㅡ - 등) → 일반 하이픈(-)으로 통일
+  x = x.replace(/[\u2010-\u2015\u2212\u2043]/g, "-");
+  //눈에 안보이는 제어문자 제거
+  x = x.replace(/[\u200B-\u200D\uFEFF]/g, "");
+  return x;
+}
+
+function normalizePath(pathArr) {
+  return (pathArr || []).map(normalizeSeg);
+}
+
+// 브랜치(자기+자식) 보장+계산 후, 그 브랜치만 리렌더
+async function ensureCountsForSubtree(provider, node){
+  const key  = node?.data?.pathKey;
+  const path = node?.data?.__path || buildPathFromNode(node);
+  if (!key || !path) return;
+
+  if (_subtreeBusy.has(key)) return; // 중복 실행 방지
+  _subtreeBusy.add(key);
+
+  try {
+    const keys = await collectAllPathKeys(provider, path);
+    const uniq = Array.from(new Set(keys.length ? keys : [key]));
+
+    if (uniq.length) {
+      // 1) 보장 + 상태계산
+      await bulkEnsureForVisible(uniq);
+      uniq.forEach(k => computePathState(k));
+
+      // 2) 가장 깊은 레벨의 counts만 모아서 합산 (중복합산 방지)
+      const levels = new Map(); // depth -> rawCounts[]
+      for (const k of uniq){
+        const c = getCounts(k);
+        if (c && sum3(c) > 0){
+          const d = keyDepth(k);
+          if (!levels.has(d)) levels.set(d, []);
+          levels.get(d).push(c);
+        }
+      }
+
+      let totals = { c: 0, t: 0, d: 0 };
+      if (levels.size){
+        const depths = Array.from(levels.keys()).sort((a,b)=>a-b);
+        const deepest = depths[depths.length - 1];
+
+        // 화며 표시 기준: td를 T/D 양쪽에 더해준다
+        for (const raw of (levels.get(deepest) || [])) {
+          const disp = toDisplayCounts(raw);
+          addCounts(totals, disp);
+        }
+      }
+      node.data.__aggCounts = totals; // 폴백 합계 저장
+    }
+
+    try { node.render(true); } catch {}
+  } finally {
+    setTimeout(() => _subtreeBusy.delete(key), 50);
+  }
+}
+
+async function ensureCountsForAllRoots(tree, provider){
+  const roots = tree.getRootNode().children || [];
+  const all = [];
+  for (const r of roots){
+    const p = r.data?.__path || [r.title];
+    const ks = await collectAllPathKeys(provider, p);
+    all.push(...ks);
+  }
+  const uniq = Array.from(new Set(all));
+  if (uniq.length) {
+    await bulkEnsureForVisible(uniq);
+    uniq.forEach(k => computePathState(k));
+  }
+  try { tree.render(true, true); } catch {}
+}
+
+// -----------------------------------------------------------------------------------
 
 // 서브트리 pathKey 전부 수집 (트리 확장 여부와 무관)
 async function collectAllPathKeys(provider, startPath, cap = 20000) {
   const keys = [];
-  const q = [startPath];
+  const q = [normalizePath(startPath)];
   const seen = new Set();
   while (q.length && cap > 0) {
     const p = q.shift();
@@ -25,7 +154,7 @@ async function collectAllPathKeys(provider, startPath, cap = 20000) {
     try { children = await provider.childrenByPath(p) || []; } catch {}
     cap -= children.length;
     for (const ch of children) {
-      const cp = ch.__path || [...p, ch.text];
+      const cp = ch.__path ? normalizePath(ch.__path) : [...p, normalizeSeg(ch.text)];
       q.push(cp);
     }
   }
@@ -101,7 +230,10 @@ function updateEyeDom(n) {
 function buildPathFromNode(node){
   const out = [];
   let cur = node;
-  while (cur && !cur.isRoot()) { out.unshift(cur.title); cur = cur.parent; }
+  while (cur && !cur.isRoot()) {
+     out.unshift(normalizeSeg(cur.title));
+     cur = cur.parent; 
+  }
   return out;
 }
 function stateToClass(st){
@@ -162,11 +294,10 @@ function calcEyeStateForNode(node){
 }
 
 export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
-  await initMatrix({ primaryOrder, provider });
-
-  // const tree = $.ui.fancytree.getTree("#wbs-tree");
-  // window.wbsTree = tree;
-
+  if(!window.__MATRIX_READY) {
+    await initMatrix({ primaryOrder, provider });
+    window.__MATRIX_READY = true;
+  }
   // 테이블 뼈대(개수 가운데 정렬: th에 text-center)
   const host = document.getElementById("wbs-group-content");
   host.innerHTML = `
@@ -198,17 +329,20 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
       try{
         asPromise(provider?.roots?.()).then((nodes) => {
           const arr = Array.isArray(nodes) ? nodes : [];
-          d.resolve(arr.map(ch => ({
-            title: ch.text,
-            lazy: ch.children === true,
-            data: {
-              __path: ch.__path || [ch.text],
-              pathKey: toKey(ch.__path || [ch.text]),
-              leafCount: ch.leafCount || 0,
-              dbId: ch.dbId,
-              elementId: ch.elementId
+          d.resolve(arr.map(ch => {
+            const basePath = ch.__path ? normalizePath(ch.__path) : [normalizeSeg(ch.text)];
+            return {
+              title: ch.text,
+              lazy: ch.children === true,
+              data: {
+                __path: basePath,
+                pathKey: toKey(basePath),
+                leafCount: ch.leafCount || 0,
+                dbId: ch.dbId,
+                elementId: ch.elementId
+              }
             }
-          })));
+          }));
         }).catch(() => d.resolve([]));
       } catch {
         d.resolve([]);
@@ -225,9 +359,10 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
         asPromise(provider?.childrenByPath?.(path)).then((children)=>{
           const arr = Array.isArray(children) ? children : [];
           d.resolve(arr.map(ch => {
-            const __path = ch.__path || [...path, ch.text];
+            const seg    = normalizeSeg(ch.text);
+            const __path = ch.__path ? normalizePath(ch.__path) : [...path, seg];
             return {
-              title: ch.text,
+              title: seg,
               lazy: ch.children === true,
               data: {
                 __path,
@@ -245,15 +380,18 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
       data.result = d.promise();
     },
 
-    loadChildren: function(event, data){
+    loadChildren: async function(event, data){
       try {
-        const keys = [];
-        data.node.visit(n => { if (n.data?.pathKey) keys.push(n.data.pathKey); });
-        bulkEnsureForVisible(keys).then(() => {
-          keys.forEach(k => computePathState(k));
-          //해당 브랜치만 안전 재랜더
-          setTimeout(() => { try { data.node.render(true); } catch {} }, 0);
-        })
+        // const rootPath = data.node.data?.__path || buildPathFromNode(data.node);
+        // //브랜치 전체 (본인+자손)의 pathKey 수집
+        // const allKeys = await collectAllPathKeys(provider, rootPath, 8000);
+        // await bulkEnsureForVisible(allKeys);
+        // allKeys.forEach(k => computePathState(k));
+        // setTimeout(() => {
+        //   try { data.node.render(true); } catch {}
+        // }
+        // , 0);
+        await ensureCountsForSubtree(provider, data.node);
       } catch (e) {
         console.warn("[WBS] loadChildren compute failed:", e);
       }
@@ -302,34 +440,63 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
       // 2) 현황 칼럼: 값만 표시, 계산은 expand/초기 배치에서
       const $statusCell = $tds.eq(2);
       if (node.data?.dbId != null) {
-        $statusCell.text("");
-          // formatObjectLabel({ elementId: node.data.elementId, dbId: node.data.dbId })
-      
+        $statusCell.text(""); // 말단은 빈칸
       } else {
-        // 현재 계산된 값이 있으면 클래스/숫자 적용
-        const st   = getPathState(node.data?.pathKey);
-        const cls  = stateToClass(st);
+        const key = node.data?.pathKey;
+      
+        // 2-0 숫자 확보: getCounts의 {total,c,t,d,td} → 화면표시용 {c,t,d}로 변환
+        //  - td(가설&철거 동시)는 T/D 양쪽에 더해 표기
+        const raw = key && getCounts(key);        // { total, c, t, d, td }
+        let counts = toDisplayCounts(raw);         // { c, t, d } (td가 t/d에 반영됨)
+      
+        // 부모 직접값이 0이면 서브트리 집계(__aggCounts)로 폴백
+        if ((!counts || sum3(counts) === 0) && node.data?.__aggCounts) {
+          counts = node.data.__aggCounts;          // __aggCounts는 이미 {c,t,d}
+        }
+      
+        // 2-1 상태(색칠): counts 기준 (t>0 && d>0 → 'TD')
+        const st  = calcStateByCounts(counts);
+        const cls = stateToClass(st);
         $(node.tr).removeClass("wbs-c wbs-t wbs-d wbs-td");
         if (cls) $(node.tr).addClass(cls);
-        // if (cls) {
-        //   $(node.tr).removeClass("wbs-c wbs-t wbs-d wbs-td").addClass(cls);
-        // }
-
-        const counts = getCounts(node.data?.pathKey);
-        if (counts) {
+      
+        // 2-2 숫자 렌더
+        if (counts && (typeof counts.c === "number" || typeof counts.t === "number" || typeof counts.d === "number")) {
           $statusCell
-          .addClass("text-center")
-          .html(`
-            <div class="wbs-status" style="justify-content: center;">
-              <div class="nums">
-                <span class="b c" title="시공">${counts.c ?? 0}</span>
-                <span class="b t" title="가설">${counts.t ?? 0}</span>
-                <span class="b d" title="철거">${counts.d ?? 0}</span>
+            .addClass("text-center")
+            .html(`
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">${counts.c ?? 0}</span>
+                  <span class="b t" title="가설">${counts.t ?? 0}</span>
+                  <span class="b d" title="철거">${counts.d ?? 0}</span>
+                </div>
               </div>
-            </div>
-          `);
+            `);
         } else {
           $statusCell.text("…");
+          if (!node.data.__countsRequested && key) {
+            node.data.__countsRequested = true;
+            ensureCountsForNode(node)
+              .then(() => { try { node.render(true); } catch {} })
+              .finally(() => { node.data.__countsRequested = false; });
+          }
+        }
+      
+        // 2-3 숫자/상태 불일치 자동 복구 (1회)
+        if (key) {
+          const totalShown = (counts?.c || 0) + (counts?.t || 0) + (counts?.d || 0);
+          const likelyWrong =
+            ((node.data?.leafCount || 0) > 0) &&
+            totalShown === 0 &&
+            !node.data.__countsRepairOnce;
+      
+          if (likelyWrong) {
+            node.data.__countsRepairOnce = true;
+            ensureCountsForSubtree(provider, node)
+              .then(() => { try { node.render(true); } catch {} })
+              .finally(() => { node.data.__countsRepairOnce = false; });
+          }
         }
       }
     },
@@ -337,16 +504,9 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
     // 확장할 때만: 보이는 경로들 계산 → 테이블 전체 1회 리렌더
     expand: async function(event, data) {
       try {
-        const keys = [];
-        data.node.visit(n => { if (n.data?.pathKey && n.lazy !== false) keys.push(n.data.pathKey); });
-        await bulkEnsureForVisible(keys);
-        keys.forEach(k => computePathState(k));
+        await ensureCountsForSubtree(provider, data.node);
       } catch(e) {
         console.warn("[WBS] expand compute failed:", e);
-      } finally {
-        setTimeout(() => {
-          try { data.node.render(true); } catch {}
-        }, 0);
       }
     },
 
@@ -388,22 +548,41 @@ export async function initWbsWithFancytree(provider, { primaryOrder } = {}) {
     init: function(event, data){
       setTimeout(async () => {
         try {
-          const tree = data.tree;
-          const keys = [];
-          tree.getRootNode().children?.forEach(n => { if (n.data?.pathKey) keys.push(n.data.pathKey); });
-          if (keys.length) {
-            await bulkEnsureForVisible(keys);
-            keys.forEach(k => computePathState(k));
-            tree.render(true, true);
-          }
+          // 루트들 전체 서브트리 키를 provider 통해 수집해서 한번에 보장/계산
+          await ensureCountsForAllRoots(data.tree, provider);
         } catch(e) {
           console.warn("[WBS] initial compute failed:", e);
         }
       }, 0);
+    },
+
+    select: function(event, data){
+      //선택 토글 후, 현재 노드 + 상위 경로만 재렌더해서 상태 클래스(wbs-*)를 즉시 복구
+      setTimeout(() => {
+        try { data.node.render(true);} catch {}
+        try {
+          const parents = data.node.getParentList(false, true) || [];
+          parents.forEach(p => { try { p.render(true);} catch {}})
+        } catch {}
+      }, 0);
     }
+
   });
 
   window.wbsTree = $.ui.fancytree.getTree("#wbs-tree");
+
+  //디버깅
+  window.__WBS_DEBUG = {
+    tree: () => $.ui.fancytree.getTree("#wbs-tree"),
+    provider,
+    getCounts,
+    computePathState,
+    bulkEnsureForVisible,
+    collectAllPathKeys,
+    ensureCountsForSubtree,
+    ensureCountsForNode,
+    toKey
+  };
 
   // 눈알 토글: 위임
   $("#wbs-tree").on("click", ".eye-toggle", async (e) => {

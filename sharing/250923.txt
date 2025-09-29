@@ -1,75 +1,87 @@
-// REPLACE the whole function
-function buildStatusSetsFromTasks(tasks) {
-  // 최종 상태를 dbId 단위로 “하나”만 남기는 맵
-  const stateById = new Map();
+// === [ADD] 색칠 팔레트 & 도우미 ===
+const __WBS_COLORS = {
+  C:  new THREE.Vector4(0.00, 0.62, 0.35, 0.8),  // 시공(완료) : 초록
+  T:  new THREE.Vector4(0.96, 0.76, 0.26, 0.8),  // 가설/진행  : 노랑
+  D:  new THREE.Vector4(0.84, 0.15, 0.16, 0.8),  // 철거       : 빨강
+  TD: new THREE.Vector4(0.55, 0.35, 0.95, 0.8),  // 동시/복합  : 보라
+};
 
-  // 상태 문자열 표준화: 한글/영문/별칭 모두 수용
+// (a) dbId → 최종상태 세트 만들기 (이미 파일에 동일 함수가 있으면 이걸로 교체)
+function buildStatusSetsFromTasks(tasks) {
+  const stateById = new Map();
   const norm = (raw) => {
     if (!raw) return "";
     const s = String(raw).trim().toUpperCase();
-    // 한글/별칭 매핑
     if (s.includes("시공") || s === "완료") return "C";
     if (s.includes("가설") || s === "진행" || s === "임시") return "T";
     if (s.includes("철거") || s === "해체") return "D";
     if (s === "TD" || s.includes("동시") || s.includes("복합")) return "TD";
-    // 영문 약어
     if (s.startsWith("C")) return "C";
     if (s.startsWith("T")) return "T";
     if (s.startsWith("D")) return "D";
-    if (s.startsWith("X")) return "TD"; // 예: 'X'를 TD로 사용한 경우
+    if (s.startsWith("X")) return "TD";
     return "";
   };
-
-  // 우선순위: C(3) > TD(2) > D(1) > T(0)
   const prio = { C:3, TD:2, D:1, T:0, "":-1 };
-
-  // dbId에 상태를 갱신(합의)하는 함수
   function apply(id, sNew) {
     if (!id || !sNew) return;
     const cur = stateById.get(id);
     if (!cur) { stateById.set(id, sNew); return; }
-
-    // T와 D가 섞이면 TD로 승격
     if ((cur === "T" && sNew === "D") || (cur === "D" && sNew === "T")) {
-      stateById.set(id, "TD");
-      return;
+      stateById.set(id, "TD"); return;
     }
-
-    // 더 높은 우선순위가 이긴다
     stateById.set(id, prio[sNew] > prio[cur] ? sNew : cur);
   }
-
-  // 태스크 트리를 돌며 상태 합의 진행
   (function walk(arr, inherited="") {
-    (arr || []).forEach(t => {
+    (arr||[]).forEach(t => {
       const sTask = norm(t.status || t.selectedOption || inherited);
-      (t.linkedObjects || []).forEach(o => {
-        const sObj = norm(o.status || o.phase || sTask);
-        apply(o.dbId, sObj);
-      });
+      (t.linkedObjects||[]).forEach(o => apply(o.dbId, norm(o.status || o.phase || sTask)));
       if (t.children) walk(t.children, sTask);
     });
   })(tasks);
-
-  // 최종 세트 만들기 (dbId 1개 = 상태 1개)
   const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
-  for (const [id, s] of stateById.entries()) {
-    if (s && S[s]) S[s].add(id);
-  }
+  for (const [id, s] of stateById.entries()) if (S[s]) S[s].add(id);
   return S;
 }
 
+// (b) 실제 색칠
+function paintByTasks(viewer) {
+  try {
+    const model = viewer?.model;
+    if (!model) return;
+    const tasks = window.__SAVED_TASKS || [];
+    const S = buildStatusSetsFromTasks(tasks);
+
+    // 테마 초기화 후 색칠
+    viewer.clearThemingColors(model);
+    try { viewer.setGhosting(false); } catch {}
+
+    const paintSet = (ids, color) => ids && ids.forEach(id => {
+      // recursive=true 로 하위 프래그먼트까지 적용
+      viewer.setThemingColor(id, color, model, true);
+    });
+
+    paintSet(S.C,  __WBS_COLORS.C);
+    paintSet(S.T,  __WBS_COLORS.T);
+    paintSet(S.D,  __WBS_COLORS.D);
+    paintSet(S.TD, __WBS_COLORS.TD);
+
+    viewer.impl.invalidate(true, true, true);
+  } catch (e) {
+    console.warn("[paintByTasks] failed:", e);
+  }
+}
+
+// (c) 디버그 수동 리페인트 훅
+window.DEBUG_WBS = window.DEBUG_WBS || {};
+window.DEBUG_WBS.repaint = () => paintByTasks(window.viewer);
 
 
-// a) 브릿지 살아있나?
+// a) 브릿지 OK?
 __WBS_DEBUG && typeof __WBS_DEBUG.getCounts === "function" && !!__WBS_DEBUG.__patchedForFallback
 
-// b) 폴백 맵 키 수 (0 아니어야 함)
+// b) 폴백 맵 키 수(0 아니어야 함)
 Object.keys(window.__FA_FALLBACK_BY_KEY||{}).length
 
-// c) 루트 한 개(보) 확인: cur과 fb가 같은지, 그리고 T/D 동시가 아닌지
-(() => {
-  const D = __WBS_DEBUG;
-  const k = D?.toKey ? D.toKey(["보"]) : toKey(["보"]);
-  return { cur: D.getCounts(k), fb: window.__FA_FALLBACK_BY_KEY[k] };
-})()
+// c) 수동 리페인트 (색 즉시 반영돼야 정상)
+DEBUG_WBS.repaint()

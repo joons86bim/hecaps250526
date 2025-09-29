@@ -1,87 +1,120 @@
-// === [ADD] 색칠 팔레트 & 도우미 ===
-const __WBS_COLORS = {
-  C:  new THREE.Vector4(0.00, 0.62, 0.35, 0.8),  // 시공(완료) : 초록
-  T:  new THREE.Vector4(0.96, 0.76, 0.26, 0.8),  // 가설/진행  : 노랑
-  D:  new THREE.Vector4(0.84, 0.15, 0.16, 0.8),  // 철거       : 빨강
-  TD: new THREE.Vector4(0.55, 0.35, 0.95, 0.8),  // 동시/복합  : 보라
+/* ==============================
+   WBS 셀 배지/색상 렌더러
+   ============================== */
+
+// 배지 색상 팔레트(트리용)
+const __WBS_BADGE_COLORS = {
+  C:  "#0a9d5a", // 시공/완료
+  T:  "#f2c14e", // 가설/진행
+  D:  "#d72638", // 철거
+  TD: "#7a5cff"  // 동시/복합
 };
 
-// (a) dbId → 최종상태 세트 만들기 (이미 파일에 동일 함수가 있으면 이걸로 교체)
-function buildStatusSetsFromTasks(tasks) {
-  const stateById = new Map();
-  const norm = (raw) => {
-    if (!raw) return "";
-    const s = String(raw).trim().toUpperCase();
-    if (s.includes("시공") || s === "완료") return "C";
-    if (s.includes("가설") || s === "진행" || s === "임시") return "T";
-    if (s.includes("철거") || s === "해체") return "D";
-    if (s === "TD" || s.includes("동시") || s.includes("복합")) return "TD";
-    if (s.startsWith("C")) return "C";
-    if (s.startsWith("T")) return "T";
-    if (s.startsWith("D")) return "D";
-    if (s.startsWith("X")) return "TD";
-    return "";
-  };
-  const prio = { C:3, TD:2, D:1, T:0, "":-1 };
-  function apply(id, sNew) {
-    if (!id || !sNew) return;
-    const cur = stateById.get(id);
-    if (!cur) { stateById.set(id, sNew); return; }
-    if ((cur === "T" && sNew === "D") || (cur === "D" && sNew === "T")) {
-      stateById.set(id, "TD"); return;
+// (1) CSS 주입
+function injectWbsBadgeCss() {
+  if (document.getElementById("wbs-badge-style")) return;
+  const css = `
+    .wbs-badges { display:inline-flex; gap:6px; margin-left:8px; vertical-align:middle; }
+    .wbs-badge {
+      display:inline-block; min-width:18px; padding:0 6px; height:18px; line-height:18px;
+      font-size:11px; font-weight:600; border-radius:9px; color:#fff; text-align:center;
+      box-shadow:inset 0 -1px rgba(0,0,0,0.15);
     }
-    stateById.set(id, prio[sNew] > prio[cur] ? sNew : cur);
-  }
-  (function walk(arr, inherited="") {
-    (arr||[]).forEach(t => {
-      const sTask = norm(t.status || t.selectedOption || inherited);
-      (t.linkedObjects||[]).forEach(o => apply(o.dbId, norm(o.status || o.phase || sTask)));
-      if (t.children) walk(t.children, sTask);
-    });
-  })(tasks);
-  const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
-  for (const [id, s] of stateById.entries()) if (S[s]) S[s].add(id);
-  return S;
+    .wbs-badge.hidden { display:none; }
+    .wbs-badge.C  { background:${__WBS_BADGE_COLORS.C}; }
+    .wbs-badge.T  { background:${__WBS_BADGE_COLORS.T}; color:#333; }
+    .wbs-badge.D  { background:${__WBS_BADGE_COLORS.D}; }
+    .wbs-badge.TD { background:${__WBS_BADGE_COLORS.TD}; }
+  `.trim();
+  const s = document.createElement("style");
+  s.id = "wbs-badge-style";
+  s.textContent = css;
+  document.head.appendChild(s);
 }
 
-// (b) 실제 색칠
-function paintByTasks(viewer) {
-  try {
-    const model = viewer?.model;
-    if (!model) return;
-    const tasks = window.__SAVED_TASKS || [];
-    const S = buildStatusSetsFromTasks(tasks);
-
-    // 테마 초기화 후 색칠
-    viewer.clearThemingColors(model);
-    try { viewer.setGhosting(false); } catch {}
-
-    const paintSet = (ids, color) => ids && ids.forEach(id => {
-      // recursive=true 로 하위 프래그먼트까지 적용
-      viewer.setThemingColor(id, color, model, true);
-    });
-
-    paintSet(S.C,  __WBS_COLORS.C);
-    paintSet(S.T,  __WBS_COLORS.T);
-    paintSet(S.D,  __WBS_COLORS.D);
-    paintSet(S.TD, __WBS_COLORS.TD);
-
-    viewer.impl.invalidate(true, true, true);
-  } catch (e) {
-    console.warn("[paintByTasks] failed:", e);
+// (2) 노드 → 경로 계산
+function getPathForNode(node) {
+  // fancytree root는 표시노드가 아니니 제외
+  const path = [];
+  let n = node;
+  while (n && !n.isRoot()) {
+    path.unshift(n.title);
+    n = n.parent;
   }
+  // initWbsPanelWithFancytree에서 __path를 심어줬다면 그걸 우선 사용
+  return node.data?.__path || path;
 }
 
-// (c) 디버그 수동 리페인트 훅
-window.DEBUG_WBS = window.DEBUG_WBS || {};
-window.DEBUG_WBS.repaint = () => paintByTasks(window.viewer);
+// (3) 카운트 가져오기 (브릿지된 getCounts 사용)
+function getCountsForPath(path) {
+  const D = window.__WBS_DEBUG || {};
+  const k = (D.toKey ? D.toKey(path) : (window.toKey ? window.toKey(path) : null));
+  if (!k) return { total:0, c:0, t:0, d:0, td:0 };
+  const c = D.getCounts ? D.getCounts(k) : {};
+  return {
+    total: c.total|0, c: c.c|0, t: c.t|0, d: c.d|0, td: c.td|0
+  };
+}
+
+// (4) 노드 하나의 배지 UI를 만들거나 갱신
+function ensureNodeBadges(node) {
+  const $ = window.jQuery || window.$;
+  if (!$ || !node || !node.span) return;
+
+  const path = getPathForNode(node);
+  const counts = getCountsForPath(path);
+
+  const $span = $(node.span);                   // .fancytree-node
+  const $title = $span.find(".fancytree-title");// 타이틀 스팬
+  if ($title.length === 0) return;
+
+  let $badges = $span.find(".wbs-badges");
+  if ($badges.length === 0) {
+    $badges = $("<span class='wbs-badges'/>").insertAfter($title);
+    // 배지 4종 생성(C/T/D/TD)
+    $badges.append("<span class='wbs-badge C'  data-k='c'>0</span>");
+    $badges.append("<span class='wbs-badge T'  data-k='t'>0</span>");
+    $badges.append("<span class='wbs-badge D'  data-k='d'>0</span>");
+    $badges.append("<span class='wbs-badge TD' data-k='td'>0</span>");
+  }
+
+  const setVal = (k, v) => {
+    const b = $badges.find(`.wbs-badge.${k}`);
+    if (b.length) {
+      b.text(v|0);
+      b.toggleClass("hidden", (v|0) === 0);
+    }
+  };
+
+  setVal("C", counts.c);
+  setVal("T", counts.t);
+  setVal("D", counts.d);
+  setVal("TD", counts.td);
+}
+
+// (5) 트리 전체 리프레시
+function colorizeWbsTree(tree) {
+  if (!tree) return;
+  tree.visit(node => ensureNodeBadges(node));
+}
+
+// (6) 렌더 훅 설치(트리 리렌더 때마다 자동 갱신)
+function installWbsBadgeRenderer(tree) {
+  if (!tree) return;
+  injectWbsBadgeCss();
+
+  // renderNode 훅 덮어쓰기(기존 훅이 있으면 체이닝)
+  const prev = tree.options.renderNode;
+  tree.$div.fancytree("option", "renderNode", function(event, data) {
+    if (typeof prev === "function") prev.call(this, event, data);
+    // 각 노드 타이틀 렌더 후 배지 갱신
+    try { ensureNodeBadges(data.node); } catch {}
+  });
+
+  // 초기 2회 강제 갱신(첫 프레임/비동기 안전)
+  try { colorizeWbsTree(tree); } catch {}
+  requestAnimationFrame(() => { try { colorizeWbsTree(tree); } catch {} });
+}
 
 
-// a) 브릿지 OK?
-__WBS_DEBUG && typeof __WBS_DEBUG.getCounts === "function" && !!__WBS_DEBUG.__patchedForFallback
 
-// b) 폴백 맵 키 수(0 아니어야 함)
-Object.keys(window.__FA_FALLBACK_BY_KEY||{}).length
-
-// c) 수동 리페인트 (색 즉시 반영돼야 정상)
-DEBUG_WBS.repaint()

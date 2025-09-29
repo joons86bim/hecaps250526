@@ -1,58 +1,90 @@
-// 전역 폴백 저장소
-window.__FA_FALLBACK_BY_KEY = Object.create(null);
-
-function keyFromPath(path) {
-  const D = window.__WBS_DEBUG;
-  return (D?.toKey ? D.toKey(path) : toKey(path));
-}
-
-async function installFallbackCounts(tree, provider) {
-  const tasks = window.__SAVED_TASKS || [];
-  if (!tree || !provider || !tasks.length) return;
-
-  const S = buildStatusSetsFromTasks(tasks);
-  console.log("[FA] sets size =", { C:S.C.size, T:S.T.size, D:S.D.size, TD:S.TD.size });
-
-  const visit = (node, path) => {
-    const counts = calcCountsForPath(provider, path, S);
-    node.data = node.data || {};
-    node.data.__aggCounts = counts;  // 트리 노드 폴백
-    // ★ 키→폴백 매핑 저장 (렌더러가 getCounts만 볼 때를 대비)
-    const k = keyFromPath(path);
-    window.__FA_FALLBACK_BY_KEY[k] = counts;
-
-    (node.children||[]).forEach(ch => {
-      const next = ch.data?.__path || [...path, ch.title];
-      visit(ch, next);
+// 태스크→상태별 dbId 집합 만들기
+function buildStatusSetsFromTasks(tasks) {
+  const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
+  (function walk(arr){
+    (arr||[]).forEach(t=>{
+      const raw = (t.status || t.selectedOption || "").toString().toUpperCase();
+      const s = raw.startsWith("C") ? "C"
+            : raw.startsWith("T") ? "T"
+            : raw.startsWith("D") ? "D"
+            : raw.startsWith("X") ? "TD"
+            : raw; // 필요시 여기서 '시공/가설/철거' 매핑
+      (t.linkedObjects||[]).forEach(o=>{
+        if (s==="C") S.C.add(o.dbId);
+        else if (s==="T") S.T.add(o.dbId);
+        else if (s==="D") S.D.add(o.dbId);
+        else if (s==="TD") S.TD.add(o.dbId);
+      });
+      if (t.children) walk(t.children);
     });
-  };
+  })(tasks);
+  return S;
+}
 
-  const root = tree.getRootNode();
-  (root.children||[]).forEach(n => visit(n, n.data?.__path || [n.title]));
+// 특정 경로(path)의 집계 계산
+function calcCountsForPath(provider, path, S) {
+  let ids = [];
+  try {
+    ids = provider.getDbIdsForPath(path, { includeDescendants:true, allowUnbuilt:true }) || [];
+  } catch {}
+  if (!ids.length) return { total:0, c:0, t:0, d:0, td:0 };
+  const set = new Set(ids);
+  let c=0,t=0,d=0,td=0;
+  for (const id of set) {
+    if (S.C.has(id)) c++;
+    if (S.T.has(id)) t++;
+    if (S.D.has(id)) d++;
+    if (S.TD.has(id)) td++;
+  }
+  return { total:set.size, c,t,d,td };
+}
 
-  try { tree.render(true, true); } catch {}
-  requestAnimationFrame(() => { try { tree.render(true, true); } catch {} });
-  console.log("[FA] fallback counts installed");
+// ── (1) 폴백 카운트 맵을 "WBS 전체 경로"에 대해 미리 만들어둠 (트리 필요 없음)
+async function buildFallbackMap(provider, { maxDepth=3, cap=6000 } = {}) {
+  window.__FA_FALLBACK_BY_KEY = Object.create(null);
+  const tasks = window.__SAVED_TASKS || [];
+  const S = buildStatusSetsFromTasks(tasks);
+
+  // 루트부터 BFS
+  const roots = (await provider.roots().catch(()=>[])) || [];
+  const q = roots.map(r => ({ path:[r.text], depth:0 }));
+  let seen = 0;
+
+  while (q.length && seen < cap) {
+    const { path, depth } = q.shift();
+    // 경로별 카운트 계산 → 키로 저장
+    const key = (window.__WBS_DEBUG?.toKey ? window.__WBS_DEBUG.toKey(path) : toKey(path));
+    window.__FA_FALLBACK_BY_KEY[key] = calcCountsForPath(provider, path, S);
+
+    // 자식 큐잉
+    let kids = [];
+    try { kids = await provider.childrenByPath(path) || []; } catch {}
+    seen += kids.length;
+
+    if (depth < maxDepth) {
+      for (const ch of kids) q.push({ path: (ch.__path || [...path, ch.text]), depth: depth+1 });
+    }
+  }
+  console.log("[FA] fallback map ready (keys =", Object.keys(window.__FA_FALLBACK_BY_KEY).length, ")");
 }
 
 
-function patchGetCountsToUseFallback() {
+
+// ── (2) 매트릭스 값이 0일 땐 폴백 맵을 돌려주는 얇은 브릿지
+function patchGetCountsBridge() {
   const D = window.__WBS_DEBUG;
   if (!D?.getCounts) return;
-  if (D.__patchedForFallback) return; // 중복 방지
+  if (D.__patchedForFallback) return;
 
   const orig = D.getCounts.bind(D);
-  D.__origGetCounts = orig;           // 디버깅용 원본 보관
+  D.__origGetCounts = orig;
 
-  D.getCounts = function (k) {
+  D.getCounts = function(k) {
     const r = orig(k) || {};
-    const sum = ((r.c|0) + (r.t|0) + (r.d|0) + (r.td|0));
-    if (sum > 0) return r; // 매트릭스 집계 준비되면 그대로 사용
-
-    // 매트릭스가 아직 0이면, 우리가 계산해 둔 폴백을 사용
-    const fb = window.__FA_FALLBACK_BY_KEY?.[k];
+    const hasReal = ((r.c|0)+(r.t|0)+(r.d|0)+(r.td|0)) > 0;
+    if (hasReal) return r;                           // 매트릭스 준비됨 → 그대로
+    const fb = window.__FA_FALLBACK_BY_KEY?.[k];     // 준비 전 → 폴백
     if (fb) {
-      // total은 원본/폴백 중 큰 값 사용 (원본 total은 이미 맞는 경우가 많음)
       const total = Math.max((r.total|0), (fb.total|0));
       return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 };
     }
@@ -60,5 +92,16 @@ function patchGetCountsToUseFallback() {
   };
 
   D.__patchedForFallback = true;
-  console.log("[FA] getCounts patched for fallback");
+  console.log("[FA] getCounts bridged");
 }
+
+
+
+
+// ① 폴백 키가 만들어졌는지
+Object.keys(window.__FA_FALLBACK_BY_KEY||{}).length
+
+// ② 임의 루트 키의 폴백 값이 존재하는지
+const D = window.__WBS_DEBUG;
+const k = D?.toKey ? D.toKey(["구조벽"]) : toKey(["구조벽"]);
+window.__FA_FALLBACK_BY_KEY?.[k]

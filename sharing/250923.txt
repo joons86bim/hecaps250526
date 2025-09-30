@@ -31,12 +31,12 @@ main.js:582 [STEP 6] panel2 resizer bound
 main.js:583 [STEP 1] Task panel OK
 main.js:584 [STEP 2] panel2-ready dispatched
 gantt-view.js:171 [gantt-view] google loaded
-current-task-modal.js:8  Uncaught ReferenceError: isoToday is not defined
-    at showCurrentTaskModal (current-task-modal.js:8:20)
+current-task-modal.js:21  Uncaught ReferenceError: svgIcon is not defined
+    at showCurrentTaskModal (current-task-modal.js:21:84)
     at HTMLButtonElement.<anonymous> (task-buttons.js:349:5)
     at HTMLButtonElement.dispatch (jquery-3.7.1.min.js:2:40035)
     at v.handle (jquery-3.7.1.min.js:2:38006)
-showCurrentTaskModal @ current-task-modal.js:8
+showCurrentTaskModal @ current-task-modal.js:21
 (anonymous) @ task-buttons.js:349
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2

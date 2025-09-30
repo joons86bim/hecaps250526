@@ -32,17 +32,17 @@ export function showCurrentTaskModal() {
 
       <div class="sim-toolbar" aria-label="시뮬레이션 컨트롤">
         <!-- 순서 고정: ㅣ< , ㅁ , > , >ㅣ -->
-        <button type="button" class="sim-btn sim-begin" title="처음으로(+5초)" aria-label="처음으로">${svgIcon('begin')}</button>
-        <button type="button" class="sim-btn sim-stop"  title="정지/맨앞"     aria-label="정지">${svgIcon('stop')}</button>
-        <button type="button" class="sim-btn sim-play"  title="재생"         aria-label="재생">${svgIcon('play')}</button>
-        <button type="button" class="sim-btn sim-end"   title="끝으로(-5초)"  aria-label="끝으로">${svgIcon('end')}</button>
+        <button type="button" class="sim-btn sim-begin" title="5초 뒤로" aria-label="5초 뒤로">${svgIcon('begin')}</button>
+        <button type="button" class="sim-btn sim-stop"  title="정지/맨앞" aria-label="정지/맨앞">${svgIcon('stop')}</button>
+        <button type="button" class="sim-btn sim-play"  title="재생"     aria-label="재생">${svgIcon('play')}</button>
+        <button type="button" class="sim-btn sim-end"   title="5초 앞으로" aria-label="5초 앞으로">${svgIcon('end')}</button>
       </div>
     </div>
   `;
   document.body.appendChild(modal);
 
-  applyInlineStyles(modal);   // 폭 300 고정, 여백 최소화
-  centerModal(modal);         // 픽셀 좌표 확정(드래그 점프 방지)
+  applyInlineStyles(modal);
+  centerModal(modal);
 
   // 핸들
   const $input    = modal.querySelector(".current-task-date-input");
@@ -53,17 +53,17 @@ export function showCurrentTaskModal() {
   const $slider   = modal.querySelector(".current-task-slider");
 
   // [4D] 버튼 핸들
-  const $btnBegin = modal.querySelector(".sim-begin"); // ㅣ< : +5초(앞으로)
+  const $btnBegin = modal.querySelector(".sim-begin"); // ㅣ< : 5초 '뒤로'
   const $btnPlay  = modal.querySelector(".sim-play");  // >
   const $btnStop  = modal.querySelector(".sim-stop");  // ㅁ
-  const $btnEnd   = modal.querySelector(".sim-end");   // >ㅣ : -5초(뒤로)
+  const $btnEnd   = modal.querySelector(".sim-end");   // >ㅣ : 5초 '앞으로'
 
   // [4D] 재생 상태 & 파라미터
   const SIM = {
     playing: false,
     raf: 0,
     lastTs: 0,
-    stepSec: 5,                    // 5초 스텝(요청사양)
+    stepSec: 5,                    // 버튼 스텝 = 5초
     speedDaysPerSec: window.SIM4D_SPEED_DAYS_PER_SEC ?? 1.0, // 1초=며칠
     zOffset: window.SIM4D_Z_OFFSET ?? 3.0,
     useDateDuration: (window.SIM4D_USE_DATE_DURATION ?? true) === true,
@@ -122,38 +122,42 @@ export function showCurrentTaskModal() {
     setDateInput(d, { apply: true, from: "slider-change" });
   });
 
-  // 헤더 드래그(포인터 캡처) — 버튼 클릭은 드래그 무시
+  // 헤더 드래그(포인터 캡처)
   enableModalDrag(modal, $header);
 
-  // 닫기(뷰 완전 초기화) — [수정] 시뮬레이션 정지 + 4D 원복 + 색/가시성 초기화
+  // 닫기(뷰 완전 초기화)
   $close.addEventListener("click", (e) => { e.stopPropagation(); resetViewerAndCloseEx(modal, SIM); });
   modal.addEventListener("keydown", (ev) => { if (ev.key === "Escape") resetViewerAndCloseEx(modal, SIM); });
 
-  // [4D] 컨트롤 바인딩 (경계 클램프 포함)
-  $btnPlay?.addEventListener("click", () => {
-    if (SIM.playing) return;
-    SIM.playing = true;
-    SIM.lastTs = performance.now();           // 첫 프레임 기준
-    SIM.raf = requestAnimationFrame(loop);
-  });
+  // [4D] 컨트롤 바인딩 (경계 클램프 + 방향 수정)
+  // ㅣ< : 5초 '뒤로'
+  $btnBegin?.addEventListener("click", () => nudge(-SIM.stepSec));
+  // >ㅣ : 5초 '앞으로'
+  $btnEnd?.addEventListener("click", () => nudge(+SIM.stepSec));
 
+  // ㅁ : 재생 중이면 정지, 정지 중이면 '맨 앞으로'(전체 기간 시작) 이동
   $btnStop?.addEventListener("click", () => {
     if (SIM.playing) {
-      // 재생 중 → 정지
       SIM.playing = false;
       if (SIM.raf) cancelAnimationFrame(SIM.raf);
       SIM.raf = 0;
     } else {
-      // 정지 중 → 맨 앞으로(전체 기간의 시작) + 정지 유지
       if (SIM.minISO) setDateInput(SIM.minISO, { apply: true, from: "stop-reset" });
     }
   });
 
-  // ㅣ< : +5초 앞으로(상태 유지) — [수정] 전체 기간 상한 내로 클램프
-  $btnBegin?.addEventListener("click", () => nudge(+SIM.stepSec));
-
-  // >ㅣ : -5초 뒤로(상태 유지) — [수정] 전체 기간 하한 내로 클램프
-  $btnEnd?.addEventListener("click", () => nudge(-SIM.stepSec));
+  // > : 재생 — 만약 현재가 최대일자면 '맨 앞으로' 옮긴 뒤 재생 시작
+  $btnPlay?.addEventListener("click", () => {
+    if (SIM.playing) return;
+    const cur = $input.value;
+    const atMax = isISO(SIM.maxISO) && isISO(cur) && Date.parse(cur) >= Date.parse(SIM.maxISO);
+    if (atMax && SIM.minISO) {
+      setDateInput(SIM.minISO, { apply: true, from: "play-reset" });
+    }
+    SIM.playing = true;
+    SIM.lastTs = performance.now();
+    SIM.raf = requestAnimationFrame(loop);
+  });
 
   function nudge(deltaSec){
     const cur = $input.value;
@@ -170,11 +174,11 @@ export function showCurrentTaskModal() {
     SIM.lastTs = now;
 
     const cur = $input.value;
-    const days = dtSec * SIM.speedDaysPerSec;
+    const days = dtSec * SIM.speedDaysPerSec;   // 항상 '앞으로' 진행
     const next = addDaysISO(cur, days);
     const clamped = clampISO(next, SIM.minISO, SIM.maxISO);
 
-    // 경계에 도달하면 자동 정지
+    // 경계 도달 시 자동 정지
     if (clamped === cur) {
       SIM.playing = false;
       if (SIM.raf) cancelAnimationFrame(SIM.raf);
@@ -190,7 +194,6 @@ export function showCurrentTaskModal() {
   setDateInput(clampISO(todayStr, SIM.minISO, SIM.maxISO), { apply: true, from: "init" });
 
   function setDateInput(dateStr, { apply = true, from = "" } = {}) {
-    // 한 번 더 안전 클램프
     const safe = clampISO(dateStr, SIM.minISO, SIM.maxISO);
     $input.value = safe;
     if (mask) { try { mask.updateValue(); } catch(_) {} }
@@ -231,7 +234,6 @@ function applyByPolicy(dateStr, source, ctxEl){
   const beforeS = (d, s)     => (isISO(s) && d < s);
   const afterE  = (d, e)     => (isISO(e) && d > e);
 
-  // 트리 전수 조사
   tree.getRootNode()?.visit((n) => {
     const d = n.data || {};
     const cat = normCat(d.selectedOption);
@@ -244,7 +246,6 @@ function applyByPolicy(dateStr, source, ctxEl){
       const id = Number(o.dbId);
       if (!Number.isFinite(id)) continue;
 
-      // 규칙 적용
       if (cat === "C") {
         if (beforeS(dateStr, d.start)) { hideSet.add(id); }
         else if (inRange(dateStr, d.start, d.end)) { showSet.add(id); themeC.add(id); }
@@ -264,17 +265,14 @@ function applyByPolicy(dateStr, source, ctxEl){
     }
   });
 
-  // 충돌 해소: 보이기가 우선
   for (const id of showSet) hideSet.delete(id);
 
   try {
-    // 최초 1회만 전체 가시화(이후는 증감만)
     if (!ctxEl.__simVisInit) {
       v.impl?.visibilityManager?.setAllOn?.();
       ctxEl.__simVisInit = true;
     }
 
-    // 테마 전체 초기화 후 다시 칠함
     try { v.clearThemingColors?.(model); } catch(_) {}
     try { v.clearThemingColors?.(); } catch(_) {}
 
@@ -284,9 +282,9 @@ function applyByPolicy(dateStr, source, ctxEl){
     if (hideArr.length) v.hide(hideArr, model);
 
     const V4 = (r,g,b,a=1) => (window.THREE ? new window.THREE.Vector4(r,g,b,a) : { r,g,b,a });
-    const cGreen = V4(0.16, 0.57, 0.20, 1); // 시공
-    const cBlue  = V4(0.12, 0.45, 0.90, 1); // 가설
-    const cRed   = V4(0.95, 0.27, 0.23, 1); // 철거
+    const cGreen = V4(0.16, 0.57, 0.20, 1);
+    const cBlue  = V4(0.12, 0.45, 0.90, 1);
+    const cRed   = V4(0.95, 0.27, 0.23, 1);
 
     const paintChunk = (ids, color) => {
       const CHUNK = 4000;
@@ -366,7 +364,7 @@ function applyInlineStyles(modal){
     width: "118px",
     textAlign: "center",
     padding: "4px 6px",
-    border: "1px solid " + "#bbb",
+    border: "1px solid #bbb",
     borderRadius: "6px",
     outline: "none",
   });
@@ -629,10 +627,9 @@ function enableModalDrag(modal, handle){
   window.addEventListener("pointerup", stopDrag, { passive: true });
 }
 
-/* [수정] 완전 초기화: 재생 정지 + 4D 원복 + 색/가시성 초기화 + 컷플레인 해제 */
+/* 완전 초기화: 재생 정지 + 4D 원복 + 색/가시성 초기화 + 컷플레인 해제 */
 function resetViewerAndCloseEx(m, SIM){
   try {
-    // 재생 정지
     if (SIM) {
       SIM.playing = false;
       if (SIM.raf) cancelAnimationFrame(SIM.raf);
@@ -641,24 +638,11 @@ function resetViewerAndCloseEx(m, SIM){
     const v = window.viewer;
     try { reset4D(v); } catch(_) {}
 
-    // 색/가시성 초기화
     try { v?.clearThemingColors?.(); } catch(_){}
     const vm = v?.impl?.visibilityManager;
     vm?.setAllOn?.();
 
-    // 컷플레인/장면 업데이트 (보수적 초기화)
     try { v?.setCutPlanes?.([]); } catch(_){}
-    v?.impl?.invalidate?.(true, true, true);
-  } catch(_){}
-  m.remove();
-}
-
-function resetViewerAndClose(m){
-  try {
-    const v = window.viewer;
-    v?.clearThemingColors?.();
-    const vm = v?.impl?.visibilityManager;
-    vm?.setAllOn?.();
     v?.impl?.invalidate?.(true, true, true);
   } catch(_){}
   m.remove();

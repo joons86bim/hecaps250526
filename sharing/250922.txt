@@ -1,41 +1,146 @@
-(() => {
-  const t = window.__WBS_DBG__?.findWbsTree?.();
-  console.log('tree id =', t?.$div?.attr('id'), 'checkbox=', t?.options?.checkbox, 'selectMode=', t?.options?.selectMode);
-  return !!t;
-})();
+/* ───────────────────────── Fancytree 경로/수집 ───────────────────────── */
 
+/** 현재 문서에서 '체크박스 지원' Fancytree를 찾아 반환
+ *  - #wbs-tree, #wbs-group-list 등 고정 ID가 아닐 수도 있어, 동적으로 탐색
+ *  - #treegrid(작업 트리)는 제외
+ */
+function findWbsTree() {
+  if (!window.$ || !$.ui || !$.ui.fancytree) return null;
 
-(() => {
-  const t = window.__WBS_DBG__?.findWbsTree?.();
-  if (!t) return console.warn('no WBS tree');
-  t.$div
-   .off('.dbgft')
-   .on('fancytreeclick.dbgft fancytreeselect.dbgft', (e, data) => {
-     console.log('[FT-EVT]', e.type, 'title=', data?.node?.title, 'selected=', data?.node?.selected, 'partsel=', data?.node?.partsel, 'targetType=', data?.targetType);
-   });
-  console.log('>> 체크박스를 몇 개 클릭해 보세요.');
-})();
+  // 1) 후보: 모든 fancytree-container → 트리 인스턴스로 치환
+  const candidates = $('.fancytree-container')
+    .map((_, el) => $.ui.fancytree.getTree(el))
+    .get()
+    .filter(Boolean);
 
+  // 2) 우선순위: (a) checkbox 옵션 켜져 있고 (b) id !== 'treegrid'
+  let pick = candidates.find(t => t.options?.checkbox && t.$div?.attr('id') !== 'treegrid');
 
+  // 3) 폴백: 알려진 id 시도
+  if (!pick) pick = $.ui.fancytree.getTree('#wbs-tree') || $.ui.fancytree.getTree('#treegrid-wbs');
 
-(() => {
-  const nodes = window.__WBS_DBG__?.getCheckedNodesFT?.() || [];
-  console.log('[checked via helper]', nodes.map(n => ({ title: n.title, idx: n.getIndexHier() })));
-  return nodes.length;
-})();
+  return pick || null;
+}
 
+/** 노드 → 경로(문자열 배열) */
+function pathOfNodeFT(n){
+  const out=[]; let cur=n;
+  while (cur && !cur.isRoot()){
+    out.unshift(cur.title || cur.key || cur.data?.text || "");
+    cur = cur.parent;
+  }
+  return out;
+}
 
+/** ───────────────── Checked 노드 안전 수집(Fancytree 전용) ─────────────────
+ * 1차: 공식 API t.getSelectedNodes(false)  (부분선택 partsel 제외)
+ * 2차: 전체 visit 중 node.selected && !node.partsel
+ * 3차: DOM 폴백(.fancytree-checkbox[aria-checked="true"]) → getNode(el)
+ */
+function getCheckedNodesFT() {
+  const t = findWbsTree();
+  if (!t) {
+    console.warn('[WBS] findWbsTree() failed: No WBS fancytree found.');
+    return [];
+  }
 
-(() => {
-  const t = window.__WBS_DBG__?.findWbsTree?.();
-  if (!t) return console.warn('no WBS tree');
-  const root = t.$div.get(0);
-  const els = root.querySelectorAll('.fancytree-checkbox[aria-checked="true"], .fancytree-node.fancytree-selected, .fancytree-title.fancytree-selected');
-  console.log('DOM-checked count=', els.length);
-  return els.length;
-})();
+  // 1) 공식 API
+  try {
+    const a = t.getSelectedNodes(false).filter(n => !n.partsel);
+    if (a.length) return a;
+  } catch(_) {}
 
+  // 2) 전체 방문
+  try {
+    const found = [];
+    t.getRootNode()?.visit((n) => {
+      if (n.selected && !n.partsel) found.push(n);
+    });
+    if (found.length) return found;
+  } catch(_) {}
 
+  // 3) DOM 폴백 (컨테이너 내부만 스캔)
+  try {
+    const rootEl = t.$div?.get?.(0);
+    if (!rootEl) return [];
 
+    const els = rootEl.querySelectorAll(
+      '.fancytree-checkbox[aria-checked="true"], .fancytree-node.fancytree-selected, .fancytree-title.fancytree-selected'
+    );
+    const uniq = new Set();
+    const out = [];
+    els.forEach(el => {
+      const n = $.ui.fancytree.getNode(el);
+      if (n && !n.partsel) {
+        const k = n.key || n.getIndexHier?.() || n.title;
+        if (k && !uniq.has(k)) { uniq.add(k); out.push(n); }
+      }
+    });
+    return out;
+  } catch (e) {
+    console.warn("[WBS] DOM fallback failed", e);
+    return [];
+  }
+}
 
+/** provider(childrenByPath)로 미확장 자손까지 leaf dbId 수집 */
+async function bfsCollectDescendantDbIds(provider, pathArr, visibleNode){
+  // (1) 화면에 보이는 서브트리에서 leaf 수집
+  const fromVisible = [];
+  try {
+    visibleNode?.visit?.((n) => {
+      if (n !== visibleNode && !(n.hasChildren && n.hasChildren())) {
+        const id = Number(n.dbId ?? n.data?.dbId);
+        if (Number.isFinite(id)) fromVisible.push(id);
+      }
+    });
+  } catch(_){}
 
+  // (2) provider BFS (미확장 자손)
+  const fromProvider = [];
+  if (provider && typeof provider.childrenByPath === "function") {
+    const queue = [ pathArr.slice() ];
+    const seenKey = new Set();
+    const SEP = "\u0001";
+
+    while (queue.length) {
+      const cur = queue.shift();
+      const key = cur.join(SEP);
+      if (seenKey.has(key)) continue;
+      seenKey.add(key);
+
+      let children = [];
+      try { children = await provider.childrenByPath(cur); } catch(_) { children = []; }
+
+      for (const ch of (children || [])) {
+        const text = String(ch.text || ch.name || "").trim();
+        if (!text) continue;
+        const id = Number(ch.dbId ?? ch.data?.dbId);
+        if (Number.isFinite(id)) fromProvider.push(id);
+        else queue.push(cur.concat(text));
+      }
+    }
+  }
+
+  // 유니크 + 순서 유지(화면 → provider)
+  const out = [];
+  const s = new Set();
+  for (const x of fromVisible.concat(fromProvider)) if (!s.has(x)) { s.add(x); out.push(x); }
+  return out;
+}
+
+/* ============== 콘솔 디버그 도우미(선택) ============== */
+window.__WBS_DBG__ = {
+  findWbsTree,
+  getCheckedNodesFT,
+  listTrees(){
+    const arr = $('.fancytree-container').map((_, el) => $.ui.fancytree.getTree(el)).get().filter(Boolean);
+    console.table(arr.map(t => ({
+      id: t.$div?.attr('id'),
+      checkbox: !!t.options?.checkbox,
+      selectMode: t.options?.selectMode,
+      selectedCount: (t.getSelectedNodes?.(false) || []).length
+    })));
+    return arr;
+  }
+};

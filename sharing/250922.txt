@@ -5,13 +5,13 @@ import { scheduleWbsRepaint } from "./ui/wbs-highlight.js";
 import { showCurrentTaskModal } from "./ui/current-task-modal.js";
 import { notifyCoverageDirtyAndRepaint } from "./ui/wbs-fixed-paint.js";
 import { ensureElementIdIndexForDbIds, getElementIdFor, formatObjectLabel } from "./core/element-id.js";
+
 import {
   initWbsStore,
   setProvider as setWbsProvider,
   refreshWbsStore,
   resetWbsStore,
-  getOrderedDbIdsFromCheckedExact,
-  pathOfNode
+  getOrderedDbIdsFromCheckedExact
 } from "./core/wbs-store.js";
 
 // 상태 반영을 위해 추가:
@@ -38,7 +38,10 @@ export function setSavedTaskData(data) {
 export function initTaskListButtons() {
   window.__ALLOW_WBS_UPDATE = window.__ALLOW_WBS_UPDATE ?? false;
 
-  try { initWbsStore({ tree:window.wbsTree, provider:__WBSPROVIDER });} catch(_) {}
+  // ✅ WBS 저장소 초기화(트리/프로바이더)
+  try { initWbsStore({ tree: window.wbsTree, provider: window.__WBS_PROVIDER }); } catch(_) {}
+  // 프로바이더가 나중에 준비될 수 있으니 훅 제공(선택)
+  window.__SET_WBS_PROVIDER__ = (p) => { try { setWbsProvider(p); refreshWbsStore(); } catch(_) {} };
 
   function withWbsGate(fn){
     const prev = window.__ALLOW_WBS_UPDATE;
@@ -156,7 +159,7 @@ export function initTaskListButtons() {
     }
   });
 
-  // [데이터연결]
+  // [데이터연결] — 체크박스(V) 기준, 확장 없이 후손 leaf 수집(WBS 순서 보장)
   $("#btn-link").off("click").on("click", async function () {
     const taskTree = $.ui.fancytree.getTree("#treegrid");
     const selectedTaskNode = taskTree.getActiveNode();
@@ -166,14 +169,13 @@ export function initTaskListButtons() {
       return;
     }
 
-    // 저장소 최신화(체크박스 상태 반영)
     try { refreshWbsStore(); } catch(_) {}
 
     const urn = window.CURRENT_MODEL_URN;
     const catSel = normalizeTaskCategory(selectedTaskNode.data?.selectedOption); // "C"|"T"|"D"
     const catLabel = catSel === "C" ? "시공" : (catSel === "T" ? "가설" : "철거");
 
-    // 정확히 체크된(V) 노드들로부터 WBS 문서 순서대로 dbId 수집(확장 불필요)
+    // 정확히 체크된(V) 노드들로부터 WBS 문서 순서대로 dbId 수집(필요 시 provider lazy 확장)
     const { orderedDbIds, pathByDbId } = await getOrderedDbIdsFromCheckedExact();
     if (!orderedDbIds.length) return alert("WBS에서 '체크(V)'된 항목이 없습니다.");
 
@@ -384,47 +386,8 @@ function getCurrentTaskDataFromTree() {
     if (node.hasChildren()) obj.children = node.children.map(nodeToData);
     return obj;
   }
-  return tree.getRootNode().children.map(nodeToData);
+  return (tree.getRootNode().children || []).map(nodeToData);
 }
-
-// WBS: 체크 노드를 트리 순서로 정렬해서 반환
-function getWbsCheckedNodesInOrder(){
-  const tree = window.wbsTree;
-  if (!tree) return [];
-  let nodes = [];
-
-  // 우선 트리 순회하면서 체크된 것만 모음
-  if (typeof tree.getRootNode === "function") {
-    tree.getRootNode().visit((n) => {
-      const isChecked = (typeof n.isSelected === "function") ? n.isSelected() : (n.selected === true || n.data?.selected === true || n.data?.checked === true);
-      if (isChecked) nodes.push(n);
-    });
-  }
-
-  // 폴백: API가 있으면 사용
-  if (!nodes.length && typeof tree.checked === "function") {
-    nodes = tree.checked() || [];
-  }
-
-  // fancytree면 getIndexHier 로 정렬
-  nodes.sort((a,b) => {
-    const ia = (typeof a.getIndexHier === "function") ? a.getIndexHier() : "";
-    const ib = (typeof b.getIndexHier === "function") ? b.getIndexHier() : "";
-    return String(ia).localeCompare(String(ib), undefined, { numeric:true });
-  });
-
-  return nodes;
-}
-
-// WBS: 노드 경로 ["구조벽", "지상2층", "101동", ...]
-// function pathOfNode(n){
-//   const out=[]; let cur=n;
-//   while (cur && cur.text && !(typeof cur.isRoot === "function" && cur.isRoot())) {
-//     out.unshift(cur.text);
-//     cur = cur.parent;
-//   }
-//   return out;
-// }
 
 /* ====== Test 버튼 관련 (기존) ====== */
 export function initTaskWbsButtons(viewer) {
@@ -453,8 +416,6 @@ async function runTestAnimation(viewer) {
   }
 
   const { model, dbIds } = sel;
-
-  // 애니메이션 중 오동작 방지
   viewer.clearSelection();
 
   const fragIds = collectFragIds(model, dbIds);
@@ -462,7 +423,6 @@ async function runTestAnimation(viewer) {
 
   const store = prepareFragStates(viewer, model, fragIds);
 
-  // -------- 파라미터 --------
   const MOVE_Z = 5.0; // m 기준
   const D1 = 2000;    // 2초: 이동 + 페이드아웃
   const HOLD = 1000;  // 1초 정지
@@ -471,7 +431,7 @@ async function runTestAnimation(viewer) {
   const THREE = window.THREE || Autodesk.Viewing.THREE;
   const FALLBACK_COLOR = new THREE.Color(1.0, 0.45, 0.0); // #FF7300
 
-  // -------- OUT(사라짐) 단계 --------
+  // OUT
   await animate(D1, (t) => {
     const k = easeInOutSine(t);
     const alphaOut = 1 - k;
@@ -494,10 +454,9 @@ async function runTestAnimation(viewer) {
     viewer.impl.invalidate(true, true, true);
   });
 
-  // -------- HOLD(정지) --------
   await delay(HOLD);
 
-  // -------- IN(복귀) 단계 --------
+  // IN
   await animate(D2, (t) => {
     const k = easeInOutSine(t);
     const alphaIn = k;
@@ -520,7 +479,7 @@ async function runTestAnimation(viewer) {
     viewer.impl.invalidate(true, true, true);
   });
 
-  // -------- 상태 복구 --------
+  // 복구
   restoreFragStates(viewer, store);
 }
 

@@ -34,7 +34,7 @@ export function initTaskListButtons() {
     const prev = window.__ALLOW_WBS_UPDATE;
     window.__ALLOW_WBS_UPDATE = true;
     try { return fn(); }
-    finally { window.__ALLOW_WBS_UPDATE = prev; } // ← 버그 수정 (예: __WBS_PAINT_LOCK 되돌리던 라인 교체)
+    finally { window.__ALLOW_WBS_UPDATE = prev; }
   }
 
   function flush(recalc = false) {
@@ -157,49 +157,70 @@ export function initTaskListButtons() {
     }
 
     const urn = window.CURRENT_MODEL_URN;
+    const provider = window.__WBS_PROVIDER;
+    if (!provider) return alert("WBS Provider 가 준비되지 않았습니다.");
+
     const catSel = normalizeTaskCategory(selectedTaskNode.data?.selectedOption); // "C"|"T"|"D"
     const catLabel = catSel === "C" ? "시공" : (catSel === "T" ? "가설" : "철거");
 
-    // 체크된 노드 → 그룹이면 하위 전체 dbId, 리프는 해당 dbId
-    const provider = window.__WBS_PROVIDER;
-    const checked = window.wbsTree.checked();
-    const dbSet = new Set();
+    // 체크된 WBS 노드를 '트리 순서'로 정렬
+    const checked = getWbsCheckedNodesInOrder();
+    if (!checked.length) return alert("WBS에서 객체를 선택하세요!");
 
-    function pathOfNode(n){
-      if (Array.isArray(n.__path)) return n.__path.slice();
-      const out=[]; let cur=n; while (cur && cur.text && !cur.isRoot?.()){ out.unshift(cur.text); cur=cur.parent; }
-      return out;
-    }
+    // dbId → pathArr 매핑(트리 순서 유지, 중복 제거)
+    const orderedDbIds = [];
+    const pathByDbId = new Map();
+    const seen = new Set();
 
     for (const node of checked) {
+      const pathArr = pathOfNode(node); // ["구조벽","지상2층","101동", ...]
+      let ids = [];
+
       if (node.hasChildren && node.hasChildren()) {
-        let ids = provider?.getDbIdsForPath(pathOfNode(node), { includeDescendants:true, allowUnbuilt:true });
-        if (ids == null) {
-          try { await provider?.childrenByPath(pathOfNode(node)); } catch {}
-          ids = provider?.getDbIdsForPath(pathOfNode(node), { includeDescendants:true, allowUnbuilt:true });
+        // 그룹: 경로로 자손 dbId 전개
+        ids = provider.getDbIdsForPath?.(pathArr, { includeDescendants:true, allowUnbuilt:true }) || [];
+        if (!ids.length) {
+          try { await provider?.childrenByPath?.(pathArr); } catch {}
+          ids = provider.getDbIdsForPath?.(pathArr, { includeDescendants:true, allowUnbuilt:true }) || [];
         }
-        if (Array.isArray(ids)) ids.forEach(id => dbSet.add(Number(id)));
+      } else if (Number.isFinite(Number(node.dbId))) {
+        ids = [Number(node.dbId)];
       } else {
-        dbSet.add(Number(node.dbId));
+        // 리프인데 dbId가 없다면 경로 기반으로 시도
+        ids = provider.getDbIdsForPath?.(pathArr, { includeDescendants:false, allowUnbuilt:true }) || [];
+      }
+
+      // 순서 보존하며 중복 제거 + 경로 기록
+      for (const id of ids) {
+        const n = Number(id);
+        if (!Number.isFinite(n) || seen.has(n)) continue;
+        seen.add(n);
+        orderedDbIds.push(n);
+        pathByDbId.set(n, pathArr.slice());
       }
     }
 
-    const dbIds = Array.from(dbSet).filter(Number.isFinite);
-    if (dbIds.length === 0) return alert("WBS에서 객체를 선택하세요!");
+    if (!orderedDbIds.length) return alert("WBS 선택에서 dbId를 찾지 못했습니다.");
 
     // ElementId 대량 프리페치
-    try { await ensureElementIdIndexForDbIds(dbIds); } catch {}
+    try { await ensureElementIdIndexForDbIds(orderedDbIds); } catch {}
 
-    // 저장 데이터에 ElementId/표시문구 같이 심기
-    const checkedObjects = dbIds.map(d => ({
-      urn,
-      dbId: d,
-      elementId: getElementIdFor(urn, d),
-      text: formatObjectLabel({ urn, dbId: d })
-    }));
+    // 저장용 오브젝트(라벨은 WBS 경로 + [ElementId|dbId])
+    const toLink = orderedDbIds.map((d) => {
+      const p = pathByDbId.get(d) || [];
+      const el = getElementIdFor(urn, d);
+      const bracket = `[${el || d}]`;
+      const pathLabel = p.length ? (p.join(" - ") + " - " + bracket) : bracket;
+      return {
+        urn,
+        dbId: d,
+        elementId: el || null,
+        text: pathLabel
+      };
+    });
 
     await runWbsHighlightBatch(async () => {
-      // 점유 현황
+      // 점유 현황 맵(dbId 기준) : C/T/D 슬롯
       const occupancy = new Map();
       taskTree.getRootNode().visit(n => {
         const cat = normalizeTaskCategory(n.data?.selectedOption);
@@ -219,7 +240,7 @@ export function initTaskListButtons() {
       const conflictsC = [];
       const conflictsSame = [];
 
-      checkedObjects.forEach(obj => {
+      toLink.forEach(obj => {
         const key = `${obj.urn}:${obj.dbId}`;
         const slot = occupancy.get(key) || { C: null, T: null, D: null };
 
@@ -305,10 +326,23 @@ export function initTaskListButtons() {
       }
 
       if (allowed.length > 0) {
-        selectedTaskNode.data.linkedObjects = _.uniqBy(
-          (selectedTaskNode.data.linkedObjects || []).concat(allowed),
-          o => o.urn + ":" + o.dbId
-        );
+        // 기존 linkedObjects와 머지(첫 등장 순서 유지)
+        const existing = selectedTaskNode.data.linkedObjects || [];
+        const merged = [];
+        const seenKey = new Set();
+
+        const pushUniq = (o) => {
+          const k = o.urn + ":" + o.dbId;
+          if (seenKey.has(k)) return;
+          seenKey.add(k);
+          merged.push(o);
+        };
+
+        // WBS 순서(allowed) 먼저, 그 다음 기존 항목
+        allowed.forEach(pushUniq);
+        existing.forEach(pushUniq);
+
+        selectedTaskNode.data.linkedObjects = merged;
       }
 
       withWbsGate(() => {
@@ -355,6 +389,8 @@ export function initTaskListButtons() {
   });
 }
 
+/* ---------- Helpers ---------- */
+
 function generateNo(parentNode) {
   if (!parentNode || parentNode.isRoot()) {
     const roots = $.ui.fancytree.getTree("#treegrid").getRootNode().children || [];
@@ -380,8 +416,8 @@ function getCurrentTaskDataFromTree() {
       linkedObjects: (node.data.linkedObjects || []).map(o => ({
         urn: o.urn ?? urn,
         dbId: o.dbId,
-        elementId: o.elementId ?? null, // ElementId 일관 저장
-        text: formatObjectLabel(o),      // ← 항상 [ElementId] 우선
+        elementId: o.elementId ?? null,
+        text: o.text ?? formatObjectLabel(o),
       })),
     };
     if (node.hasChildren()) obj.children = node.children.map(nodeToData);
@@ -390,12 +426,46 @@ function getCurrentTaskDataFromTree() {
   return tree.getRootNode().children.map(nodeToData);
 }
 
+// WBS: 체크 노드를 트리 순서로 정렬해서 반환
+function getWbsCheckedNodesInOrder(){
+  const tree = window.wbsTree;
+  if (!tree) return [];
+  let nodes = [];
 
-// /wwwroot/js/task-wbs/task-buttons.js
-// Test 버튼: (선택 해제) → Z+5m 2초 이동 + 부드러운 페이드아웃 → 1초 정지 → 2초 복귀 + 페이드인
-// - 페이드는 시각적으로 균일하게 보이도록 S-커브(easeInOutSine) 적용
-// - 모델 단위가 m이 아니면 MOVE_Z 값을 조정하세요. (mm 모델이면 5000 등)
+  // 우선 트리 순회하면서 체크된 것만 모음
+  if (typeof tree.getRootNode === "function") {
+    tree.getRootNode().visit((n) => {
+      const isChecked = (typeof n.isSelected === "function") ? n.isSelected() : (n.selected === true || n.data?.selected === true || n.data?.checked === true);
+      if (isChecked) nodes.push(n);
+    });
+  }
 
+  // 폴백: API가 있으면 사용
+  if (!nodes.length && typeof tree.checked === "function") {
+    nodes = tree.checked() || [];
+  }
+
+  // fancytree면 getIndexHier 로 정렬
+  nodes.sort((a,b) => {
+    const ia = (typeof a.getIndexHier === "function") ? a.getIndexHier() : "";
+    const ib = (typeof b.getIndexHier === "function") ? b.getIndexHier() : "";
+    return String(ia).localeCompare(String(ib), undefined, { numeric:true });
+  });
+
+  return nodes;
+}
+
+// WBS: 노드 경로 ["구조벽", "지상2층", "101동", ...]
+function pathOfNode(n){
+  const out=[]; let cur=n;
+  while (cur && cur.text && !(typeof cur.isRoot === "function" && cur.isRoot())) {
+    out.unshift(cur.text);
+    cur = cur.parent;
+  }
+  return out;
+}
+
+/* ====== Test 버튼 관련 (기존) ====== */
 export function initTaskWbsButtons(viewer) {
   let btn = document.getElementById('btn-test');
   if (!btn || !viewer) return;
@@ -438,27 +508,23 @@ async function runTestAnimation(viewer) {
   const D2 = 2000;    // 2초: 복귀 + 페이드인
 
   const THREE = window.THREE || Autodesk.Viewing.THREE;
-  const FALLBACK_COLOR = new THREE.Color(1.0, 0.45, 0.0); // #FF7300 근처(색 보간 폴백용)
+  const FALLBACK_COLOR = new THREE.Color(1.0, 0.45, 0.0); // #FF7300
 
   // -------- OUT(사라짐) 단계 --------
   await animate(D1, (t) => {
-    // 시각 균일 S-커브
-    const k = easeInOutSine(t);      // 0 -> 1 (초/말 느림, 중간 빠름)
-    const alphaOut = 1 - k;          // 1 -> 0
-    const dz = lerp(0, MOVE_Z, k);   // 위치도 같은 이징으로 보간
+    const k = easeInOutSine(t);
+    const alphaOut = 1 - k;
+    const dz = lerp(0, MOVE_Z, k);
 
     for (const f of store) {
-      // 위치 이동
       f.proxy.position.z = f.startPos.z + dz;
       f.proxy.updateAnimTransform();
 
-      // 불투명도(페이드)
       if (f.cloneMat) {
         f.cloneMat.opacity = alphaOut;
         f.cloneMat.transparent = true;
         f.cloneMat.needsUpdate = true;
 
-        // 색 폴백(원색 -> 주황) : 일부 머티리얼에서 투명이 약할 때 변화 체감용
         if (f.cloneMat.color && f.originalColor) {
           f.cloneMat.color.copy(f.originalColor).lerp(FALLBACK_COLOR, k);
         }
@@ -472,9 +538,9 @@ async function runTestAnimation(viewer) {
 
   // -------- IN(복귀) 단계 --------
   await animate(D2, (t) => {
-    const k = easeInOutSine(t);     // 0 -> 1
-    const alphaIn = k;              // 0 -> 1
-    const dz = lerp(MOVE_Z, 0, k);  // Z 복귀
+    const k = easeInOutSine(t);
+    const alphaIn = k;
+    const dz = lerp(MOVE_Z, 0, k);
 
     for (const f of store) {
       f.proxy.position.z = f.startPos.z + dz;
@@ -485,7 +551,6 @@ async function runTestAnimation(viewer) {
         f.cloneMat.transparent = true;
         f.cloneMat.needsUpdate = true;
 
-        // 색 복귀(주황 -> 원색)
         if (f.cloneMat.color && f.originalColor) {
           f.cloneMat.color.copy(FALLBACK_COLOR).lerp(f.originalColor, k);
         }
@@ -498,17 +563,15 @@ async function runTestAnimation(viewer) {
   restoreFragStates(viewer, store);
 }
 
-// ================= Helpers =================
+// ================= Helpers for Test =================
 
 function getSelectionSmart(viewer) {
-  // 집계 선택(멀티 모델) 우선
   const agg = viewer.getAggregateSelection?.();
   if (agg && agg.length > 0) {
     const a = agg[0];
     const ids = (a.selection || []).slice();
     return ids.length ? { model: a.model, dbIds: ids, aggregate: true } : null;
   }
-  // 일반 선택
   const ids = viewer.getSelection?.() || [];
   return (ids && ids.length) ? { model: viewer.model, dbIds: ids, aggregate: false } : null;
 }
@@ -522,11 +585,9 @@ function collectFragIds(model, dbIds) {
   return fragIds;
 }
 
-// cross-version FragmentList getter
 function getFragList(viewer, model) {
-  if (model?.getFragmentList) return model.getFragmentList();                  // 표준
-  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();   // 대체
-  // 구버전: viewer.impl.getFragmentList()가 있을 수도 있으나 현재 환경엔 없음
+  if (model?.getFragmentList) return model.getFragmentList();
+  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();
   return null;
 }
 
@@ -536,14 +597,11 @@ function prepareFragStates(viewer, model, fragIds) {
   const fragList = getFragList(viewer, model);
   const store = [];
 
-  // fragId -> dbId 매핑
   const fragToDb = {};
   if (fragList) {
     fragIds.forEach((fragId) => {
       try { fragToDb[fragId] = fragList.getDbId(fragId); } catch (_) {}
     });
-  } else {
-    console.warn('[test-btn] FragmentList not available.');
   }
 
   for (const fragId of fragIds) {
@@ -554,11 +612,9 @@ function prepareFragStates(viewer, model, fragIds) {
     const rp = viewer.impl.getRenderProxy(model, fragId);
     const originalMat = rp?.material || null;
 
-    // 원래 색상 저장(폴백용)
     let originalColor = null;
     if (originalMat && originalMat.color) originalColor = originalMat.color.clone();
 
-    // 머티리얼 클론(공유 차단) + 투명 세팅
     let cloneMat = null;
     if (originalMat) {
       cloneMat = (matman && matman.cloneMaterial) ? matman.cloneMaterial(originalMat) : originalMat.clone();
@@ -568,13 +624,12 @@ function prepareFragStates(viewer, model, fragIds) {
       cloneMat.side = originalMat.side;
       cloneMat.needsUpdate = true;
 
-      // 핵심: 공식 경로로 바인딩
       if (viewer.impl.setMaterial) {
         viewer.impl.setMaterial(model, fragId, cloneMat);
       } else if (fragList?.setMaterial) {
         fragList.setMaterial(fragId, cloneMat);
       } else if (viewer.impl.setFragmentMaterial) {
-        viewer.impl.setFragmentMaterial(fragId, cloneMat); // 레거시
+        viewer.impl.setFragmentMaterial(fragId, cloneMat);
       }
     }
 
@@ -597,11 +652,9 @@ function restoreFragStates(viewer, store) {
   const fragList = getFragList(viewer, model);
 
   for (const f of store) {
-    // 위치 원복
     f.proxy.position.copy(f.startPos);
     f.proxy.updateAnimTransform();
 
-    // 머티리얼 원복
     if (f.originalMat) {
       if (viewer.impl.setMaterial) {
         viewer.impl.setMaterial(f.model, f.fragId, f.originalMat);
@@ -633,8 +686,4 @@ function animate(duration, step) {
   });
 }
 
-// 시각적으로 고르게 보이는 S-커브
 function easeInOutSine(t){ return 0.5 - 0.5 * Math.cos(Math.PI * t); }
-
-// (옵션) 감마 기반 보정이 필요하면 아래를 사용해도 됩니다.
-// function easeGamma(t, gamma = 0.45) { return 1 - Math.pow(1 - t, gamma); }

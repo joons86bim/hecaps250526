@@ -1,193 +1,103 @@
-// [데이터연결] — 체크된 WBS 노드 → 경로 → 자손 leaf dbId 수집 후 링크
-$("#btn-link").off("click").on("click", async function () {
-  const taskTree = $.ui.fancytree.getTree("#treegrid");
-  const selectedTaskNode = taskTree.getActiveNode();
-  if (!selectedTaskNode) return alert("Task를 선택하세요!");
-  if (selectedTaskNode.hasChildren && selectedTaskNode.hasChildren()) {
-    alert("하위 작업이 있는 Task에는 연결할 수 없습니다.\n 최하위 Task를 선택해 주세요.");
-    return;
-  }
+/** 사용 중인 WBS Fancytree 인스턴스를 찾는다.
+ *  - 후보: 모든 .fancytree-container 중 #treegrid(작업 트리)는 제외
+ *  - 우선순위: checkbox 옵션이 true 인 트리
+ */
+function findWbsTree(){
+  const all = Array.from(document.querySelectorAll('.fancytree-container'))
+    .map(el => $.ui.fancytree.getTree(el))
+    .filter(Boolean);
 
-  const urn = window.CURRENT_MODEL_URN;
-  const provider = window.__WBS_PROVIDER; // 있으면 미확장 자손까지 BFS
-  const catSel = normalizeTaskCategory(selectedTaskNode.data?.selectedOption); // "C"|"T"|"D"
-  const catLabel = catSel === "C" ? "시공" : (catSel === "T" ? "가설" : "철거");
+  // 작업용(treegrid) 제외
+  const taskTree = $.ui.fancytree.getTree('#treegrid');
+  const cand = all.filter(t => t !== taskTree);
 
-  // (중요) 실제 사용 중인 WBS 트리 인스턴스 확보
-  const _wbs = findWbsTree();
-  if (!_wbs) { alert("WBS 트리를 찾을 수 없습니다(체크박스가 있는 트리)."); return; }
+  // checkbox 지원 트리를 우선 반환
+  const withCk = cand.filter(t => !!t.options?.checkbox);
+  return withCk[0] || cand[0] || null;
+}
 
-  // V 체크된 노드만 수집 (partsel 제외) — 내부적으로 findWbsTree() 사용
-  const checkedNodes = getCheckedNodesFT();
-  if (!checkedNodes.length) {
-    console.warn("[WBS] No checked nodes via API/DOM fallback.");
-    alert("WBS에서 '체크(V)'된 항목이 없습니다.\n(체크 후 다시 시도해 주세요)");
-    return;
-  }
+/** ── Checked 노드 안전 수집(Fancytree)
+ * 우선순위:
+ *  1) tree.getSelectedNodes(false).filter(!partsel)
+ *  2) 전체 방문해 node.selected && !node.partsel
+ *  3) DOM 폴백: aria-checked="true" / .fancytree-selected → getNode(el)
+ */
+function getCheckedNodesFT() {
+  const tree = findWbsTree();
+  if (!tree) { console.warn('[WBS] findWbsTree() = null'); return []; }
 
-  // 문서 순서 정렬
-  checkedNodes.sort((a,b) => a.getIndexHier().localeCompare(b.getIndexHier(), undefined, { numeric:true }));
+  // 1) 공식 API
+  try {
+    const nodes = tree.getSelectedNodes(false).filter(n => !n.partsel);
+    if (nodes.length) return nodes;
+  } catch(_) {}
 
-  // 체크 노드 → 경로 → 자손 leaf dbId 수집
-  const orderedDbIds = [];
-  const pathByDbId = new Map();
-  const seen = new Set();
-
-  for (const node of checkedNodes){
-    const path = pathOfNodeFT(node);
-    const ids = await bfsCollectDescendantDbIds(provider, path, node);
-    for (const id of ids){
-      if (!seen.has(id)) {
-        seen.add(id);
-        orderedDbIds.push(id);
-        pathByDbId.set(id, path.slice());
-      }
-    }
-  }
-
-  if (!orderedDbIds.length) return alert("체크된 항목에서 연결 가능한 객체(dbId)를 찾지 못했습니다.");
-
-  // ElementId 프리페치
-  try { await ensureElementIdIndexForDbIds(orderedDbIds); } catch {}
-
-  // 저장용 오브젝트(경로 라벨: "A - B - C - [ElementId|dbId]")
-  const toLink = orderedDbIds.map((d) => {
-    const p = pathByDbId.get(d) || [];
-    const el = getElementIdFor(urn, d);
-    const bracket = `[${el || d}]`;
-    const pathLabel = p.length ? (p.join(" - ") + " - " + bracket) : bracket;
-    return { urn, dbId: d, elementId: el || null, text: pathLabel };
-  });
-
-  // ==== 점유/충돌 처리(기존 로직 유지) ====
-  await (async () => {
-    const occupancy = new Map();
-    taskTree.getRootNode().visit(n => {
-      const cat = normalizeTaskCategory(n.data?.selectedOption);
-      if (!cat) return;
-      (n.data?.linkedObjects || []).forEach(o => {
-        const key = `${o.urn || urn}:${o.dbId}`;
-        const slot = occupancy.get(key) || { C: null, T: null, D: null };
-        if (cat === "C" && !slot.C) slot.C = n;
-        if (cat === "T" && !slot.T) slot.T = n;
-        if (cat === "D" && !slot.D) slot.D = n;
-        occupancy.set(key, slot);
-      });
+  // 2) 전체 방문
+  try {
+    const found = [];
+    tree.getRootNode()?.visit((n) => {
+      if (n.selected && !n.partsel) found.push(n);
     });
+    if (found.length) return found;
+  } catch(_) {}
 
-    const allowed = [];
-    const conflictsForC = [];
-    const conflictsC = [];
-    const conflictsSame = [];
+  // 3) DOM 폴백 (tree.$div 기준!)
+  try {
+    const $cont = tree.$div || $(tree.$div);
+    const $cand = $cont.find(
+      '.fancytree-checkbox[aria-checked="true"], ' +
+      '.fancytree-node.fancytree-selected, ' +
+      '.fancytree-title.fancytree-selected'
+    );
+    const raw = $cand.toArray()
+      .map(el => $.ui.fancytree.getNode(el))
+      .filter(Boolean);
 
-    toLink.forEach(obj => {
-      const key = `${obj.urn}:${obj.dbId}`;
-      const slot = occupancy.get(key) || { C: null, T: null, D: null };
-
-      if (catSel === "C") {
-        if (!slot.C && !slot.T && !slot.D) allowed.push(obj);
-        else conflictsForC.push({ obj, slot });
-      } else if (catSel === "T") {
-        if (slot.C) conflictsC.push({ obj, slot });
-        else if (slot.T) conflictsSame.push({ obj, slot });
-        else allowed.push(obj);
-      } else if (catSel === "D") {
-        if (slot.C) conflictsC.push({ obj, slot });
-        else if (slot.D) conflictsSame.push({ obj, slot });
-        else allowed.push(obj);
+    // 중복 제거 + partsel 제외
+    const out = [];
+    const seen = new Set();
+    raw.forEach(n => {
+      const key = n.key || n.getIndexHier?.() || n.title;
+      const isPart = n.partsel || $(n.span).hasClass("fancytree-partsel");
+      if (!isPart && key && !seen.has(key)) {
+        seen.add(key);
+        out.push(n);
       }
     });
+    return out;
+  } catch (e) {
+    console.warn("[WBS] DOM fallback failed", e);
+    return [];
+  }
+}
 
-    function unlinkFromNode(node, obj) {
-      if (!node) return;
-      node.data.linkedObjects = (node.data.linkedObjects || []).filter(
-        o => !(String(o.urn || urn) === String(obj.urn) && Number(o.dbId) === Number(obj.dbId))
-      );
-      node.render && node.render();
-    }
 
-    if (catSel === "C" && conflictsForC.length) {
-      const res = prompt([
-        `선택한 객체 중 ${conflictsForC.length}개는 이미 다른 Task에 연결되어 있습니다.`,
-        `규칙상 '시공'은 단독 연결만 가능합니다.`,
-        ``,
-        `1. 기존 연결 해제 후 이 Task(시공)로 새로 연결`,
-        `2. 이미 연결된 객체만 제외하고 진행`,
-        `3. 취소`,
-        ``,
-        `번호를 입력하세요 (1/2/3)`
-      ].join("\n"), "2");
-      if (res === "3" || res == null) return;
-      if (res === "1") {
-        conflictsForC.forEach(({ obj, slot }) => {
-          unlinkFromNode(slot.C, obj);
-          unlinkFromNode(slot.T, obj);
-          unlinkFromNode(slot.D, obj);
-          allowed.push(obj);
-        });
-      }
-    }
+window.__WBS_DBG__ = {
+  listTrees(){
+    const rows = Array.from(document.querySelectorAll('.fancytree-container'))
+      .map(el => $.ui.fancytree.getTree(el))
+      .filter(Boolean)
+      .map(t => ({
+        id: t.$div?.attr?.('id'),
+        checkbox: !!t.options?.checkbox,
+        selectMode: t.options?.selectMode,
+        selectedCount: (t.getSelectedNodes?.(false) || []).length
+      }));
+    console.table(rows);
+    return rows;
+  },
+  findWbsTree,
+  getCheckedNodesFT
+};
 
-    if ((catSel === "T" || catSel === "D") && conflictsC.length) {
-      const res = prompt([
-        `다음 객체는 '시공'에 이미 연결되어 있어 ${catLabel}과(와) 병행할 수 없습니다.`,
-        ``,
-        `1. 시공 연결 해제 후 이 Task(${catLabel})로 새로 연결`,
-        `2. 이미 연결된 객체만 제외하고 진행`,
-        `3. 취소`,
-        ``,
-        `번호를 입력하세요 (1/2/3)`
-      ].join("\n"), "2");
-      if (res === "3" || res == null) return;
-      if (res === "1") {
-        conflictsC.forEach(({ obj, slot }) => { unlinkFromNode(slot.C, obj); allowed.push(obj); });
-      }
-    }
 
-    if ((catSel === "T" || catSel === "D") && conflictsSame.length) {
-      const label = catLabel;
-      const res = prompt([
-        `다음 객체는 이미 '${label}'에 연결되어 있습니다.`,
-        ``,
-        `1. 기존 '${label}' 연결을 이 Task로 교체 (해당 카테고리만 교체)`,
-        `2. 이미 연결된 객체만 제외하고 진행`,
-        `3. 취소`,
-        ``,
-        `번호를 입력하세요 (1/2/3)`
-      ].join("\n"), "2");
-      if (res === "3" || res == null) return;
-      if (res === "1") {
-        conflictsSame.forEach(({ obj, slot }) => {
-          if (catSel === "T") unlinkFromNode(slot.T, obj);
-          if (catSel === "D") unlinkFromNode(slot.D, obj);
-          allowed.push(obj);
-        });
-      }
-    }
 
-    if (allowed.length > 0) {
-      const existing = selectedTaskNode.data.linkedObjects || [];
-      const merged = [];
-      const seenKey = new Set();
-      const pushUniq = (o) => { const k = o.urn + ":" + o.dbId; if (!seenKey.has(k)) { seenKey.add(k); merged.push(o); } };
-      allowed.forEach(pushUniq);  // WBS 순서 우선
-      existing.forEach(pushUniq); // 기존 뒤에
-      selectedTaskNode.data.linkedObjects = merged;
-    }
+window.__WBS_DBG__.listTrees();              // 어떤 트리가 있는지 표로 보기
+window.__WBS_DBG__.getCheckedNodesFT();      // 현재 체크된 노드들 얻기
+window.__WBS_DBG__.getCheckedNodesFT()
+  .map(n => ({title:n.title, idx:n.getIndexHier()}));
 
-    // 렌더/페인트
-    const prev = window.__ALLOW_WBS_UPDATE;
-    window.__ALLOW_WBS_UPDATE = true;
-    try {
-      if (window.requestTaskRecalcAndFlush) window.requestTaskRecalcAndFlush(); 
-      else if (window.requestTaskTreeFlush) window.requestTaskTreeFlush();
-      try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_) {}
-    } finally {
-      window.__ALLOW_WBS_UPDATE = prev;
-    }
 
-    try { await notifyCoverageDirtyAndRepaint(); } catch {}
-  })();
 
-  try { window.__WBS_MARK_TASKS_CHANGED?.(); } catch {}
-});
+window.__WBS_DBG__.listTrees();
+window.__WBS_DBG__.getCheckedNodesFT().map(n=>n.title);

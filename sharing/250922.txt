@@ -19,6 +19,10 @@ export function initTaskPanel(taskData) {
       // 리드타임 전체 재계산 + 객체 집계
       try { recalcAllLeadtime(data.tree); } catch(e){}
       try { recomputeAggObjects(data.tree); } catch(e){}
+
+      // ★ 구분 필드 하이드레이션(누락 보정)
+      ensureCategoryFieldsForAll(data.tree);
+
       data.tree.render(true, true);
       enforceCategoryInheritance(data.tree);
       setTimeout(() => scheduleFlush(), 0);
@@ -31,17 +35,34 @@ export function initTaskPanel(taskData) {
         ? node.getLevel() === 1
         : (node.parent?.isRoot?.() === true);
 
+      // 번호
       $tdList.eq(0).text(node.data.no || "");
+
+      // ★ 구분(셀렉트) — 옵션/선택값 안전 처리
+      const opts = Array.isArray(node.data.selectOptions) && node.data.selectOptions.length
+        ? node.data.selectOptions
+        : (window.DEFAULT_TASK_CATEGORIES || ["시공","가설","철거"]);
+      const sel  = node.data.selectedOption || opts[0];
+
       $tdList.eq(1).html(
         `<select class="treegrid-dropdown" ${isTop ? "" : "disabled"} style="width:100%;box-sizing:border-box;height:28px;">
-          ${node.data.selectOptions.map(opt => `<option${opt === node.data.selectedOption ? " selected" : ""}>${opt}</option>`).join("")}
+          ${opts.map(opt => {
+            const o = String(opt);
+            const selected = (o === sel) ? " selected" : "";
+            return `<option value="${o.replace(/"/g,'&quot;')}"${selected}>${o}</option>`;
+          }).join("")}
         </select>`
       );
+
+      // 제목
       $tdList.eq(2).find(".fancytree-title").text(node.data.title || node.title || "");
+
+      // 날짜/리드타임
       $tdList.eq(3).text(node.data.start || "").addClass("text-center");
       $tdList.eq(4).text(node.data.leadtime || "").addClass("text-center");
       $tdList.eq(5).text(node.data.end || "").addClass("text-center");
 
+      // 연결 객체 수 + 카테고리 컬러
       const objCount = Number(node.data._aggObjCount || 0);
       $tdList.eq(6)
         .text(objCount || "")
@@ -66,11 +87,10 @@ export function initTaskPanel(taskData) {
     $tbl.wrap('<div class="table-scroll"></div>');
   }
 
-
-  // 더블클릭 편집
+  // ── 더블클릭 편집(네임스페이스 안정화)
   $("#treegrid")
-    .off("dblclick", "td")
-    .on("dblclick", "td", function(){
+    .off("dblclick.cellEdit", "td")
+    .on("dblclick.cellEdit", "td", function(){
       const colIdx = this.cellIndex;
       const node = $.ui.fancytree.getNode(this);
       if (!node) return;
@@ -111,18 +131,34 @@ export function initTaskPanel(taskData) {
       }
     });
 
-  // 구분 변경 → 전면 하이라이트 1회 (게이트 ON 후 트리거)
+  // ── 구분 변경: 최상위만 직접 수정 + 하위 전파 + 상속 강제
   $("#treegrid").on("change", ".treegrid-dropdown", function(){
-    const $tr = $(this).closest("tr");
+    const $tr  = $(this).closest("tr");
     const node = $.ui.fancytree.getNode($tr);
-    const isTop = (typeof node.getLevel === "function") ? node.getLevel() === 1 : (node.parent?.isRoot?.() === true);
-    if (!isTop) { this.value = node.data.selectedOption; return; }
-    const newCat = this.value;
+    const isTop = (typeof node.getLevel === "function")
+      ? node.getLevel() === 1
+      : (node.parent?.isRoot?.() === true);
 
+    if (!isTop) {
+      // 하위 노드는 상속만 — 셀렉트 되돌림
+      this.value = node.data.selectedOption;
+      return;
+    }
+
+    const newCat = String(this.value || "").trim();
+
+    // ★ 최상위 노드 자신의 선택값 갱신
+    node.data.selectedOption = newCat;
+
+    // 하위로 전파 + 상속 강제
     propagateCategoryDown(node, newCat);
+    enforceCategoryInheritance(node.tree);
+
+    // 즉시 렌더 + 플러시
     node.tree.render(true, true);
     window.requestTaskTreeFlush?.();
 
+    // 하이라이트 1회
     requestWbsHighlightGateOn();
     requestWbsHighlight();
   });
@@ -273,14 +309,13 @@ function openDateEditor($td, node, field) {
   const $iconBtn = $('<button type="button" class="datepicker-btn" style="margin-left:4px; padding:0; background:none; border:none; cursor:pointer;"></button>').html(calendarSvg);
   $td.append($input, $iconBtn);
 
-  // ⛔ 여기서 IMask 직접 붙이지 마세요(아래 attachDatePickerToInput에서 처리)
   function restoreCell() {
     setTimeout(() => $td.text(node.data[field] || ""), 10);
     $(document).off("mousedown.cellEdit");
   }
   function commitDate(dateStr) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      commit(node, { [field]: dateStr }, field); // → 리드타임/조상 집계 계산 + node.render() + flush
+      commit(node, { [field]: dateStr }, field);
     }
     restoreCell();
   }
@@ -307,7 +342,6 @@ function openDateEditor($td, node, field) {
   $input.on("blur", () => commitDate($input.val()));
 }
 
-
 function renderRowAndAncestors(node) {
   // 현재 행
   if (node?.render) node.render();
@@ -318,4 +352,18 @@ function renderRowAndAncestors(node) {
     if (p.render) p.render();
     p = p.parent;
   }
+}
+
+/* ───────── 구분 필드 하이드레이션 ───────── */
+function ensureCategoryFieldsForAll(tree){
+  const DEFAULT_OPTS = (window.DEFAULT_TASK_CATEGORIES || ["시공","가설","철거"]);
+  tree?.getRootNode()?.visit((n) => {
+    const d = (n.data = n.data || {});
+    if (!Array.isArray(d.selectOptions) || d.selectOptions.length === 0) {
+      d.selectOptions = DEFAULT_OPTS.slice();
+    }
+    if (!d.selectedOption) {
+      d.selectedOption = d.selectOptions[0]; // 기본은 '시공'
+    }
+  });
 }

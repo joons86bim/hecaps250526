@@ -31,14 +31,17 @@ main.js:582 [STEP 6] panel2 resizer bound
 main.js:583 [STEP 1] Task panel OK
 main.js:584 [STEP 2] panel2-ready dispatched
 gantt-view.js:171 [gantt-view] google loaded
-task-buttons.js:353  [WBS] No checked nodes via API/DOM fallback.
-(anonymous) @ task-buttons.js:353
+task-buttons.js:381  [WBS] No checked nodes via API/DOM fallback.
+(anonymous) @ task-buttons.js:381
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-window.__WBS_DBG__?.listTrees();
-task-buttons.js:166 (index)idcheckboxselectModeselectedCount(index)idcheckboxselectModeselectedCount0'treegrid'false201'wbs-tree'true31Array(2)
-(2) [I, I]
-window.__WBS_DBG__?.getCheckedNodesFT()?.map(n=>n.getIndexHier));
-VM37452:1 Uncaught SyntaxError: Unexpected token ')'
-window.__WBS_DBG__?.getCheckedNodesFT()?.map(n=>n.getIndexHier());
-[]length: 0lastIndex: (...)lastItem: (...)[[Prototype]]: Array(0)
+window.__WBS_DBG__.listTrees();
+task-buttons.js:863 (index)idcheckboxselectModeselectedCount(index)idcheckboxselectModeselectedCount0'treegrid'false201'wbs-tree'true31Array(2)
+(2) [{…}, {…}]
+window.__WBS_DBG__.getCheckedNodesFT();
+[]
+window.__WBS_DBG__.getCheckedNodesFT()
+  .map(n => ({title:n.title, idx:n.getIndexHier()}));
+[]
+
+

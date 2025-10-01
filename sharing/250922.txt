@@ -1,721 +1,309 @@
-// /wwwroot/js/sidebar/task-wbs/task-buttons.js
-import { normalizeTaskCategory, enforceCategoryInheritance } from "./core/categories.js";
-import { aggregateTaskFields } from "./logic/task-aggregate.js";
-import { scheduleWbsRepaint } from "./ui/wbs-highlight.js";
-import { showCurrentTaskModal } from "./ui/current-task-modal.js";
-import { notifyCoverageDirtyAndRepaint } from "./ui/wbs-fixed-paint.js";
-import { ensureElementIdIndexForDbIds, getElementIdFor, formatObjectLabel } from "./core/element-id.js";
+import { ensureEyeButton, installWbsVisibilityDelegate } from "./ui/wbs-visibility.js";
+import { applyHighlightForSubtreeUI } from "./ui/wbs-highlight.js";
+import { activateFixedPaint, refreshFixedPaint, requestDebouncedRepaint, paintSubtreeNow } from "./ui/wbs-fixed-paint.js";
 
-import {
-  initWbsStore,
-  setProvider as setWbsProvider,
-  refreshWbsStore,
-  getOrderedDbIdsFromCheckedExact,
-  pathOfNode
-} from "./core/wbs-store.js";
+const rIC = typeof requestIdleCallback === "function"
+  ? requestIdleCallback
+  : (fn)=>setTimeout(()=>fn({ timeRemaining:()=>5 }),0);
 
-// 상태 반영 알림
-function notifyWbsStatusRefresh(){
-  try { window.__WBS_MARK_TASKS_CHANGED?.(); } catch {}
-}
+// 체크 프리픽스 규칙 (전역 공유)
+const CHECK_RULES = (window.__WBS_CHECK_RULES = window.__WBS_CHECK_RULES || { on:new Set(), off:new Set() });
+const PSEP = "¦";
+const pkey = (path) => (path||[]).join(PSEP);
+const startsWithKey = (full, key) => (full===key || full.startsWith(key + PSEP));
 
-// 페인트 배치(간단 락)
-async function runWbsHighlightBatch(cb){
-  const prev = window.__WBS_PAINT_LOCK === true;
-  window.__WBS_PAINT_LOCK = true;
-  try { await cb(); }
-  finally {
-    window.__WBS_PAINT_LOCK = prev;
-    requestAnimationFrame(()=>{ try{ window.updateWBSHighlight?.(); } catch{} });
+function registerAutoCheck(pathArr, turnOn){
+  const k = pkey(pathArr);
+  if (turnOn){
+    Array.from(CHECK_RULES.off).forEach(x => { if (startsWithKey(x,k) || startsWithKey(k,x)) CHECK_RULES.off.delete(x); });
+    Array.from(CHECK_RULES.on).forEach(x => { if (startsWithKey(x,k)) CHECK_RULES.on.delete(x); });
+    CHECK_RULES.on.add(k);
+  }else{
+    Array.from(CHECK_RULES.on).forEach(x => { if (startsWithKey(x,k) || startsWithKey(k,x)) CHECK_RULES.on.delete(x); });
+    CHECK_RULES.off.add(k);
   }
 }
-
-// 외부 저장 스냅샷
-export function setSavedTaskData(data) {
-  window.savedTaskData = JSON.parse(JSON.stringify(data ?? []));
+function shouldBeChecked(pathArr){
+  const k = pkey(pathArr);
+  for (const off of CHECK_RULES.off) if (startsWithKey(k,off)) return false;
+  for (const on  of CHECK_RULES.on ) if (startsWithKey(k,on )) return true;
+  return null; // 규칙 없음
 }
+const shouldBeCheckedByNode = (n) => shouldBeChecked(pathOf(n));
 
-export function initTaskListButtons() {
-  window.__ALLOW_WBS_UPDATE = window.__ALLOW_WBS_UPDATE ?? false;
+export function initWbsPanel(input){
+  // 1) 확장 반짝임 억제용 CSS 1회 주입
+  (function injectWbsPaintCss(){
+    if (document.getElementById('wbs-expanding-css')) return;
+    const st = document.createElement('style');
+    st.id = 'wbs-expanding-css';
+    st.textContent = `
+      /* 확장되는 노드의 직계 자식 목록은 칠 완료까지 숨김 */
+      #wbs-group-list li.expanding > ol { visibility: hidden; }
+    `;
+    document.head.appendChild(st);
+  })();
 
-  // ✅ WBS 저장소 초기화(트리/프로바이더)
-  try { initWbsStore({ tree: window.wbsTree, provider: window.__WBS_PROVIDER }); } catch(_) {}
-  // 프로바이더가 나중에 준비될 수도 있으니 훅 제공(선택)
-  window.__SET_WBS_PROVIDER__ = (p) => { try { setWbsProvider(p); refreshWbsStore(); } catch(_) {} };
+  const wrap = document.getElementById("wbs-group-content");
+  if (!wrap) return;
+  wrap.innerHTML = `<div id="wbs-group-list"></div>`;
+  const host = document.getElementById("wbs-group-list");
 
-  function withWbsGate(fn){
-    const prev = window.__ALLOW_WBS_UPDATE;
-    window.__ALLOW_WBS_UPDATE = true;
-    try { return fn(); }
-    finally { window.__ALLOW_WBS_UPDATE = prev; }
+  const rawProvider = (input && input.__provider) ? input : null;
+  let provider = rawProvider;
+  const usingProvider = !!rawProvider;
+
+  function pathOf(node){
+    if (node && Array.isArray(node.__path)) return node.__path.slice();
+    const out = []; let cur = node;
+    while (cur && cur.text && !cur.isRoot?.()) { out.unshift(cur.text); cur = cur.parent; }
+    return out;
   }
+  const rawPathOf = pathOf; // 별칭
 
-  function flush(recalc = false) {
-    if (recalc && window.requestTaskRecalcAndFlush) {
-      window.requestTaskRecalcAndFlush();
-    } else if (window.requestTaskTreeFlush) {
-      window.requestTaskTreeFlush();
-    } else {
-      const tree = $.ui.fancytree.getTree("#treegrid");
-      tree.render(true, true);
-    }
-    if (!window.__WBS_PAINT_LOCK) scheduleWbsRepaint();
-  }
-
-  // [추가]
-  $("#btn-add").off("click").on("click", function () {
-    const tree = $.ui.fancytree.getTree("#treegrid");
-    const sel = tree.getActiveNode();
-    const parentNode = sel || null;
-    const baseCat = (parentNode?.data?.selectedOption) || "시공";
-    const no = generateNo(parentNode);
-    const nodeData = {
-      no,
-      selectOptions: ["시공", "가설", "철거"],
-      selectedOption: baseCat,
-      title: "새 작업",
-      start: "",
-      end: "",
-      linkedObjects: []
+  // 2) ★★★ 체크 규칙을 '초기 데이터'에 주입하는 래퍼 프로바이더
+  if (usingProvider) {
+    const coerceCheckOnData = (items, parentPath=[]) => {
+      if (!Array.isArray(items)) return items;
+      return items.map(item => {
+        // 버킷이면 내부 항목까지 재귀 적용
+        if (item?._isBucket && Array.isArray(item.__bucket)) {
+          item.__bucket = coerceCheckOnData(item.__bucket, parentPath);
+          return item;
+        }
+        // 정상 노드: label로 경로 확장
+        const label = item?.text ?? "";
+        const path = parentPath.concat([label]);
+        const want = shouldBeChecked(path);
+        if (want !== null) {
+          item.itree = item.itree || {};
+          item.itree.state = item.itree.state || {};
+          item.itree.state.checked = !!want;
+        }
+        return item;
+      });
     };
-    if (parentNode) {
-      if (Array.isArray(parentNode.data?.linkedObjects) && parentNode.data.linkedObjects.length) {
-        parentNode.data.linkedObjects = [];
-        parentNode.render && parentNode.render();
-      }
-      parentNode.addChildren(nodeData);
-      parentNode.setExpanded(true);
-      parentNode.data.start = "";
-      parentNode.data.end = "";
-      parentNode.render && parentNode.render();
-    } else {
-      tree.getRootNode().addChildren(nodeData);
+
+    provider = {
+      __provider: true,
+      async roots(){
+        const items = await rawProvider.roots();
+        return coerceCheckOnData(items, []);
+      },
+      async childrenByPath(path){
+        const items = await rawProvider.childrenByPath(path);
+        return coerceCheckOnData(items, path);
+      },
+      countAt: (...a)=>rawProvider.countAt(...a),
+      getDbIdsForPath: (...a)=>rawProvider.getDbIdsForPath(...a),
+      ensurePathMapForDbIds: (...a)=>rawProvider.ensurePathMapForDbIds?.(...a)
+    };
+  }
+
+  const tree = new window.InspireTree({
+    selection: { multi:true, mode:"simple", autoSelectChildren:false, autoDselectChildren:false, require:false, autoSelectParents:false },
+    data: usingProvider
+      ? function(node, resolve){
+          if (!node) { provider.roots().then(resolve); return; }
+          if (node._isBucket && Array.isArray(node.__bucket)) { resolve(node.__bucket); return; }
+          provider.childrenByPath(pathOf(node)).then(resolve);
+        }
+      : (input || [])
+  });
+  window.wbsTree = tree;
+
+  new window.InspireTreeDOM(tree, { target:"#wbs-group-list", showCheckboxes:true, dragAndDrop:{enabled:false} });
+
+  if (usingProvider) {
+    window.__WBS_PROVIDER = provider;
+    window.__WBS_GET_DBIDS_FOR_NODE = (node, opts) => provider.getDbIdsForPath(pathOf(node), opts);
+  }
+
+  function rowFor(node){
+    const wrap = ensureRowShell(node);
+    if (wrap) return wrap;
+    const uid = node?._id ?? node?.id;
+    const li = host.querySelector(`li[data-uid="${uid}"]`);
+    return li?.querySelector(':scope > .title-wrap') || li;
+  }
+
+  function ensureCountBadge(node){
+    const row = rowFor(node); if (!row) return;
+
+    let badge = row.querySelector('.count-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'count-badge';
+      row.appendChild(badge);
     }
-    enforceCategoryInheritance(tree);
-    flush(true);
-  });
 
-  // [삭제]
-  $("#btn-delete").off("click").on("click", function(){
-    const tree = $.ui.fancytree.getTree("#treegrid");
-    const sel = tree.getActiveNode();
-    if (sel && !sel.isRoot()) {
-      sel.remove();
-      flush(true);
-    }
-  });
-
-  // [객체선택] → 3D viewer select
-  $("#btn-select").off("click").on("click", function() {
-    const taskTree = $.ui.fancytree.getTree("#treegrid");
-    const selected = taskTree.getActiveNode();
-    if (!selected) return alert("Task를 선택하세요!");
-
-    const objects = aggregateTaskFields(selected).objects;
-    if (!objects || objects.length === 0) return alert("이 Task(및 하위 Task)에 연결된 객체가 없습니다.");
-
-    const byUrn = {};
-    objects.forEach(obj => {
-      if (!byUrn[obj.urn]) byUrn[obj.urn] = [];
-      byUrn[obj.urn].push(obj.dbId);
-    });
-    Object.entries(byUrn).forEach(([urn, dbIds]) => {
-      if (urn === window.CURRENT_MODEL_URN && window.viewer) {
-        window.viewer.select(dbIds);
-      }
-    });
-  });
-
-  // [업데이트] 저장
-  $("#btn-update").off("click").on("click", async function () {
-    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
-    const url = `/api/tasks?urn=${safeUrnVal}`;
-    const currentTaskData = getCurrentTaskDataFromTree();
-    const current = JSON.stringify(currentTaskData ?? []);
-    const saved   = JSON.stringify(window.savedTaskData ?? []);
-
-    if (!window.savedTaskData || (Array.isArray(window.savedTaskData) && window.savedTaskData.length === 0 && currentTaskData.length > 0)) {
-      // 최초 저장 허용
-    } else if (current === saved) {
-      alert("수정된 데이터가 없습니다.");
+    const isLeaf = (typeof node.dbId === "number");
+    if (isLeaf) {
+      badge.textContent = '';
+      badge.style.display = 'none';
       return;
     }
 
-    try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(currentTaskData),
-      });
-      if (resp.ok) {
-        alert("Task 데이터가 저장되었습니다!");
-        window.savedTaskData = JSON.parse(JSON.stringify(currentTaskData));
-      } else {
-        alert("Task 데이터 저장 실패!");
+    let cnt = (typeof node.leafCount === 'number') ? node.leafCount : undefined;
+    if (cnt == null && usingProvider) { cnt = provider.countAt(pathOf(node)); }
+
+    badge.textContent = (typeof cnt === 'number') ? String(cnt) : '…';
+    badge.style.display = '';
+  }
+
+  function ensureDecor(n){ try { ensureCountBadge(n); } catch {} try { ensureEyeButton(n); } catch {} }
+
+  function decorateDeep(root){
+    const Q = [root]; const CHUNK = 600;
+    (function step(deadline){
+      let n=0;
+      while (Q.length && (!deadline || deadline.timeRemaining()>3) && n<CHUNK){
+        const cur = Q.shift();
+        try { ensureDecor(cur); } catch {}
+        if (cur.hasChildren && cur.hasChildren()) (cur.children||[]).forEach(ch=>Q.push(ch));
+        n++;
       }
-    } catch (err) {
-      alert("저장 중 오류 발생: " + err.message);
-    }
+      if (Q.length) rIC(step,{timeout:60});
+    })();
+  }
+
+  // 하이라이트 스로틀
+  let HL_SUSPENDED = false;
+  const q = new Set(); let scheduled = false;
+  function scheduleHL(n){
+    if (HL_SUSPENDED || window.__WBS_FIXED_MODE) return;
+    q.add(n); if (scheduled) return; scheduled = true;
+    requestAnimationFrame(()=>{
+      const map = window.__WBS_CATMAP;
+      if (!window.__WBS_FIXED_MODE && map) {
+        q.forEach(x=>{ try{ applyHighlightForSubtreeUI(x,map);}catch{} });
+      }
+      q.clear(); scheduled=false;
+    });
+  }
+  function flushOnce(){
+    if (window.__WBS_FIXED_MODE) return;
+    const map = window.__WBS_CATMAP; if (!map) return;
+    tree.nodes().forEach(r=>{ try{ applyHighlightForSubtreeUI(r,map);}catch{} });
+  }
+
+  tree.on("node.rendered", (n)=>requestAnimationFrame(()=>{ ensureDecor(n); scheduleHL(n); }));
+
+  // 막 로드된 자식들에게 규칙/칠 즉시 적용 (보조 안전장치)
+  tree.on("children.loaded", (parent) => {
+    try {
+      (parent.children || []).forEach(ch => {
+        try {
+          const want = shouldBeCheckedByNode(ch);
+          if (want === true) ch.check?.();
+          else if (want === false) ch.uncheck?.();
+        } catch {}
+      });
+      paintSubtreeNow(parent);
+    } catch {}
   });
 
-  // [데이터연결] — 체크박스(V) 기준, 확장 없이 후손 leaf 수집(WBS 순서 보장) + 폴백
-  $("#btn-link").off("click").on("click", async function () {
-    const taskTree = $.ui.fancytree.getTree("#treegrid");
-    const selectedTaskNode = taskTree.getActiveNode();
-    if (!selectedTaskNode) return alert("Task를 선택하세요!");
-    if (selectedTaskNode.hasChildren && selectedTaskNode.hasChildren()) {
-      alert("하위 작업이 있는 Task에는 연결할 수 없습니다.\n 최하위 Task를 선택해 주세요.");
-      return;
-    }
+  // 확장시 반짝임 억제 + 고정색칠 경로 최신화
+  tree.on("node.expanded",  async (n)=>{
+    HL_SUSPENDED = true;
+    decorateDeep(n);
 
-    // 체크 상태 최신화
-    try { refreshWbsStore(); } catch(_) {}
+    const uid = n?._id ?? n?.id;
+    const li  = uid ? host.querySelector(`li[data-uid="${uid}"]`) : null;
+    li?.classList.add('expanding');
 
-    const urn = window.CURRENT_MODEL_URN;
-    const catSel = normalizeTaskCategory(selectedTaskNode.data?.selectedOption); // "C"|"T"|"D"
-    const catLabel = catSel === "C" ? "시공" : (catSel === "T" ? "가설" : "철거");
+    const prevLock = window.__WBS_PAINT_LOCK === true;
+    window.__WBS_PAINT_LOCK = true;
 
-    // 1차: 저장소 기반(정확히 체크된 V) → 실패 시 2차 폴백
-    let orderedDbIds = [], pathByDbId = new Map();
-    try {
-      const res = await getOrderedDbIdsFromCheckedExact();
-      orderedDbIds = res?.orderedDbIds || [];
-      pathByDbId = res?.pathByDbId || new Map();
-    } catch(_) {}
+    if (usingProvider) { try { await provider.childrenByPath(rawPathOf(n)); } catch {} }
 
-    if (!orderedDbIds.length) {
-      // 🔁 폴백: UI 트리에서 체크된 노드 수집 → provider BFS로 자손 leaf 수집
-      const fb = await collectDbIdsFromUITreeFallback();
-      orderedDbIds = fb.orderedDbIds;
-      pathByDbId = fb.pathByDbId;
-    }
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
 
-    if (!orderedDbIds.length) return alert("WBS에서 '체크(V)'된 항목을 찾지 못했습니다.");
+    try { paintSubtreeNow(n); } catch {}
+    try { await refreshFixedPaint({ repaint:true }); } catch {}
 
-    // ElementId 프리페치
-    try { await ensureElementIdIndexForDbIds(orderedDbIds); } catch {}
+    window.__WBS_PAINT_LOCK = prevLock;
+    li?.classList.remove('expanding');
+    HL_SUSPENDED = false;
 
-    // 저장용 오브젝트(경로라벨 보존: "A - B - C - [ElementId|dbId]")
-    const toLink = orderedDbIds.map((d) => {
-      const p = pathByDbId.get(d) || [];
-      const el = getElementIdFor(urn, d);
-      const bracket = `[${el || d}]`;
-      const pathLabel = p.length ? (p.join(" - ") + " - " + bracket) : bracket;
-      return { urn, dbId: d, elementId: el || null, text: pathLabel };
-    });
+    flushOnce();
+  });
 
-    // ==== 점유/충돌 처리(기존 로직 유지) ====
-    await runWbsHighlightBatch(async () => {
-      const occupancy = new Map();
-      taskTree.getRootNode().visit(n => {
-        const cat = normalizeTaskCategory(n.data?.selectedOption);
-        if (!cat) return;
-        (n.data?.linkedObjects || []).forEach(o => {
-          const key = `${o.urn || urn}:${o.dbId}`;
-          const slot = occupancy.get(key) || { C: null, T: null, D: null };
-          if (cat === "C" && !slot.C) slot.C = n;
-          if (cat === "T" && !slot.T) slot.T = n;
-          if (cat === "D" && !slot.D) slot.D = n;
-          occupancy.set(key, slot);
-        });
-      });
+  requestAnimationFrame(()=>{ try { tree.nodes().forEach(ensureDecor); } catch {} });
+  requestAnimationFrame(()=>{ try { activateFixedPaint(); } catch {} });
 
-      const allowed = [];
-      const conflictsForC = [];
-      const conflictsC = [];
-      const conflictsSame = [];
+  installWbsVisibilityDelegate();
 
-      toLink.forEach(obj => {
-        const key = `${obj.urn}:${obj.dbId}`;
-        const slot = occupancy.get(key) || { C: null, T: null, D: null };
-
-        if (catSel === "C") {
-          if (!slot.C && !slot.T && !slot.D) allowed.push(obj);
-          else conflictsForC.push({ obj, slot });
-        } else if (catSel === "T") {
-          if (slot.C) conflictsC.push({ obj, slot });
-          else if (slot.T) conflictsSame.push({ obj, slot });
-          else allowed.push(obj);
-        } else if (catSel === "D") {
-          if (slot.C) conflictsC.push({ obj, slot });
-          else if (slot.D) conflictsSame.push({ obj, slot });
-          else allowed.push(obj);
-        }
-      });
-
-      function unlinkFromNode(node, obj) {
-        if (!node) return;
-        node.data.linkedObjects = (node.data.linkedObjects || []).filter(
-          o => !(String(o.urn || urn) === String(obj.urn) && Number(o.dbId) === Number(obj.dbId))
-        );
-        node.render && node.render();
-      }
-
-      if (catSel === "C" && conflictsForC.length) {
-        const res = prompt([
-          `선택한 객체 중 ${conflictsForC.length}개는 이미 다른 Task에 연결되어 있습니다.`,
-          `규칙상 '시공'은 단독 연결만 가능합니다.`,
-          ``,
-          `1. 기존 연결 해제 후 이 Task(시공)로 새로 연결`,
-          `2. 이미 연결된 객체만 제외하고 진행`,
-          `3. 취소`,
-          ``,
-          `번호를 입력하세요 (1/2/3)`
-        ].join("\n"), "2");
-        if (res === "3" || res == null) return;
-        if (res === "1") {
-          conflictsForC.forEach(({ obj, slot }) => {
-            unlinkFromNode(slot.C, obj);
-            unlinkFromNode(slot.T, obj);
-            unlinkFromNode(slot.D, obj);
-            allowed.push(obj);
+  // DOM 추가 감시
+  try {
+    if (!host.__wbsDecorObserver){
+      const obs = new MutationObserver((mutList)=>{
+        let addedSomething = false;
+        for (const m of mutList){
+          m.addedNodes && m.addedNodes.forEach(el=>{
+            if (el.nodeType !== 1) return;
+            const lis = el.matches?.('li[data-uid]') ? [el] : Array.from(el.querySelectorAll?.('li[data-uid]') || []);
+            if (!lis.length) return;
+            addedSomething = true;
+            requestAnimationFrame(()=>{
+              lis.forEach(li => {
+                try {
+                  const uid = li.getAttribute('data-uid');
+                  const node = uid ? tree.node(uid) : null;
+                  if (!node) return;
+                  ensureRowShell(node);
+                  ensureCountBadge(node);
+                  ensureEyeButton(node);
+                  try {
+                    const want = shouldBeCheckedByNode(node);
+                    if (want === true) node.check?.();
+                    else if (want === false) node.uncheck?.();
+                  } catch {}
+                } catch {}
+              });
+            });
           });
         }
-      }
-
-      if ((catSel === "T" || catSel === "D") && conflictsC.length) {
-        const res = prompt([
-          `다음 객체는 '시공'에 이미 연결되어 있어 ${catLabel}과(와) 병행할 수 없습니다.`,
-          ``,
-          `1. 시공 연결 해제 후 이 Task(${catLabel})로 새로 연결`,
-          `2. 이미 연결된 객체만 제외하고 진행`,
-          `3. 취소`,
-          ``,
-          `번호를 입력하세요 (1/2/3)`
-        ].join("\n"), "2");
-        if (res === "3" || res == null) return;
-        if (res === "1") {
-          conflictsC.forEach(({ obj, slot }) => { unlinkFromNode(slot.C, obj); allowed.push(obj); });
-        }
-      }
-
-      if ((catSel === "T" || catSel === "D") && conflictsSame.length) {
-        const label = catLabel;
-        const res = prompt([
-          `다음 객체는 이미 '${label}'에 연결되어 있습니다.`,
-          ``,
-          `1. 기존 '${label}' 연결을 이 Task로 교체 (해당 카테고리만 교체)`,
-          `2. 이미 연결된 객체만 제외하고 진행`,
-          `3. 취소`,
-          ``,
-          `번호를 입력하세요 (1/2/3)`
-        ].join("\n"), "2");
-        if (res === "3" || res == null) return;
-        if (res === "1") {
-          conflictsSame.forEach(({ obj, slot }) => {
-            if (catSel === "T") unlinkFromNode(slot.T, obj);
-            if (catSel === "D") unlinkFromNode(slot.D, obj);
-            allowed.push(obj);
-          });
-        }
-      }
-
-      if (allowed.length > 0) {
-        const existing = selectedTaskNode.data.linkedObjects || [];
-        const merged = [];
-        const seenKey = new Set();
-        const pushUniq = (o) => { const k = o.urn + ":" + o.dbId; if (!seenKey.has(k)) { seenKey.add(k); merged.push(o); } };
-        // WBS 순서(allowed) 먼저, 그 다음 기존 항목
-        allowed.forEach(pushUniq);
-        existing.forEach(pushUniq);
-        selectedTaskNode.data.linkedObjects = merged;
-      }
-
-      withWbsGate(() => {
-        flush(true);
-        try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_) {}
+        if (addedSomething) requestDebouncedRepaint?.(32);
       });
-
-      try { await notifyCoverageDirtyAndRepaint(); } catch {}
-    });
-
-    notifyWbsStatusRefresh();
-  });
-
-  // [연결 해제]
-  $("#btn-unlink").off("click").on("click", async function () {
-    const taskTree = $.ui.fancytree.getTree("#treegrid");
-    const selectedNode = taskTree.getActiveNode();
-    if (!selectedNode) return alert("연결을 해제할 Task를 선택하세요!");
-
-    await runWbsHighlightBatch(async () => {
-      (function unlinkAll(node){
-        node.data.linkedObjects = [];
-        if (node.hasChildren()) node.children.forEach(unlinkAll);
-      })(selectedNode);
-
-      withWbsGate(() => {
-        flush(true);
-        try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_) {}
-      });
-
-      try { await notifyCoverageDirtyAndRepaint(); } catch {}
-    });
-    notifyWbsStatusRefresh();
-  });
-
-  // 공정현황 버튼
-  $("#btn-date").off("click").on("click", function(){
-    showCurrentTaskModal();
-  });
-
-  // TEST 버튼
-  $("#btn-test").off("click").on("click", async function() {
-    initTaskWbsButtons(window.viewer);
-  });
-}
-
-/* ---------- Fallback: UI 트리에서 직접 체크 수집 + provider BFS ---------- */
-async function collectDbIdsFromUITreeFallback(){
-  const tree = window.wbsTree;
-  const provider = window.__WBS_PROVIDER;
-  const pathByDbId = new Map();
-  const orderedDbIds = [];
-  const seen = new Set();
-
-  if (!tree) return { orderedDbIds, pathByDbId };
-
-  // 체크 노드 수집(정확히 V: partsel 제외)
-  let nodes = [];
-  if (typeof tree.getSelectedNodes === "function") {
-    nodes = tree.getSelectedNodes(true) || []; // includeHidden=true
-  } else if (typeof tree.checked === "function") {
-    nodes = tree.checked() || [];
-  } else {
-    // 전수 순회
-    const root = tree.getRootNode?.();
-    if (root?.visit) {
-      root.visit((n) => {
-        const sel = typeof n.isSelected === "function" ? n.isSelected() : !!(n.selected || n.data?.selected || n.data?.checked);
-        const part = typeof n.isPartsel === "function" ? n.isPartsel() : !!n.partsel;
-        if (sel && !part) nodes.push(n);
-      });
+      obs.observe(host, { childList:true, subtree:true });
+      host.__wbsDecorObserver = obs;
     }
-  }
+  } catch {}
 
-  // 문서 순서 정렬
-  nodes.sort((a,b) => {
-    const ia = (typeof a.getIndexHier === "function") ? a.getIndexHier() : (a.key || a.title || a.text || "");
-    const ib = (typeof b.getIndexHier === "function") ? b.getIndexHier() : (b.key || b.title || b.text || "");
-    return String(ia).localeCompare(String(ib), undefined, { numeric:true });
+  // 체크 이벤트 → 규칙 갱신(미확장 자식에도 적용되도록)
+  tree.on("node.checked", (n)=>{
+    registerAutoCheck(pathOf(n), true);
+    if (n.hasChildren && n.hasChildren()) (n.children||[]).forEach(ch => { try{ ch.check?.(); }catch{} });
   });
-
-  // 각 노드 경로의 모든 자손 leaf dbId 수집(BFS, 트리 미확장도 커버)
-  for (const node of nodes) {
-    const p = pathOfNode(node);
-    const ids = await bfsCollectDescendantDbIdsByPath(provider, p, node);
-    for (const id of ids) {
-      if (!seen.has(id)) {
-        seen.add(id);
-        orderedDbIds.push(id);
-        pathByDbId.set(id, p.slice());
-      }
-    }
-  }
-  return { orderedDbIds, pathByDbId };
-}
-
-async function bfsCollectDescendantDbIdsByPath(provider, pathArr, visibleNode){
-  // 1) 우선 화면에 보이는 서브트리에서 leaf dbId 수집
-  const fromVisible = [];
-  if (visibleNode?.visit) {
-    visibleNode.visit((n) => {
-      if (n !== visibleNode && !(n.hasChildren && n.hasChildren())) {
-        const id = Number(n.data?.dbId ?? n.dbId);
-        if (Number.isFinite(id)) fromVisible.push(id);
-      }
-    });
-  }
-
-  // 2) provider가 있으면 미표시 자손까지 BFS로 보강
-  const fromProvider = [];
-  if (provider && typeof provider.childrenByPath === "function") {
-    const queue = [ pathArr.slice() ];
-    const seenKey = new Set();
-    const SEP = "\u0001";
-
-    while (queue.length) {
-      const cur = queue.shift();
-      const key = cur.join(SEP);
-      if (seenKey.has(key)) continue;
-      seenKey.add(key);
-
-      let children = [];
-      try { children = await provider.childrenByPath(cur); } catch(_) { children = []; }
-
-      for (const ch of (children || [])) {
-        const text = String(ch.text || ch.name || "").trim();
-        if (!text) continue;
-        const id = Number(ch.dbId ?? ch.data?.dbId);
-        if (Number.isFinite(id)) {
-          fromProvider.push(id);
-        } else {
-          queue.push(cur.concat(text));
-        }
-      }
-    }
-  }
-
-  // 유니크 + 순서 유지(화면 → provider)
-  const out = [];
-  const s = new Set();
-  for (const x of fromVisible.concat(fromProvider)) if (!s.has(x)) { s.add(x); out.push(x); }
-  return out;
-}
-
-/* ---------- Helpers ---------- */
-
-function generateNo(parentNode) {
-  if (!parentNode || parentNode.isRoot()) {
-    const roots = $.ui.fancytree.getTree("#treegrid").getRootNode().children || [];
-    return String(roots.length + 1);
-  } else {
-    const siblings = parentNode.children || [];
-    const baseNo = parentNode.data.no || parentNode.title;
-    return baseNo + "." + (siblings.length + 1);
-  }
-}
-
-function getCurrentTaskDataFromTree() {
-  const tree = $.ui.fancytree.getTree("#treegrid");
-  const urn = window.CURRENT_MODEL_URN;
-  function nodeToData(node) {
-    const obj = {
-      no: node.data.no,
-      selectOptions: node.data.selectOptions ?? ["시공", "가설", "철거"],
-      selectedOption: node.data.selectedOption ?? "시공",
-      title: node.data.title ?? node.title,
-      start: node.data.start,
-      end: node.data.end,
-      linkedObjects: (node.data.linkedObjects || []).map(o => ({
-        urn: o.urn ?? urn,
-        dbId: o.dbId,
-        elementId: o.elementId ?? null,
-        text: o.text ?? formatObjectLabel(o),
-      })),
-    };
-    if (node.hasChildren()) obj.children = node.children.map(nodeToData);
-    return obj;
-  }
-  return (tree.getRootNode().children || []).map(nodeToData);
-}
-
-/* ====== Test 버튼 관련 (기존) ====== */
-export function initTaskWbsButtons(viewer) {
-  let btn = document.getElementById('btn-test');
-  if (!btn || !viewer) return;
-
-  // 기존 리스너 중복 방지: 클론 교체
-  const clone = btn.cloneNode(true);
-  btn.parentNode.replaceChild(clone, btn);
-  btn = clone;
-
-  btn.addEventListener('click', async () => {
-    try {
-      await runTestAnimation(viewer);
-    } catch (e) {
-      console.error('[test-btn] error:', e);
-    }
+  tree.on("node.unchecked", (n)=>{
+    registerAutoCheck(pathOf(n), false);
+    if (n.hasChildren && n.hasChildren()) (n.children||[]).forEach(ch => { try{ ch.uncheck?.(); }catch{} });
   });
 }
 
-async function runTestAnimation(viewer) {
-  const sel = getSelectionSmart(viewer);
-  if (!sel || !sel.model || !sel.dbIds.length) {
-    console.warn('[test-btn] 먼저 객체를 선택하세요.');
-    return;
-  }
+function ensureRowShell(node){
+  const uid = node?._id ?? node?.id;
+  if (!uid) return null;
+  const li = document.querySelector(`#wbs-group-list li[data-uid="${uid}"]`);
+  if (!li) return null;
 
-  const { model, dbIds } = sel;
-  viewer.clearSelection();
+  let wrap = li.querySelector(':scope > .title-wrap');
+  if (wrap) return wrap;
 
-  const fragIds = collectFragIds(model, dbIds);
-  if (!fragIds.length) return;
+  wrap = document.createElement('div');
+  wrap.className = 'title-wrap';
 
-  const store = prepareFragStates(viewer, model, fragIds);
-
-  const MOVE_Z = 5.0; // m 기준
-  const D1 = 2000;    // 2초: 이동 + 페이드아웃
-  const HOLD = 1000;  // 1초 정지
-  const D2 = 2000;    // 2초: 복귀 + 페이드인
-
-  const THREE = window.THREE || Autodesk.Viewing.THREE;
-  const FALLBACK_COLOR = new THREE.Color(1.0, 0.45, 0.0); // #FF7300
-
-  // OUT
-  await animate(D1, (t) => {
-    const k = easeInOutSine(t);
-    const alphaOut = 1 - k;
-    const dz = lerp(0, MOVE_Z, k);
-
-    for (const f of store) {
-      f.proxy.position.z = f.startPos.z + dz;
-      f.proxy.updateAnimTransform();
-
-      if (f.cloneMat) {
-        f.cloneMat.opacity = alphaOut;
-        f.cloneMat.transparent = true;
-        f.cloneMat.needsUpdate = true;
-
-        if (f.cloneMat.color && f.originalColor) {
-          f.cloneMat.color.copy(f.originalColor).lerp(FALLBACK_COLOR, k);
-        }
-      }
-    }
-    viewer.impl.invalidate(true, true, true);
+  const moveSelectors = ['a.toggle', 'input[type="checkbox"]', '.title'];
+  const moving = [];
+  moveSelectors.forEach(sel => {
+    const el = li.querySelector(`:scope > ${sel}`);
+    if (el) moving.push(el);
   });
 
-  await delay(HOLD);
+  li.insertBefore(wrap, li.firstChild);
+  moving.forEach(el => wrap.appendChild(el));
 
-  // IN
-  await animate(D2, (t) => {
-    const k = easeInOutSine(t);
-    const alphaIn = k;
-    const dz = lerp(MOVE_Z, 0, k);
-
-    for (const f of store) {
-      f.proxy.position.z = f.startPos.z + dz;
-      f.proxy.updateAnimTransform();
-
-      if (f.cloneMat) {
-        f.cloneMat.opacity = alphaIn;
-        f.cloneMat.transparent = true;
-        f.cloneMat.needsUpdate = true;
-
-        if (f.cloneMat.color && f.originalColor) {
-          f.cloneMat.color.copy(FALLBACK_COLOR).lerp(f.originalColor, k);
-        }
-      }
-    }
-    viewer.impl.invalidate(true, true, true);
-  });
-
-  // 복구
-  restoreFragStates(viewer, store);
+  return wrap;
 }
-
-// ================= Helpers for Test =================
-
-function getSelectionSmart(viewer) {
-  const agg = viewer.getAggregateSelection?.();
-  if (agg && agg.length > 0) {
-    const a = agg[0];
-    const ids = (a.selection || []).slice();
-    return ids.length ? { model: a.model, dbIds: ids, aggregate: true } : null;
-  }
-  const ids = viewer.getSelection?.() || [];
-  return (ids && ids.length) ? { model: viewer.model, dbIds: ids, aggregate: false } : null;
-}
-
-function collectFragIds(model, dbIds) {
-  const it = model.getData().instanceTree;
-  const fragIds = [];
-  dbIds.forEach((dbId) => {
-    it.enumNodeFragments(dbId, (fragId) => fragIds.push(fragId), true);
-  });
-  return fragIds;
-}
-
-function getFragList(viewer, model) {
-  if (model?.getFragmentList) return model.getFragmentList();
-  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();
-  return null;
-}
-
-function prepareFragStates(viewer, model, fragIds) {
-  const THREE = window.THREE || Autodesk.Viewing.THREE;
-  const matman = viewer.impl.matman ? viewer.impl.matman() : null;
-  const fragList = getFragList(viewer, model);
-  const store = [];
-
-  const fragToDb = {};
-  if (fragList) {
-    fragIds.forEach((fragId) => {
-      try { fragToDb[fragId] = fragList.getDbId(fragId); } catch (_) {}
-    });
-  }
-
-  for (const fragId of fragIds) {
-    const proxy = viewer.impl.getFragmentProxy(model, fragId);
-    proxy.getAnimTransform();
-    const startPos = new THREE.Vector3(proxy.position.x, proxy.position.y, proxy.position.z);
-
-    const rp = viewer.impl.getRenderProxy(model, fragId);
-    const originalMat = rp?.material || null;
-
-    let originalColor = null;
-    if (originalMat && originalMat.color) originalColor = originalMat.color.clone();
-
-    let cloneMat = null;
-    if (originalMat) {
-      cloneMat = (matman && matman.cloneMaterial) ? matman.cloneMaterial(originalMat) : originalMat.clone();
-      cloneMat.transparent = true;
-      cloneMat.opacity = 1.0;
-      cloneMat.depthWrite = false;
-      cloneMat.side = originalMat.side;
-      cloneMat.needsUpdate = true;
-
-      if (viewer.impl.setMaterial) {
-        viewer.impl.setMaterial(model, fragId, cloneMat);
-      } else if (fragList?.setMaterial) {
-        fragList.setMaterial(fragId, cloneMat);
-      } else if (viewer.impl.setFragmentMaterial) {
-        viewer.impl.setFragmentMaterial(fragId, cloneMat);
-      }
-    }
-
-    store.push({
-      model, fragId,
-      dbId: fragToDb[fragId],
-      proxy, startPos,
-      renderProxy: rp,
-      originalMat, cloneMat,
-      originalColor
-    });
-  }
-  viewer.impl.invalidate(true, true, true);
-  return store;
-}
-
-function restoreFragStates(viewer, store) {
-  if (!store.length) return;
-  const model = store[0].model;
-  const fragList = getFragList(viewer, model);
-
-  for (const f of store) {
-    f.proxy.position.copy(f.startPos);
-    f.proxy.updateAnimTransform();
-
-    if (f.originalMat) {
-      if (viewer.impl.setMaterial) {
-        viewer.impl.setMaterial(f.model, f.fragId, f.originalMat);
-      } else if (fragList?.setMaterial) {
-        fragList.setMaterial(f.fragId, f.originalMat);
-      } else if (viewer.impl.setFragmentMaterial) {
-        viewer.impl.setFragmentMaterial(f.fragId, f.originalMat);
-      }
-    }
-    if (f.cloneMat?.dispose) f.cloneMat.dispose();
-  }
-
-  viewer.impl.invalidate(true, true, true);
-}
-
-function lerp(a, b, t) { return a + (b - a) * t; }
-function delay(ms) { return new Promise((res) => setTimeout(res, ms)); }
-
-function animate(duration, step) {
-  return new Promise((resolve) => {
-    const start = performance.now();
-    function frame(now) {
-      const t = Math.min(1, (now - start) / duration);
-      step(t);
-      if (t < 1) requestAnimationFrame(frame);
-      else resolve();
-    }
-    requestAnimationFrame(frame);
-  });
-}
-
-function easeInOutSine(t){ return 0.5 - 0.5 * Math.cos(Math.PI * t); }

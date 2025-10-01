@@ -1,68 +1,162 @@
-/* ---------- FancyTree 체크 수집 ---------- */
-async function collectFromFancyTree(){
-  const tree = $.ui.fancytree.getTree("#wbs-group-list") || $.ui.fancytree.getTree("#treegrid-wbs") || window.wbsTree;
-  const provider = window.__WBS_PROVIDER;
-  const pathByDbId = new Map();
-  const orderedDbIds = [];
-  const seen = new Set();
+// ===== WBS 디버그(1): 어떤 트리(들)가 존재하는지 스캔 =====
+(function(){
+  const out = {};
+  out.hasFancytree = !!(window.$ && $.ui && $.ui.fancytree);
+  out.hasInspireTree = !!window.InspireTree;
 
-  if (!tree) return { orderedDbIds, pathByDbId };
+  // DOM 내 fancytree 컨테이너들 수집
+  const $containers = $('.fancytree-container');
+  out.ftContainerCount = $containers.length;
+  out.ftContainerIds = $containers.map((i,el)=>el.id || ('#'+(el.className||'').split(' ').join('.'))).get();
 
-  // ✅ 정확히 체크된 노드만 수집
-  const checkedNodes = tree.getSelectedNodes(true) || [];  // true → includePartsel=false
-  if (!checkedNodes.length) return { orderedDbIds, pathByDbId };
+  // 각 컨테이너별 트리 인스턴스, 옵션, 선택 수량 덤프
+  out.trees = $containers.map((i,el)=>$.ui.fancytree.getTree(el)).get().filter(Boolean);
+  out.treesInfo = out.trees.map(t => ({
+    id: t.$div.attr('id'),
+    selectMode: t.options.selectMode,
+    checkbox: !!t.options.checkbox,
+    extensions: t.options.extensions,
+    selectedCount: (t.getSelectedNodes && t.getSelectedNodes().length) || 0
+  }));
 
-  // 문서 순서 정렬
-  checkedNodes.sort((a,b) => {
-    const ia = a.getIndexHier();
-    const ib = b.getIndexHier();
-    return ia.localeCompare(ib, undefined, { numeric:true });
+  // 혹시 우리가 쓰는 예상 ID들에도 트리가 있는지 같이 체크
+  out.treegridWbs = $.ui.fancytree.getTree("#treegrid-wbs") ? true : false;
+  out.wbsGroupList = $.ui.fancytree.getTree("#wbs-group-list") ? true : false;
+
+  console.table(out.treesInfo);
+  console.log(out);
+  return out;
+})();
+
+
+
+
+// ===== WBS 디버그(2): select / click 이벤트 로그 =====
+(function(){
+  $('.fancytree-container')
+    .off('.dbgft')
+    .on('fancytreeinit.dbgft fancytreeclick.dbgft fancytreeactivate.dbgft fancytreeselect.dbgft', function(e, data){
+      const t = $.ui.fancytree.getTree(this);
+      console.log('[FT-EVT]', e.type, 'node=', data?.node?.title, 'selected=', data?.node?.selected, 'targetType=', data?.targetType, 'treeId=', t?.$div?.attr('id'));
+    });
+
+  console.log('>> 체크박스를 몇 개 클릭해 보세요. 위 로그에 fancytreeselect 가 찍히는지 확인!');
+})();
+
+
+
+
+// ===== WBS 응급 패치: 체크박스 클릭 → node.setSelected 토글 =====
+(function(){
+  $(document).off('click.patchft', '.fancytree-checkbox').on('click.patchft', '.fancytree-checkbox', function(e){
+    const node = $.ui.fancytree.getNode(this);
+    if (!node) return;
+    node.setSelected(!node.isSelected());
+    e.stopPropagation();
+    console.log('[FT-PATCH] toggled:', node.title, '=>', node.isSelected());
   });
+  console.log('[FT-PATCH] fancytree-checkbox click patch installed');
+})();
 
-  // 각 노드별 경로
-  function pathOfNode(n) {
-    const out = [];
-    let cur = n;
-    while (cur && !cur.isRoot()) {
-      out.unshift(cur.title || cur.text || cur.key);
-      cur = cur.parent;
+
+
+
+// ===== WBS 디버그(3): 지금 선택된 노드 프린트(부분선택 제외) =====
+(function(){
+  const trees = $('.fancytree-container').map((i,el)=>$.ui.fancytree.getTree(el)).get().filter(Boolean);
+  trees.forEach((t, idx) => {
+    const nodes = (t.getSelectedNodes ? t.getSelectedNodes(false) : []).filter(n => !n.partsel);
+    console.log(`[FT-SELECT] tree#${idx} (${t.$div.attr('id')}):`, nodes.map(n => ({title:n.title, idx:n.getIndexHier(), partsel:n.partsel})));
+  });
+})();
+
+
+
+
+
+// ===== 강력 폴백 수집기: DOM에서 체크된 것 찾고 node로 역매핑 =====
+async function __collectCheckedNodesFallback(){
+  const arr = [];
+  document.querySelectorAll('.fancytree-node').forEach(spanNode => {
+    const cb = spanNode.querySelector(':scope > .fancytree-checkbox[aria-checked="true"], :scope > .fancytree-checkbox.fancytree-selected');
+    if (!cb) return;
+    const node = $.ui.fancytree.getNode(spanNode);
+    if (node && node.setSelected){ // 선택 상태 보정
+      if (!node.isSelected()) node.setSelected(true);
+      if (!node.partsel) arr.push(node);
     }
-    return out;
-  }
+  });
+  console.log('[FT-FALLBACK] checked nodes =', arr.map(n => n.title));
+  return arr;
+}
 
-  // BFS로 자손 leaf dbId 수집
-  for (const node of checkedNodes) {
-    const path = pathOfNode(node);
-    const ids = await bfsCollectDescendantDbIds(provider, path, node);
-    for (const id of ids) {
-      if (!seen.has(id)) {
-        seen.add(id);
-        orderedDbIds.push(id);
-        pathByDbId.set(id, path.slice());
+
+
+
+// btn-link 핸들러 안에서…
+let checkedNodes = [];
+const t = $('.fancytree-container').map((i,el)=>$.ui.fancytree.getTree(el)).get().filter(Boolean)[0];
+if (t) {
+  checkedNodes = (t.getSelectedNodes ? t.getSelectedNodes(false) : []).filter(n => !n.partsel);
+}
+if (!checkedNodes.length){
+  checkedNodes = await __collectCheckedNodesFallback(); // DOM 폴백
+}
+console.log('[LINK] using checkedNodes:', checkedNodes.map(n=>n.title));
+
+
+
+
+function pathOfNodeFT(n){
+  const out=[]; let cur=n; 
+  while(cur && !cur.isRoot()){
+    out.unshift(cur.title || cur.key || cur.data?.text || '');
+    cur = cur.parent;
+  }
+  return out;
+}
+
+// provider가 있을 때 (확장 없이) 경로 기준 BFS
+async function bfsCollectDescendantDbIds(provider, pathArr, visibleNode){
+  const fromVisible = [];
+  try {
+    visibleNode.visit(n=>{
+      if (n !== visibleNode && !(n.hasChildren && n.hasChildren())) {
+        const id = Number(n.data?.dbId ?? n.dbId);
+        if (Number.isFinite(id)) fromVisible.push(id);
+      }
+    });
+  } catch(_){}
+
+  const out = [...fromVisible];
+  const seen = new Set(out);
+
+  if (provider?.childrenByPath){
+    const q = [ pathArr.slice() ];
+    const keyOf = a => a.join('\u0001');
+    const seenKey = new Set();
+    while(q.length){
+      const cur = q.shift();
+      const k = keyOf(cur);
+      if (seenKey.has(k)) continue;
+      seenKey.add(k);
+
+      let children = [];
+      try { children = await provider.childrenByPath(cur); } catch(_) { children = []; }
+      for (const ch of (children || [])){
+        const nm = String(ch.text || ch.name || '').trim();
+        const id = Number(ch.dbId ?? ch.data?.dbId);
+        if (Number.isFinite(id)){
+          if (!seen.has(id)){ seen.add(id); out.push(id); }
+        } else if (nm) {
+          q.push(cur.concat(nm));
+        }
       }
     }
   }
-
-  return { orderedDbIds, pathByDbId };
+  return out;
 }
 
 
-
-// [데이터연결] 내부에서
-let orderedDbIds = [], pathByDbId = new Map();
-if (hasWbsStore) {
-  try {
-    const res = await WbsStore.getOrderedDbIdsFromCheckedExact();
-    orderedDbIds = res?.orderedDbIds || [];
-    pathByDbId = res?.pathByDbId || new Map();
-  } catch(_) {}
-}
-
-// WbsStore가 없거나 비었을 경우 → FancyTree 수집
-if (!orderedDbIds.length) {
-  const fb = await collectFromFancyTree();
-  orderedDbIds = fb.orderedDbIds;
-  pathByDbId = fb.pathByDbId;
-}
 
 

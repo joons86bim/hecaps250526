@@ -1,73 +1,16 @@
-// /wwwroot/js/task-wbs/4d/4d-simulation.js
-// 공개 API:
-//   apply4DAtMs(viewer, timeMs, config)
-//   apply4DAt(viewer, dateISO, config)  // 호환용
-//   reset4D(viewer)
-//
-// config 기본값:
-// {
-//   zOffset: 3.0,              // 모델 단위에 맞춰 조정
-//   useDateDuration: true,     // true: 시작~끝 날짜 비율, false: 고정시간(압축)
-//   fixedDurationSec: 2.0,     // useDateDuration=false일 때 1개 작업 진행시간(초)
-//   speedDaysPerSec: 1.0,      // 재생 속도(참조용)
-//   hideEdgeThreshold: 0.05    // 알파가 이 값 이하이면 완전 숨김(엣지 제거)
-// }
-
-let _globalState = new Map(); // key: model.id
-
-export function reset4D(viewer) {
-  const model = (viewer.getVisibleModels?.()[0]) || viewer.model;
-  if (!model) return;
-  const st = _globalState.get(model.id);
-  if (!st) return;
-
-  const { store } = st;
-  const fragList = _getFragList(viewer, model);
-
-  for (const f of store.items) {
-    try {
-      f.proxy.position.copy(f.startPos);
-      f.proxy.updateAnimTransform();
-
-      if (f.originalMat) {
-        if (viewer.impl.setMaterial) viewer.impl.setMaterial(model, f.fragId, f.originalMat);
-        else if (fragList?.setMaterial) fragList.setMaterial(f.fragId, f.originalMat);
-        else if (viewer.impl.setFragmentMaterial) viewer.impl.setFragmentMaterial(f.fragId, f.originalMat);
-      }
-      if (f.cloneMat?.dispose) f.cloneMat.dispose();
-      f.cloneMat = null;
-    } catch(_) {}
-  }
-  // 가시성 / 테마 초기화
-  try { viewer.impl.visibilityManager.setAllOn(); } catch(_) {}
-  try { viewer.clearThemingColors?.(model); } catch(_) {}
-  try { viewer.clearThemingColors?.(); } catch(_) {}
-  viewer.impl.invalidate?.(true, true, true);
-
-  _globalState.delete(model.id);
-}
-
-export function apply4DAt(viewer, dateISO, config = {}) {
-  if (!dateISO) return;
-  const ms = Date.parse(String(dateISO));
-  if (!Number.isFinite(ms)) return;
-  apply4DAtMs(viewer, ms, config);
-}
-
 export function apply4DAtMs(viewer, nowMs, config = {}) {
   const cfg = {
     zOffset: 3.0,
     useDateDuration: true,
     fixedDurationSec: 2.0,
     speedDaysPerSec: 1.0,
-    hideEdgeThreshold: 0.05,
+    hideEdgeThreshold: 0.05, // (예비) 더 이상 쓰지 않지만 남겨둠
     ...config,
   };
   if (!viewer || !Number.isFinite(nowMs)) return;
   const model = (viewer.getVisibleModels?.()[0]) || viewer.model;
   if (!model) return;
 
-  // 초기화/캐시
   let state = _globalState.get(model.id);
   if (!state) {
     const schedule = _buildSchedule(model);
@@ -80,247 +23,103 @@ export function apply4DAtMs(viewer, nowMs, config = {}) {
 
   const vm = viewer.impl.visibilityManager;
 
-  // 컬러 정의(정책과 동일)
+  // 정책과 동일 색 (알파는 여기선 고정: 진행중=1, 그 외=0)
   const V4 = (r,g,b,a=1) => (window.THREE ? new window.THREE.Vector4(r,g,b,a) : { r,g,b,a });
   const C_GREEN = V4(0.16, 0.57, 0.20, 1);
   const C_BLUE  = V4(0.12, 0.45, 0.90, 1);
   const C_RED   = V4(0.95, 0.27, 0.23, 1);
-  const C_ZERO  = V4(0,0,0,0); // 테마 제거용(알파0)
+  const C_ZERO  = V4(0,0,0,0);
 
-  // dbId 단위로 "현재 상태"를 계산해서 적용
   for (const dbId of schedule.allDbIds) {
     const tl = schedule.byDb.get(dbId) || { installs: [], demolitions: [] };
-    const inst = tl.installs;     // {cat:'C'|'T', startMs, endMs}
-    const demo = tl.demolitions;  // {startMs, endMs}
+    const inst = tl.installs;
+    const demo = tl.demolitions;
 
-    // 우선순위: 1) 철거 진행 중, 2) 가설/시공 진행 중, 3) 그 외(사전/사이/사후)
-    const activeInstall = _findActive(inst, nowMs);
-    const activeDemo    = _findActive(demo, nowMs);
-
-    // 기본값
-    let alpha = 1.0;
-    let dz = 0.0;
-    let theme = C_ZERO;
-
-    // 보조값
-    const zOff = cfg.zOffset;
     const firstInstStart = _minStart(inst);
+    const lastInstEnd    = _maxEnd(inst);
     const firstDemoStart = _minStart(demo);
     const lastDemoEnd    = _maxEnd(demo);
+
+    const activeInstall  = _findActive(inst, nowMs);
+    const activeDemo     = _findActive(demo, nowMs);
+
+    let alpha = 1.0, dz = 0.0, theme = C_ZERO;
+    let forceNodeOff = false;
 
     if (activeDemo) {
       // 철거 중: 빨강, 0→zOff, 1→0
       const p = _progress(nowMs, activeDemo.startMs, activeDemo.endMs, cfg);
       alpha = 1 - p;
-      dz = _lerp(0, zOff, p);
+      dz = _lerp(0, cfg.zOffset, p);
       theme = C_RED;
     } else if (activeInstall) {
       // 가설/시공 중: 파랑/초록, zOff→0, 0→1
       const p = _progress(nowMs, activeInstall.startMs, activeInstall.endMs, cfg);
       alpha = p;
-      dz = _lerp(zOff, 0, p);
+      dz = _lerp(cfg.zOffset, 0, p);
       theme = (activeInstall.cat === 'T') ? C_BLUE : C_GREEN;
-    } else if (inst.length > 0) {
-      // 설치가 있는 객체
-      if (firstInstStart != null && nowMs < firstInstStart) {
-        // 설치 전: 안 보임(+zOff)
-        alpha = 0;
-        dz = zOff;
-        theme = C_ZERO;
-      } else {
-        // 설치는 끝났고 철거는 아직 전/중/후?
-        if (demo.length === 0) {
-          // 철거가 없다: 설치 완료 상태 유지(원래색)
-          alpha = 1; dz = 0; theme = C_ZERO;
-        } else if (firstDemoStart != null && nowMs < firstDemoStart) {
-          // 철거 전: 원래색 유지
-          alpha = 1; dz = 0; theme = C_ZERO;
-        } else if (lastDemoEnd != null && nowMs > lastDemoEnd) {
-          // 철거 이후: 숨김(+zOff)
-          alpha = 0; dz = zOff; theme = C_ZERO;
-        } else {
-          // (이 구간은 activeDemo가 true였어야 하지만, 안전망)
-          alpha = 1; dz = 0; theme = C_ZERO;
-        }
-      }
-    } else if (demo.length > 0) {
-      // 설치 없이 철거만 있는(기존물) 객체
-      if (firstDemoStart != null && nowMs < firstDemoStart) {
-        // 철거 전: 기존물 보임(원래색)
-        alpha = 1; dz = 0; theme = C_ZERO;
-      } else if (lastDemoEnd != null && nowMs > lastDemoEnd) {
-        // 철거 이후: 숨김(+zOff)
-        alpha = 0; dz = zOff; theme = C_ZERO;
-      } else {
-        // 진행 중은 위 activeDemo에서 처리됨
-        alpha = 1; dz = 0; theme = C_ZERO;
-      }
+    } else if (firstInstStart != null && nowMs < firstInstStart) {
+      // 설치(가설/시공) 시작 전: 완전 숨김(엣지 포함)
+      alpha = 0;
+      dz = cfg.zOffset;
+      theme = C_ZERO;
+      forceNodeOff = true;
+    } else if (lastDemoEnd != null && nowMs > lastDemoEnd) {
+      // 철거 완료 후: 완전 숨김(엣지 포함)
+      alpha = 0;
+      dz = cfg.zOffset;
+      theme = C_ZERO;
+      forceNodeOff = true;
     } else {
-      // 작업 정보가 전혀 없으면 원래 상태 유지
-      alpha = 1; dz = 0; theme = C_ZERO;
+      // 그 외(설치 끝~철거 전, 또는 설치만 있고 철거 없음, 또는 철거만 있고 아직 전)
+      alpha = 1;
+      dz = 0;
+      theme = C_ZERO;
     }
 
-    // 적용: 프래그먼트 이동/투명도
+    // 프래그먼트 적용
     const frags = store.fragsByDb.get(dbId);
     if (frags) {
       for (const f of frags) {
         try {
           f.proxy.position.z = f.startPos.z + dz;
           f.proxy.updateAnimTransform();
-
-          if (f.cloneMat) {
-            f.cloneMat.opacity = alpha;
-            f.cloneMat.transparent = true;
-            f.cloneMat.depthWrite = false;
-            f.cloneMat.needsUpdate = true;
-          }
+          _applyFragMatState(f, alpha); // ★ 불투명 시 depthWrite=true, transparent=false
         } catch(_) {}
       }
     }
 
-    // 엣지 처리: 충분히 투명하면 완전 숨김(라인패스까지 제거)
+    // 가시성: 특정 구간은 엣지까지 숨김
     try {
-      if (alpha <= cfg.hideEdgeThreshold) vm.setNodeOff(dbId);
+      if (forceNodeOff) vm.setNodeOff(dbId);
       else vm.setNodeOn(dbId);
     } catch(_) {}
 
-    // 테마: 진행 중일 때만 색 적용, 그 외엔 제거(알파0)
+    // 테마: 진행 중일 때만 색을 입힘, 그 외엔 제거
     try {
       const isColorPhase = !!activeInstall || !!activeDemo;
-      const col = isColorPhase ? theme : C_ZERO;
-      viewer.setThemingColor(dbId, col, model);
+      viewer.setThemingColor(dbId, isColorPhase ? theme : C_ZERO, model);
     } catch(_) {}
   }
 
   viewer.impl.invalidate?.(true, true, true);
 }
 
-/* ------------------ 스케줄/스토어 구성 ------------------ */
-
-// schedule: { items, byDb: Map<dbId, { installs:[{cat,startMs,endMs}], demolitions:[{startMs,endMs}] }>, allDbIds:Set }
-function _buildSchedule(model) {
-  const urnCur = String(window.CURRENT_MODEL_URN || "");
-  const tree = window.taskTree;
-
-  const items = [];
-  const byDb = new Map();
-  const allDbIds = new Set();
-
-  const normCat = (v) => {
-    const s = String(v || "").trim();
-    if (s === "C" || s.startsWith("시공")) return "C";
-    if (s === "T" || s.startsWith("가설")) return "T";
-    if (s === "D" || s.startsWith("철거")) return "D";
-    return "";
-  };
-  const isISO = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s||""));
-
-  tree?.getRootNode?.()?.visit((n) => {
-    const d = n.data || {};
-    const cat = normCat(d.selectedOption);
-    if (!cat) return;
-    if (!isISO(d.start) || !isISO(d.end)) return;
-
-    const startMs = Date.parse(d.start + "T00:00:00Z");
-    const endMs   = Date.parse(d.end   + "T23:59:59Z");
-
-    const objs = Array.isArray(d.linkedObjects) ? d.linkedObjects : [];
-    for (const o of objs) {
-      const urn = String(o.urn || urnCur);
-      if (urnCur && urn !== urnCur) continue;
-      const dbId = Number(o.dbId);
-      if (!Number.isFinite(dbId)) continue;
-
-      items.push({ dbId, cat, startMs, endMs });
-      allDbIds.add(dbId);
-
-      let tl = byDb.get(dbId);
-      if (!tl) { tl = { installs: [], demolitions: [] }; byDb.set(dbId, tl); }
-      if (cat === 'D') tl.demolitions.push({ startMs, endMs });
-      else tl.installs.push({ cat, startMs, endMs });
-    }
-  });
-
-  return { items, byDb, allDbIds };
-}
-
-function _prepareStore(viewer, model, schedule) {
-  const THREE = window.THREE || Autodesk.Viewing.THREE;
-  const matman = viewer.impl.matman ? viewer.impl.matman() : null;
-  const fragList = _getFragList(viewer, model);
-  const it = model.getData().instanceTree;
-
-  const fragsByDb = new Map();
-  const items = [];
-  const fragIdToDb = new Map();
-
-  // dbId → fragId 수집
-  for (const dbId of schedule.allDbIds) {
-    const list = [];
-    it.enumNodeFragments(dbId, (fragId) => {
-      list.push(fragId);
-      fragIdToDb.set(fragId, dbId);
-    }, true);
-    if (list.length) fragsByDb.set(dbId, []);
-  }
-
-  // 각 frag에 프록시/머티리얼 클론
-  for (const [fragId, dbId] of fragIdToDb.entries()) {
-    const proxy = viewer.impl.getFragmentProxy(model, fragId);
-    proxy.getAnimTransform();
-    const startPos = new THREE.Vector3(proxy.position.x, proxy.position.y, proxy.position.z);
-
-    const rp = viewer.impl.getRenderProxy(model, fragId);
-    const originalMat = rp?.material || null;
-
-    let cloneMat = null;
-    if (originalMat) {
-      cloneMat = (matman?.cloneMaterial) ? matman.cloneMaterial(originalMat) : originalMat.clone();
-      cloneMat.transparent = true;
-      cloneMat.opacity = originalMat.opacity ?? 1.0;
-      cloneMat.depthWrite = false;
-      cloneMat.side = originalMat.side;
-      cloneMat.needsUpdate = true;
-
-      if (viewer.impl.setMaterial) viewer.impl.setMaterial(model, fragId, cloneMat);
-      else if (fragList?.setMaterial) fragList.setMaterial(fragId, cloneMat);
-      else if (viewer.impl.setFragmentMaterial) viewer.impl.setFragmentMaterial(fragId, cloneMat);
-    }
-
-    const f = { fragId, proxy, startPos, originalMat, cloneMat };
-    items.push(f);
-    const arr = fragsByDb.get(dbId);
-    if (arr) arr.push(f);
-  }
-
-  viewer.impl.invalidate?.(true, true, true);
-  return { items, fragsByDb };
-}
-
-/* ------------------ 유틸 ------------------ */
-
-function _getFragList(viewer, model) {
-  if (model?.getFragmentList) return model.getFragmentList();
-  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();
-  return null;
-}
-
-function _findActive(segs, t){
-  for (const s of segs) { if (t >= s.startMs && t <= s.endMs) return s; }
-  return null;
-}
-function _minStart(segs){
-  if (!segs.length) return null;
-  return segs.reduce((a,s)=> a==null || s.startMs < a ? s.startMs : a, null);
-}
+/* 도우미: 구간 최대 종료 */
 function _maxEnd(segs){
   if (!segs.length) return null;
   return segs.reduce((a,s)=> a==null || s.endMs > a ? s.endMs : a, null);
 }
-function _progress(now, startMs, endMs, cfg){
-  const endEff = cfg.useDateDuration ? endMs : (startMs + cfg.fixedDurationSec * 1000 * cfg.speedDaysPerSec);
-  const denom = Math.max(1, endEff - startMs);
-  const p = (now - startMs) / denom;
-  return p <= 0 ? 0 : (p >= 1 ? 1 : p);
+
+/* 도우미: 머티리얼 상태 적용
+   - alpha>=0.999 : 완전 불투명(transparent=false, depthWrite=true) → 뒤 물체가 비치지 않음
+   - alpha<0.999  : 투명 페이드(transparent=true, depthWrite=false)
+*/
+function _applyFragMatState(f, alpha){
+  if (!f.cloneMat) return;
+  const opaque = alpha >= 0.999;
+  f.cloneMat.opacity = alpha;
+  f.cloneMat.transparent = !opaque;
+  f.cloneMat.depthWrite = opaque;
+  f.cloneMat.needsUpdate = true;
 }
-function _lerp(a,b,t){ return a + (b - a) * (t < 0 ? 0 : (t > 1 ? 1 : t)); }

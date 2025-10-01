@@ -10,11 +10,11 @@ import {
   initWbsStore,
   setProvider as setWbsProvider,
   refreshWbsStore,
-  resetWbsStore,
-  getOrderedDbIdsFromCheckedExact
+  getOrderedDbIdsFromCheckedExact,
+  pathOfNode
 } from "./core/wbs-store.js";
 
-// 상태 반영을 위해 추가:
+// 상태 반영 알림
 function notifyWbsStatusRefresh(){
   try { window.__WBS_MARK_TASKS_CHANGED?.(); } catch {}
 }
@@ -40,7 +40,7 @@ export function initTaskListButtons() {
 
   // ✅ WBS 저장소 초기화(트리/프로바이더)
   try { initWbsStore({ tree: window.wbsTree, provider: window.__WBS_PROVIDER }); } catch(_) {}
-  // 프로바이더가 나중에 준비될 수 있으니 훅 제공(선택)
+  // 프로바이더가 나중에 준비될 수도 있으니 훅 제공(선택)
   window.__SET_WBS_PROVIDER__ = (p) => { try { setWbsProvider(p); refreshWbsStore(); } catch(_) {} };
 
   function withWbsGate(fn){
@@ -159,7 +159,7 @@ export function initTaskListButtons() {
     }
   });
 
-  // [데이터연결] — 체크박스(V) 기준, 확장 없이 후손 leaf 수집(WBS 순서 보장)
+  // [데이터연결] — 체크박스(V) 기준, 확장 없이 후손 leaf 수집(WBS 순서 보장) + 폴백
   $("#btn-link").off("click").on("click", async function () {
     const taskTree = $.ui.fancytree.getTree("#treegrid");
     const selectedTaskNode = taskTree.getActiveNode();
@@ -169,15 +169,29 @@ export function initTaskListButtons() {
       return;
     }
 
+    // 체크 상태 최신화
     try { refreshWbsStore(); } catch(_) {}
 
     const urn = window.CURRENT_MODEL_URN;
     const catSel = normalizeTaskCategory(selectedTaskNode.data?.selectedOption); // "C"|"T"|"D"
     const catLabel = catSel === "C" ? "시공" : (catSel === "T" ? "가설" : "철거");
 
-    // 정확히 체크된(V) 노드들로부터 WBS 문서 순서대로 dbId 수집(필요 시 provider lazy 확장)
-    const { orderedDbIds, pathByDbId } = await getOrderedDbIdsFromCheckedExact();
-    if (!orderedDbIds.length) return alert("WBS에서 '체크(V)'된 항목이 없습니다.");
+    // 1차: 저장소 기반(정확히 체크된 V) → 실패 시 2차 폴백
+    let orderedDbIds = [], pathByDbId = new Map();
+    try {
+      const res = await getOrderedDbIdsFromCheckedExact();
+      orderedDbIds = res?.orderedDbIds || [];
+      pathByDbId = res?.pathByDbId || new Map();
+    } catch(_) {}
+
+    if (!orderedDbIds.length) {
+      // 🔁 폴백: UI 트리에서 체크된 노드 수집 → provider BFS로 자손 leaf 수집
+      const fb = await collectDbIdsFromUITreeFallback();
+      orderedDbIds = fb.orderedDbIds;
+      pathByDbId = fb.pathByDbId;
+    }
+
+    if (!orderedDbIds.length) return alert("WBS에서 '체크(V)'된 항목을 찾지 못했습니다.");
 
     // ElementId 프리페치
     try { await ensureElementIdIndexForDbIds(orderedDbIds); } catch {}
@@ -350,6 +364,104 @@ export function initTaskListButtons() {
   $("#btn-test").off("click").on("click", async function() {
     initTaskWbsButtons(window.viewer);
   });
+}
+
+/* ---------- Fallback: UI 트리에서 직접 체크 수집 + provider BFS ---------- */
+async function collectDbIdsFromUITreeFallback(){
+  const tree = window.wbsTree;
+  const provider = window.__WBS_PROVIDER;
+  const pathByDbId = new Map();
+  const orderedDbIds = [];
+  const seen = new Set();
+
+  if (!tree) return { orderedDbIds, pathByDbId };
+
+  // 체크 노드 수집(정확히 V: partsel 제외)
+  let nodes = [];
+  if (typeof tree.getSelectedNodes === "function") {
+    nodes = tree.getSelectedNodes(true) || []; // includeHidden=true
+  } else if (typeof tree.checked === "function") {
+    nodes = tree.checked() || [];
+  } else {
+    // 전수 순회
+    const root = tree.getRootNode?.();
+    if (root?.visit) {
+      root.visit((n) => {
+        const sel = typeof n.isSelected === "function" ? n.isSelected() : !!(n.selected || n.data?.selected || n.data?.checked);
+        const part = typeof n.isPartsel === "function" ? n.isPartsel() : !!n.partsel;
+        if (sel && !part) nodes.push(n);
+      });
+    }
+  }
+
+  // 문서 순서 정렬
+  nodes.sort((a,b) => {
+    const ia = (typeof a.getIndexHier === "function") ? a.getIndexHier() : (a.key || a.title || a.text || "");
+    const ib = (typeof b.getIndexHier === "function") ? b.getIndexHier() : (b.key || b.title || b.text || "");
+    return String(ia).localeCompare(String(ib), undefined, { numeric:true });
+  });
+
+  // 각 노드 경로의 모든 자손 leaf dbId 수집(BFS, 트리 미확장도 커버)
+  for (const node of nodes) {
+    const p = pathOfNode(node);
+    const ids = await bfsCollectDescendantDbIdsByPath(provider, p, node);
+    for (const id of ids) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        orderedDbIds.push(id);
+        pathByDbId.set(id, p.slice());
+      }
+    }
+  }
+  return { orderedDbIds, pathByDbId };
+}
+
+async function bfsCollectDescendantDbIdsByPath(provider, pathArr, visibleNode){
+  // 1) 우선 화면에 보이는 서브트리에서 leaf dbId 수집
+  const fromVisible = [];
+  if (visibleNode?.visit) {
+    visibleNode.visit((n) => {
+      if (n !== visibleNode && !(n.hasChildren && n.hasChildren())) {
+        const id = Number(n.data?.dbId ?? n.dbId);
+        if (Number.isFinite(id)) fromVisible.push(id);
+      }
+    });
+  }
+
+  // 2) provider가 있으면 미표시 자손까지 BFS로 보강
+  const fromProvider = [];
+  if (provider && typeof provider.childrenByPath === "function") {
+    const queue = [ pathArr.slice() ];
+    const seenKey = new Set();
+    const SEP = "\u0001";
+
+    while (queue.length) {
+      const cur = queue.shift();
+      const key = cur.join(SEP);
+      if (seenKey.has(key)) continue;
+      seenKey.add(key);
+
+      let children = [];
+      try { children = await provider.childrenByPath(cur); } catch(_) { children = []; }
+
+      for (const ch of (children || [])) {
+        const text = String(ch.text || ch.name || "").trim();
+        if (!text) continue;
+        const id = Number(ch.dbId ?? ch.data?.dbId);
+        if (Number.isFinite(id)) {
+          fromProvider.push(id);
+        } else {
+          queue.push(cur.concat(text));
+        }
+      }
+    }
+  }
+
+  // 유니크 + 순서 유지(화면 → provider)
+  const out = [];
+  const s = new Set();
+  for (const x of fromVisible.concat(fromProvider)) if (!s.has(x)) { s.add(x); out.push(x); }
+  return out;
 }
 
 /* ---------- Helpers ---------- */

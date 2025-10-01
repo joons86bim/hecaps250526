@@ -18,26 +18,6 @@ WebGLRenderer.js:29 THREE.WebGLRenderer 71
 WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
 WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
 (index):1 Autofocus processing was blocked because a document already has a focused element.
-GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
-GeometryList.js:345 Number of meshes: 23
-GeometryList.js:346 Num Meshes on GPU: 26
-GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:548 [WBS] roots: 3
-main.js:148 [persistTasksSnapshot] saved. count = 3
-main.js:276 [FA] fallback map ready (keys = 24 )
-main.js:310 [FA] getCounts bridged
-main.js:576 [STEP 5] WBS fancytree init OK
-main.js:582 [STEP 6] panel2 resizer bound
-main.js:583 [STEP 1] Task panel OK
-main.js:584 [STEP 2] panel2-ready dispatched
-gantt-view.js:171 [gantt-view] google loaded
-CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
 GeometryList.js:344 Total geometry size: 22.579627990722656 MB
 GeometryList.js:345 Number of meshes: 6614
 GeometryList.js:346 Num Meshes on GPU: 6647
@@ -50,48 +30,15 @@ main.js:576 [STEP 5] WBS fancytree init OK
 main.js:582 [STEP 6] panel2 resizer bound
 main.js:583 [STEP 1] Task panel OK
 main.js:584 [STEP 2] panel2-ready dispatched
-task-buttons.js:101  [WBS] no checked nodes via api/dom fallback
-getCheckedNodesFT @ task-buttons.js:101
-(anonymous) @ task-buttons.js:327
+gantt-view.js:171 [gantt-view] google loaded
+task-buttons.js:353  [WBS] No checked nodes via API/DOM fallback.
+(anonymous) @ task-buttons.js:353
 dispatch @ jquery-3.7.1.min.js:2
 v.handle @ jquery-3.7.1.min.js:2
-(() => {
-  const t = window.__WBS_DBG__?.findWbsTree?.();
-  console.log('tree id =', t?.$div?.attr('id'), 'checkbox=', t?.options?.checkbox, 'selectMode=', t?.options?.selectMode);
-  return !!t;
-})();
-VM34977:3 tree id = undefined checkbox= undefined selectMode= undefined
-false
-(() => {
-  const t = window.__WBS_DBG__?.findWbsTree?.();
-  if (!t) return console.warn('no WBS tree');
-  t.$div
-   .off('.dbgft')
-   .on('fancytreeclick.dbgft fancytreeselect.dbgft', (e, data) => {
-     console.log('[FT-EVT]', e.type, 'title=', data?.node?.title, 'selected=', data?.node?.selected, 'partsel=', data?.node?.partsel, 'targetType=', data?.targetType);
-   });
-  console.log('>> 체크박스를 몇 개 클릭해 보세요.');
-})();
-VM34981:3  no WBS tree
-(anonymous) @ VM34981:3
-(anonymous) @ VM34981:10
-undefined
-(() => {
-  const nodes = window.__WBS_DBG__?.getCheckedNodesFT?.() || [];
-  console.log('[checked via helper]', nodes.map(n => ({ title: n.title, idx: n.getIndexHier() })));
-  return nodes.length;
-})();
-VM34985:3 [checked via helper] []
-0
-(() => {
-  const t = window.__WBS_DBG__?.findWbsTree?.();
-  if (!t) return console.warn('no WBS tree');
-  const root = t.$div.get(0);
-  const els = root.querySelectorAll('.fancytree-checkbox[aria-checked="true"], .fancytree-node.fancytree-selected, .fancytree-title.fancytree-selected');
-  console.log('DOM-checked count=', els.length);
-  return els.length;
-})();
-VM34989:3  no WBS tree
-(anonymous) @ VM34989:3
-(anonymous) @ VM34989:8
-undefined
+window.__WBS_DBG__?.listTrees();
+task-buttons.js:166 (index)idcheckboxselectModeselectedCount(index)idcheckboxselectModeselectedCount0'treegrid'false201'wbs-tree'true31Array(2)
+(2) [I, I]
+window.__WBS_DBG__?.getCheckedNodesFT()?.map(n=>n.getIndexHier));
+VM37452:1 Uncaught SyntaxError: Unexpected token ')'
+window.__WBS_DBG__?.getCheckedNodesFT()?.map(n=>n.getIndexHier());
+[]length: 0lastIndex: (...)lastItem: (...)[[Prototype]]: Array(0)

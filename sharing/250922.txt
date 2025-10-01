@@ -6,27 +6,160 @@ import { showCurrentTaskModal } from "./ui/current-task-modal.js";
 import { notifyCoverageDirtyAndRepaint } from "./ui/wbs-fixed-paint.js";
 import { ensureElementIdIndexForDbIds, getElementIdFor, formatObjectLabel } from "./core/element-id.js";
 
-/* ───────────────────── Optional WbsStore (있으면 사용) ─────────────────────
+/* =============================================================================
+   Optional WbsStore (있으면 사용, 없어도 동작)
    - 전역(window.__WBS_STORE__) 또는 동적 import 둘 중 가능한 경로를 사용
    - 본 파일은 WbsStore 없이도 동작 (Fancytree + provider BFS 기반)
-*/
+============================================================================= */
 let __WBS_STORE__ = (typeof window !== "undefined" && window.__WBS_STORE__) || null;
-async function ensureWbsStore() {
-  if (__WBS_STORE__) return __WBS_STORE__;
-  try {
-    // 번들러/모듈 환경에서만 성공. 실패해도 무시.
-    const mod = await import("./core/wbs-store.js");
-    __WBS_STORE__ = mod;
-  } catch(_) {}
-  return __WBS_STORE__;
+function ensureWbsStore() {
+  // 동적 import는 모듈/번들러 환경에서만 성공할 수 있음. 실패해도 무시.
+  if (__WBS_STORE__) return Promise.resolve(__WBS_STORE__);
+  return import("./core/wbs-store.js").then(mod => { __WBS_STORE__ = mod; return mod; }).catch(()=>null);
 }
 
-/* ───────────────────────── 상태 반영 알림 ───────────────────────── */
+/* =============================================================================
+   유틸/디버그
+============================================================================= */
+const DEBUG_WBS = false; // 필요시 true
+
+function log(...a){ if (DEBUG_WBS) console.log("[task-buttons]", ...a); }
+
+/** checkbox=true 인 fancytree를 우선적으로 찾아 반환 */
+function findWbsTree(){
+  // 1순위: 우리가 알고 있는 id
+  let t = $.ui.fancytree.getTree("#wbs-tree");
+  if (t) return t;
+
+  // 2순위: checkbox 옵션이 켜진 fancytree
+  const $containers = $(".fancytree-container");
+  for (let i = 0; i < $containers.length; i++){
+    const tt = $.ui.fancytree.getTree($containers[i]);
+    if (tt && tt.options && tt.options.checkbox) return tt;
+  }
+
+  // 3순위: 아무 fancytree나(최후 폴백)
+  if ($containers.length){
+    const any = $.ui.fancytree.getTree($containers[0]);
+    if (any) return any;
+  }
+  return null;
+}
+
+/** Fancytree 노드 → 경로 배열 (타이틀 기준) */
+function pathOfNodeFT(n){
+  const out=[]; let cur=n;
+  while (cur && !cur.isRoot()){
+    out.unshift(cur.title || cur.key || cur.data?.text || "");
+    cur = cur.parent;
+  }
+  return out;
+}
+
+/** ───────────────── Checked 노드 안정 수집(Fancytree 전용) ─────────────────
+ * 1차: API t.getSelectedNodes(false)
+ * 2차: 전체 노드 방문해 node.selected 검사
+ * 3차: DOM 폴백(컨테이너 내부 .fancytree-selected / aria-checked="true")
+ * partsel(부분선택)은 제외
+ */
+function getCheckedNodesFT() {
+  const tree = findWbsTree();
+  if (!tree) { log("findWbsTree() → null"); return []; }
+
+  // 1) 공식 API
+  try {
+    const a = tree.getSelectedNodes(false).filter(n => !n.partsel);
+    if (a.length) { log("getSelectedNodes(false) =", a.length); return a; }
+  } catch(_) {}
+
+  // 2) 전체 방문
+  try {
+    const found = [];
+    tree.getRootNode()?.visit((n) => {
+      if (n.selected && !n.partsel) found.push(n);
+    });
+    if (found.length) { log("scan selected =", found.length); return found; }
+  } catch(_) {}
+
+  // 3) DOM 폴백(컨테이너 내부만 스캔)
+  try {
+    const contEl = tree.$div?.get?.(0) || document;
+    const cand = contEl.querySelectorAll(
+      '.fancytree-checkbox[aria-checked="true"], .fancytree-node.fancytree-selected, .fancytree-title.fancytree-selected'
+    );
+    const raw = [];
+    cand.forEach(el => {
+      const node = $.ui.fancytree.getNode(el);
+      if (node && !node.partsel) raw.push(node);
+    });
+    // uniq
+    const seen = new Set(); const out = [];
+    raw.forEach(n => {
+      const k = n.key || n.getIndexHier?.() || n.title;
+      if (k && !seen.has(k)) { seen.add(k); out.push(n); }
+    });
+    if (!out.length) console.warn("[WBS] no checked nodes via api/dom fallback");
+    else log("DOM fallback selected =", out.length);
+    return out;
+  } catch (e) {
+    console.warn("[WBS] DOM fallback failed", e);
+    return [];
+  }
+}
+
+/** provider(childrenByPath)로 미확장 자손까지 leaf dbId 수집 (중복정의 금지) */
+async function bfsCollectDescendantDbIds(provider, pathArr, visibleNode){
+  // (1) 화면에 보이는 서브트리에서 leaf 수집
+  const fromVisible = [];
+  try {
+    visibleNode?.visit?.((n) => {
+      if (n !== visibleNode && !(n.hasChildren && n.hasChildren())) {
+        const id = Number(n.dbId ?? n.data?.dbId);
+        if (Number.isFinite(id)) fromVisible.push(id);
+      }
+    });
+  } catch(_){}
+
+  // (2) provider BFS (미확장 자손)
+  const fromProvider = [];
+  if (provider && typeof provider.childrenByPath === "function") {
+    const queue = [ pathArr.slice() ];
+    const seenKey = new Set();
+    const SEP = "\u0001";
+
+    while (queue.length) {
+      const cur = queue.shift();
+      const key = cur.join(SEP);
+      if (seenKey.has(key)) continue;
+      seenKey.add(key);
+
+      let children = [];
+      try { children = await provider.childrenByPath(cur); } catch(_) { children = []; }
+
+      for (const ch of (children || [])) {
+        const text = String(ch.text || ch.name || "").trim();
+        if (!text) continue;
+        const id = Number(ch.dbId ?? ch.data?.dbId);
+        if (Number.isFinite(id)) fromProvider.push(id);
+        else queue.push(cur.concat(text));
+      }
+    }
+  }
+
+  // 유니크 + 순서 유지(화면 → provider)
+  const out = [];
+  const s = new Set();
+  for (const x of fromVisible.concat(fromProvider)) if (!s.has(x)) { s.add(x); out.push(x); }
+  return out;
+}
+
+/* =============================================================================
+   상태 반영/페인트
+============================================================================= */
 function notifyWbsStatusRefresh(){
   try { window.__WBS_MARK_TASKS_CHANGED?.(); } catch {}
 }
 
-/* ──────────────────────── 페인트 배치(간단 락) ─────────────────────── */
 async function runWbsHighlightBatch(cb){
   const prev = window.__WBS_PAINT_LOCK === true;
   window.__WBS_PAINT_LOCK = true;
@@ -37,12 +170,16 @@ async function runWbsHighlightBatch(cb){
   }
 }
 
-/* ───────────────────────── 외부 저장 스냅샷 ───────────────────────── */
+/* =============================================================================
+   외부 저장 스냅샷
+============================================================================= */
 export function setSavedTaskData(data) {
   window.savedTaskData = JSON.parse(JSON.stringify(data ?? []));
 }
 
-/* ─────────────────────────── 초기화 본체 ─────────────────────────── */
+/* =============================================================================
+   초기화 본체
+============================================================================= */
 export function initTaskListButtons() {
   window.__ALLOW_WBS_UPDATE = window.__ALLOW_WBS_UPDATE ?? false;
 
@@ -186,15 +323,9 @@ export function initTaskListButtons() {
     const catSel = normalizeTaskCategory(selectedTaskNode.data?.selectedOption); // "C"|"T"|"D"
     const catLabel = catSel === "C" ? "시공" : (catSel === "T" ? "가설" : "철거");
 
-    // ✅ 정확히 체크된(V) 노드만 (부분선택 제외)
-    const wbsTree = $.ui.fancytree.getTree("#wbs-tree");
-    if (!wbsTree) { alert("WBS 트리를 찾을 수 없습니다(#wbs-tree)."); return; }
-
-    // ✅ 체크 노드 안전 수집(다중 전략)
+    // ✅ 체크 노드 안전 수집
     const checkedNodes = getCheckedNodesFT();
     if (!checkedNodes.length) {
-      // 디버그 도움말
-      console.warn("[WBS] No checked nodes via API/DOM fallback.");
       alert("WBS에서 '체크(V)'된 항목이 없습니다.\n(체크 후 다시 시도해 주세요)");
       return;
     }
@@ -394,17 +525,9 @@ export function initTaskListButtons() {
   });
 }
 
-/* ───────────────────────── Fancytree 경로/수집 ───────────────────────── */
-function pathOfNodeFT(n){
-  const out=[]; let cur=n;
-  while (cur && !cur.isRoot()){
-    out.unshift(cur.title || cur.key || cur.data?.text || "");
-    cur = cur.parent;
-  }
-  return out;
-}
-
-/* ───────────────────────── Task 트리 저장 변환 ───────────────────────── */
+/* =============================================================================
+   Task 트리 저장 변환/번호 생성
+============================================================================= */
 function getCurrentTaskDataFromTree() {
   const tree = $.ui.fancytree.getTree("#treegrid");
   const urn = window.CURRENT_MODEL_URN;
@@ -429,7 +552,6 @@ function getCurrentTaskDataFromTree() {
   return (tree.getRootNode().children || []).map(nodeToData);
 }
 
-/* ───────────────────── 번호 생성 ───────────────────── */
 function generateNo(parentNode) {
   if (!parentNode || parentNode.isRoot()) {
     const roots = $.ui.fancytree.getTree("#treegrid").getRootNode().children || [];
@@ -441,7 +563,9 @@ function generateNo(parentNode) {
   }
 }
 
-/* ───────────────────── TEST 애니메이션 ───────────────────── */
+/* =============================================================================
+   TEST 애니메이션 (유지)
+============================================================================= */
 export function initTaskWbsButtons(viewer) {
   let btn = document.getElementById('btn-test');
   if (!btn || !viewer) return;
@@ -535,7 +659,8 @@ async function runTestAnimation(viewer) {
   restoreFragStates(viewer, store);
 }
 
-/* ───────────────────── TEST 헬퍼 ───────────────────── */
+/* ================= Helpers for Test ================= */
+
 function getSelectionSmart(viewer) {
   const agg = viewer.getAggregateSelection?.();
   if (agg && agg.length > 0) {
@@ -656,103 +781,3 @@ function animate(duration, step) {
   });
 }
 function easeInOutSine(t){ return 0.5 - 0.5 * Math.cos(Math.PI * t); }
-
-
-/** ───────────────── Checked 노드 안전 수집(Fancytree 전용) ─────────────────
- * 1차: API t.getSelectedNodes(false)
- * 2차: 전체 노드 방문해 node.selected 검사
- * 3차: DOM 폴백(.fancytree-checkbox[aria-checked="true"] 등) → getNode(el)
- * partsel(부분선택)은 제외
- */
-function getCheckedNodesFT() {
-  const tree = $.ui.fancytree.getTree("#wbs-tree");
-  if (!tree) return [];
-
-  // 1) 공식 API
-  try {
-    const a = tree.getSelectedNodes(false).filter(n => !n.partsel);
-    if (a.length) return a;
-  } catch(_) {}
-
-  // 2) 전체 방문해서 selected=true 찾기
-  try {
-    const found = [];
-    tree.getRootNode()?.visit((n) => {
-      if (n.selected && !n.partsel) found.push(n);
-    });
-    if (found.length) return found;
-  } catch(_) {}
-
-  // 3) DOM 폴백
-  try {
-    const $cont = $("#wbs-tree");
-    const $cand = $cont.find(
-      '.fancytree-node.fancytree-selected, .fancytree-checkbox[aria-checked="true"]'
-    );
-    const raw = $cand.toArray()
-      .map(el => $.ui.fancytree.getNode(el))
-      .filter(Boolean);
-
-    const seen = new Set();
-    const out = [];
-    raw.forEach(n => {
-      const key = n.key || n.getIndexHier?.() || n.title;
-      const isPart = n.partsel || $(n.span).hasClass("fancytree-partsel");
-      if (!isPart && key && !seen.has(key)) {
-        seen.add(key);
-        out.push(n);
-      }
-    });
-    return out;
-  } catch (e) {
-    console.warn("[WBS] DOM fallback failed", e);
-    return [];
-  }
-}
-
-/** provider(childrenByPath)로 미확장 자손까지 leaf dbId 수집 */
-async function bfsCollectDescendantDbIds(provider, pathArr, visibleNode){
-  // (1) 화면에 보이는 서브트리에서 leaf 수집
-  const fromVisible = [];
-  try {
-    visibleNode?.visit?.((n) => {
-      if (n !== visibleNode && !(n.hasChildren && n.hasChildren())) {
-        const id = Number(n.dbId ?? n.data?.dbId);
-        if (Number.isFinite(id)) fromVisible.push(id);
-      }
-    });
-  } catch(_){}
-
-  // (2) provider BFS (미확장 자손)
-  const fromProvider = [];
-  if (provider && typeof provider.childrenByPath === "function") {
-    const queue = [ pathArr.slice() ];
-    const seenKey = new Set();
-    const SEP = "\u0001";
-
-    while (queue.length) {
-      const cur = queue.shift();
-      const key = cur.join(SEP);
-      if (seenKey.has(key)) continue;
-      seenKey.add(key);
-
-      let children = [];
-      try { children = await provider.childrenByPath(cur); } catch(_) { children = []; }
-
-      for (const ch of (children || [])) {
-        const text = String(ch.text || ch.name || "").trim();
-        if (!text) continue;
-        const id = Number(ch.dbId ?? ch.data?.dbId);
-        if (Number.isFinite(id)) fromProvider.push(id);
-        else queue.push(cur.concat(text));
-      }
-    }
-  }
-
-  // 유니크 + 순서 유지(화면 → provider)
-  const out = [];
-  const s = new Set();
-  for (const x of fromVisible.concat(fromProvider)) if (!s.has(x)) { s.add(x); out.push(x); }
-  return out;
-}
-

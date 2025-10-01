@@ -1,34 +1,60 @@
-// /core/wbs-store.js
-// WBS 트리에서 한 번 구조/인덱스를 뽑아 캐시하고, 링크 시엔 이 저장소만 참조.
-// - 트리 문서 순서(nodesInOrder)
-// - path(문자열 배열) → dbIds(자손 포함) 맵
-// - dbId → path 맵
-// - 체크 노드 목록(트리 순서) 반환
+// /wwwroot/js/sidebar/task-wbs/core/wbs-store.js
+// 목적: UI 트리 확장 여부와 무관하게, "정확히 체크된(V) 노드"의 모든 후손 leaf dbId를
+//       가져올 수 있는 스냅샷/인덱스 저장소.
+//
+// 사용 요약:
+//   initWbsStore({ tree: window.wbsTree, provider: window.__WBS_PROVIDER });
+//   const nodes = getCheckedExactNodesInOrder();
+//   const ids = await getAllDescendantDbIdsByPath(pathArr); // 확장 필요시 provider로 lazy load
+//
+// 제공 API:
+//   initWbsStore({tree, provider})
+//   setProvider(provider)
+//   resetWbsStore()
+//   refreshWbsStore()         // UI 트리 기반 인덱스 재빌드(보이는 범위 우선)
+//   getCheckedExactNodesInOrder()
+//   getAllDescendantDbIdsByPath(pathArr)
+//   getOrderedDbIdsFromCheckedExact()  // ← 한 번에 (ids[], pathByDbId Map)
+//   pathOfNode(node)
 
-export let WbsStore = {
+export const WbsStore = {
   tree: null,
+  provider: null,
   nodesInOrder: [],
-  pathKeyToDbIds: new Map(), // "A␁B␁C" -> [dbId...]
+  pathKeyToDbIds: new Map(), // "A␁B␁C" -> [dbId...](자손 포함)
   dbIdToPath: new Map(),     // dbId -> ["A","B","C"]
   isReady: false,
 };
 
-const SEP = "\u0001"; // 경로 키 구분자(트리 텍스트에 없을 법한 문자)
+const SEP = "\u0001"; // 경로 키 구분자
 
-/** 초기화 + 트리 이벤트에 맞춰 자동 리빌드 */
-export function initWbsStore(tree) {
-  WbsStore.tree = tree || window.wbsTree || null;
-  rebuildWbsIndex();
-
-  // fancytree 기준: 확장/축소/체크 변경 시 인덱스 갱신(부하 적게 debounce)
+export function initWbsStore({ tree, provider } = {}) {
+  if (tree) WbsStore.tree = tree;
+  if (provider) WbsStore.provider = provider;
+  rebuildIndexFromVisibleTree();
+  // fancytree 이벤트에 따라 가볍게 갱신
   try {
     const $root = $(WbsStore.tree?.$div || "#wbs-tree");
     $root.off(".wbsstore");
-    $root.on("fancytreechange.wbsstore fancytreeexpand.wbsstore fancytreecollapse.wbsstore", debounce(rebuildWbsIndex, 120));
+    $root.on("fancytreechange.wbsstore fancytreeexpand.wbsstore fancytreecollapse.wbsstore", debounce(rebuildIndexFromVisibleTree, 120));
   } catch(_) {}
 }
 
-/** 경로 배열 생성: ["구조벽","지상2층","101동", ...] */
+export function setProvider(provider){
+  WbsStore.provider = provider || null;
+}
+
+export function resetWbsStore(){
+  WbsStore.nodesInOrder = [];
+  WbsStore.pathKeyToDbIds.clear();
+  WbsStore.dbIdToPath.clear();
+  WbsStore.isReady = false;
+}
+
+export function refreshWbsStore(){
+  rebuildIndexFromVisibleTree();
+}
+
 export function pathOfNode(n){
   const out = [];
   let cur = n;
@@ -39,61 +65,69 @@ export function pathOfNode(n){
   return out;
 }
 
-/** 체크 노드를 트리 문서 순서로 반환 */
-export function getCheckedNodesInOrder(){
-  if (!WbsStore.isReady) rebuildWbsIndex();
-  return WbsStore.nodesInOrder.filter(n => isChecked(n));
+export function getCheckedExactNodesInOrder(){
+  if (!WbsStore.isReady) rebuildIndexFromVisibleTree();
+  return WbsStore.nodesInOrder.filter(isCheckedExact);
 }
 
-/** 주어진 경로에 해당하는 dbIds 반환 (기본: 자손 포함) */
-export function getDbIdsForPath(pathArr, { includeDescendants = true } = {}){
-  if (!WbsStore.isReady) rebuildWbsIndex();
-  const key = (pathArr || []).join(SEP);
+/** 체크(V)된 노드들의 자손 leaf dbId를 UI 확장 없이 수집 (WBS 순서 유지) */
+export async function getOrderedDbIdsFromCheckedExact(){
+  const checked = getCheckedExactNodesInOrder();
+  const orderedDbIds = [];
+  const pathByDbId = new Map();
+  const seen = new Set();
 
-  if (includeDescendants) {
-    const arr = WbsStore.pathKeyToDbIds.get(key);
-    if (arr && arr.length) return arr.slice();
+  for (const node of checked) {
+    const pathArr = pathOfNode(node);
+    const ids = await getAllDescendantDbIdsByPath(pathArr);
+    for (const id of ids) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        orderedDbIds.push(id);
+        pathByDbId.set(id, pathArr.slice());
+      }
+    }
   }
-
-  // 정확히 이 경로에 매핑된 leaf dbId만
-  const out = [];
-  for (const [id, p] of WbsStore.dbIdToPath.entries()) {
-    if (arrayEq(p, pathArr)) out.push(id);
-  }
-  return out;
+  return { orderedDbIds, pathByDbId };
 }
 
-/** 필요 시 강제 리빌드 */
-export function refreshWbsStore(){ rebuildWbsIndex(); }
+/** 주어진 경로의 모든 자손 leaf dbId 반환(스냅샷에 없으면 provider로 lazy 확장 후 캐시) */
+export async function getAllDescendantDbIdsByPath(pathArr){
+  if (!Array.isArray(pathArr) || !pathArr.length) return [];
+  if (!WbsStore.isReady) rebuildIndexFromVisibleTree();
+
+  const key = pathArr.join(SEP);
+  let cached = WbsStore.pathKeyToDbIds.get(key);
+  if (Array.isArray(cached) && cached.length) return cached.slice();
+
+  // 없으면 provider로 lazy 확장
+  const ids = await ensureSubtreeAndCollect(pathArr);
+  if (ids.length) WbsStore.pathKeyToDbIds.set(key, ids.slice());
+  return ids;
+}
 
 /* ============= 내부 구현 ============= */
 
-function rebuildWbsIndex(){
+function rebuildIndexFromVisibleTree(){
+  resetWbsStore();
   const tree = WbsStore.tree || window.wbsTree;
-  WbsStore.nodesInOrder = [];
-  WbsStore.pathKeyToDbIds.clear();
-  WbsStore.dbIdToPath.clear();
-  WbsStore.isReady = false;
-
   const root = tree?.getRootNode?.();
   if (!root) return;
 
-  // 1) 문서 순서 수집 + leaf(dbId) 즉시 맵핑
   root.visit((n) => {
     WbsStore.nodesInOrder.push(n);
-    const path = pathOfNode(n);
-    const pkey = path.join(SEP);
-
     if (isLeafWithDb(n)) {
+      const path = pathOfNode(n);
+      const pkey = path.join(SEP);
       const id = Number(n.data?.dbId ?? n.dbId);
       if (Number.isFinite(id)) {
         WbsStore.dbIdToPath.set(id, path);
-        pushPathId(pkey, id);
+        appendToKeyArray(WbsStore.pathKeyToDbIds, pkey, id);
       }
     }
   });
 
-  // 2) 그룹 노드: 자손 leaf dbId 집계하여 pathKeyToDbIds에 기록
+  // 그룹 경로에 대해 현재 보이는 자손만이라도 집계
   root.visit((n) => {
     if (n.hasChildren && n.hasChildren()) {
       const path = pathOfNode(n);
@@ -112,9 +146,62 @@ function rebuildWbsIndex(){
   WbsStore.isReady = true;
 }
 
-function isChecked(n){
-  if (typeof n.isSelected === "function") return !!n.isSelected();
-  return !!(n.selected || n.data?.selected || n.data?.checked);
+async function ensureSubtreeAndCollect(pathArr){
+  // provider가 전체 트리를 서비스할 수 있어야 함
+  const p = WbsStore.provider;
+  if (!p || typeof p.childrenByPath !== "function") return [];
+  // BFS로 path 이하 모든 leaf까지 확장
+  const queue = [ pathArr.slice() ];
+  const leafIds = [];
+  const seenPathKey = new Set();
+
+  while (queue.length) {
+    const curPath = queue.shift();
+    const key = curPath.join(SEP);
+    if (seenPathKey.has(key)) continue;
+    seenPathKey.add(key);
+
+    let children = [];
+    try {
+      children = await p.childrenByPath(curPath); // [{text, dbId?}] child list
+    } catch(_){ children = []; }
+
+    const subIds = [];
+    for (const ch of (children || [])) {
+      const text = String(ch.text || ch.name || "").trim();
+      if (!text) continue;
+      const nextPath = curPath.concat(text);
+      const id = Number(ch.dbId ?? ch.data?.dbId);
+      if (Number.isFinite(id)) {
+        // leaf
+        WbsStore.dbIdToPath.set(id, nextPath);
+        subIds.push(id);
+      } else {
+        // group
+        queue.push(nextPath);
+      }
+    }
+
+    if (subIds.length) {
+      const pkey = curPath.join(SEP);
+      const merged = uniqKeepOrder([...(WbsStore.pathKeyToDbIds.get(pkey) || []), ...subIds]);
+      WbsStore.pathKeyToDbIds.set(pkey, merged);
+      leafIds.push(...subIds);
+    }
+  }
+
+  // 최상위 pathArr의 자손 통합 결과
+  const key = pathArr.join(SEP);
+  return uniqKeepOrder([...(WbsStore.pathKeyToDbIds.get(key) || []), ...leafIds]);
+}
+
+/* 유틸 */
+
+function isCheckedExact(n){
+  // 정확히 V 상태만 (부분선택/하이픈 제외)
+  const sel = (typeof n.isSelected === "function") ? n.isSelected() : !!(n.selected || n.data?.selected === true || n.data?.checked === true);
+  const part = (typeof n.isPartsel === "function") ? n.isPartsel() : !!n.partsel;
+  return !!sel && !part;
 }
 
 function isLeafWithDb(n){
@@ -123,27 +210,21 @@ function isLeafWithDb(n){
   return !hasKids && Number.isFinite(id);
 }
 
-function pushPathId(pkey, id){
-  const arr = WbsStore.pathKeyToDbIds.get(pkey) || [];
-  arr.push(id);
-  WbsStore.pathKeyToDbIds.set(pkey, arr);
+function appendToKeyArray(map, key, val){
+  const arr = map.get(key) || [];
+  arr.push(val);
+  map.set(key, arr);
 }
 
 function uniqKeepOrder(arr){
-  const s = new Set(); const out = [];
+  const s = new Set(), out = [];
   for (const x of arr) if (!s.has(x)) { s.add(x); out.push(x); }
   return out;
 }
 
-function arrayEq(a, b){
-  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-  for (let i=0;i<a.length;i++){ if (String(a[i]) !== String(b[i])) return false; }
-  return true;
-}
-
 function debounce(fn, ms){
-  let t = 0;
-  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  let t=0;
+  return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); };
 }
 
 
@@ -159,46 +240,21 @@ $("#btn-link").off("click").on("click", async function () {
     return;
   }
 
-  // 저장소 준비 재시도(트리 늦게 붙는 경우)
-  try { initWbsStore(window.wbsTree); refreshWbsStore(); } catch(_) {}
+  // 저장소 최신화(체크박스 상태 반영)
+  try { refreshWbsStore(); } catch(_) {}
 
   const urn = window.CURRENT_MODEL_URN;
   const catSel = normalizeTaskCategory(selectedTaskNode.data?.selectedOption); // "C"|"T"|"D"
   const catLabel = catSel === "C" ? "시공" : (catSel === "T" ? "가설" : "철거");
 
-  // 체크 노드를 문서 순서대로
-  const checked = getCheckedNodesInOrder();
-  if (!checked.length) return alert("WBS에서 객체를 선택하세요!");
-
-  // 경로 → dbIds(자손 포함) in-order
-  const orderedDbIds = [];
-  const pathByDbId = new Map();
-  const seen = new Set();
-
-  for (const node of checked) {
-    const pathArr = pathOfNode(node);
-    let ids = getDbIdsForPath(pathArr, { includeDescendants: true }) || [];
-    // leaf인데 인덱스가 없다면 혹시 dbId가 박혀 있으면 직접 사용
-    if (!ids.length) {
-      const leafId = Number(node.data?.dbId ?? node.dbId);
-      if (Number.isFinite(leafId)) ids = [leafId];
-    }
-    for (const id of ids) {
-      if (!seen.has(id)) {
-        seen.add(id);
-        orderedDbIds.push(id);
-        pathByDbId.set(id, pathArr.slice());
-      }
-    }
-  }
-  if (!orderedDbIds.length) {
-    return alert("선택한 WBS에서 dbId를 찾지 못했습니다.\n(지연 로드 중이면 WBS를 한 번 펼친 뒤 다시 시도하세요)");
-  }
+  // 정확히 체크된(V) 노드들로부터 WBS 문서 순서대로 dbId 수집(확장 불필요)
+  const { orderedDbIds, pathByDbId } = await getOrderedDbIdsFromCheckedExact();
+  if (!orderedDbIds.length) return alert("WBS에서 '체크(V)'된 항목이 없습니다.");
 
   // ElementId 프리페치
   try { await ensureElementIdIndexForDbIds(orderedDbIds); } catch {}
 
-  // 저장용 오브젝트(경로 라벨 보존)
+  // 저장용 오브젝트(경로라벨 보존: "A - B - C - [ElementId|dbId]")
   const toLink = orderedDbIds.map((d) => {
     const p = pathByDbId.get(d) || [];
     const el = getElementIdFor(urn, d);
@@ -334,6 +390,12 @@ $("#btn-link").off("click").on("click", async function () {
 
   notifyWbsStatusRefresh();
 });
+
+
+
+
+
+
 
 
 

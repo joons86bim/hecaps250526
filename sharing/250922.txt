@@ -1,28 +1,37 @@
 export function apply4DAtMs(viewer, nowMs, config = {}) {
   const cfg = {
-    zOffset: 3.0,
+    zOffset: 3.0,            // 입력은 "미터" 기준
     useDateDuration: true,
     fixedDurationSec: 2.0,
     speedDaysPerSec: 1.0,
-    // alpha가 이 값 미만이면 엣지까지 완전 숨김(nodeOff)
-    edgeNodeOnAlpha: 0.4,
+    edgeNodeOnAlpha: 0.2,    // α가 이 값 미만이면 엣지까지 완전 숨김(nodeOff + frag off)
     ...config,
   };
   if (!viewer || !Number.isFinite(nowMs)) return;
   const model = (viewer.getVisibleModels?.()[0]) || viewer.model;
   if (!model) return;
 
+  // 모델 단위 환산: "미터 → 모델단위"
+  const unitScale = (typeof model.getUnitScale === 'function') ? model.getUnitScale() : 1; // 모델 1단위 = unitScale 미터
+  const metersToModel = (m) => (unitScale > 0 ? (m / unitScale) : m);
+  const zOffModel = metersToModel(cfg.zOffset ?? 3.0);
+
+  // 초기화/캐시
   let state = _globalState.get(model.id);
   if (!state) {
     const schedule = _buildSchedule(model);
     const store = _prepareStore(viewer, model, schedule);
-    state = { schedule, store };
+    state = { schedule, store, ghostedOff: false };
     _globalState.set(model.id, state);
   }
   const { schedule, store } = state;
   if (!schedule.allDbIds.size) return;
 
+  // (안정화) 유령효과 끄기 1회
+  if (!state.ghostedOff) { try { viewer.setGhosting?.(false); } catch(_) {} state.ghostedOff = true; }
+
   const vm = viewer.impl.visibilityManager;
+  const fragList = (model.getFragmentList?.()) || (viewer.model?.getFragmentList?.());
 
   // 정책 색
   const V4 = (r,g,b,a=1) => (window.THREE ? new window.THREE.Vector4(r,g,b,a) : { r,g,b,a });
@@ -45,53 +54,69 @@ export function apply4DAtMs(viewer, nowMs, config = {}) {
     const activeDemo     = _findActive(demo, nowMs);
 
     let alpha = 1.0, dz = 0.0, theme = C_ZERO;
-    let forceNodeOff = false;
+    let forceNodeOff = false; // 엣지까지 완전 숨김
 
     if (activeDemo) {
-      // 철거: 전반부 불투명, 후반부 페이드아웃 / z: 0→+z
+      // 철거: 전반 불투명, 후반 페이드아웃 / z: 0→+z
       const p = _progress(nowMs, activeDemo.startMs, activeDemo.endMs, cfg);
       const half = (p <= 0.5);
-      alpha = half ? 1.0 : (2.0 * (1.0 - p));      // 0.5~1 구간 1→0
-      dz    = _lerp(0, cfg.zOffset, p);            // 전체 기간 0→+z
+      alpha = half ? 1.0 : (2.0 * (1.0 - p));  // 0.5~1 구간 1→0
+      dz    = _lerp(0, zOffModel, p);          // 전체 기간 0→+z
       theme = C_RED;
+
+      // 페이드 말미에 엣지 차단(α가 충분히 작아지면 완전 숨김)
+      if (!half && alpha < cfg.edgeNodeOnAlpha) forceNodeOff = true;
+
     } else if (activeInstall) {
-      // 가설/시공: 전반부 페이드인, 후반부 불투명 / z: +z→0
+      // 가설/시공: 전반 완전 숨김 → 50% 시점에 완전 등장 / z: +z→0
       const p = _progress(nowMs, activeInstall.startMs, activeInstall.endMs, cfg);
       const half = (p <= 0.5);
-      alpha = half ? (2.0 * p) : 1.0;              // 0~0.5 구간 0→1
-      dz    = _lerp(cfg.zOffset, 0, p);            // 전체 기간 +z→0
+
+      // 0~0.5: 완전 숨김(엣지까지), 0.5~1: 완전 보임
+      alpha = half ? 0.0 : 1.0;
+      dz    = _lerp(zOffModel, 0, p);          // 전체 기간 +z→0
       theme = (activeInstall.cat === 'T') ? C_BLUE : C_GREEN;
+
+      if (half) forceNodeOff = true;
+
     } else if (firstInstStart != null && nowMs < firstInstStart) {
-      // 설치 시작 전: 완전 숨김
-      alpha = 0; dz = cfg.zOffset; theme = C_ZERO; forceNodeOff = true;
+      // 설치(가설/시공) 시작 전: 완전 숨김
+      alpha = 0; dz = zOffModel; theme = C_ZERO; forceNodeOff = true;
+
     } else if (lastDemoEnd != null && nowMs > lastDemoEnd) {
       // 철거 완료 후: 완전 숨김
-      alpha = 0; dz = cfg.zOffset; theme = C_ZERO; forceNodeOff = true;
+      alpha = 0; dz = zOffModel; theme = C_ZERO; forceNodeOff = true;
+
     } else {
-      // 설치 완료 ~ 철거 시작 사이(또는 철거만 있고 아직 전): 원상 (불투명, 테마 없음)
+      // 그 외(설치 완료~철거 전, 또는 철거만 있고 아직 전/중/후 처리 외): 원상태
       alpha = 1; dz = 0; theme = C_ZERO;
     }
 
-    // 프래그먼트 적용
+    // 프래그먼트 적용 + 프래그 가시성 토글(엣지까지 차단용 보조)
     const frags = store.fragsByDb.get(dbId);
+    const nodeOn = !forceNodeOff && (alpha >= cfg.edgeNodeOnAlpha || alpha >= 0.999);
+
     if (frags) {
       for (const f of frags) {
         try {
           f.proxy.position.z = f.startPos.z + dz;
           f.proxy.updateAnimTransform();
-          _applyFragMatState(f, alpha); // 불투명 시 depthWrite=true, transparent=false
+
+          // 프래그 가시성 (nodeOn=false면 엣지까지 보조적으로 차단)
+          try { fragList?.setVisibility?.(f.fragId, !!nodeOn); } catch(_){}
+
+          // 머티리얼 상태(불투명: depthWrite ON / 투명: depthWrite OFF)
+          _applyFragMatState(f, alpha);
         } catch(_) {}
       }
     }
 
-    // 가시성: alpha가 충분히 오르기 전엔 엣지 포함 완전 숨김
+    // 트리 가시성 (엣지 패스까지 확실히 차단)
     try {
-      const nodeOn = !forceNodeOff && (alpha >= cfg.edgeNodeOnAlpha);
-      if (nodeOn) vm.setNodeOn(dbId);
-      else vm.setNodeOff(dbId);
+      if (nodeOn) vm.setNodeOn(dbId); else vm.setNodeOff(dbId);
     } catch(_) {}
 
-    // 테마: 진행 중일 때만 색 적용, 그 외엔 제거
+    // 테마: 진행 중일 때만 색 적용(가설/시공=파랑/초록, 철거=빨강)
     try {
       const hasColor = !!activeInstall || !!activeDemo;
       viewer.setThemingColor(dbId, hasColor ? theme : C_ZERO, model);
@@ -101,12 +126,12 @@ export function apply4DAtMs(viewer, nowMs, config = {}) {
   viewer.impl.invalidate?.(true, true, true);
 }
 
-/* 머티리얼 상태: 불투명은 깊이쓰기 ON, 투명 페이즈는 깊이쓰기 OFF */
+/* 불투명/투명 단계별 머티리얼 제어 */
 function _applyFragMatState(f, alpha){
   if (!f.cloneMat) return;
   const opaque = alpha >= 0.999;
   f.cloneMat.opacity = alpha;
   f.cloneMat.transparent = !opaque;
-  f.cloneMat.depthWrite = opaque;
+  f.cloneMat.depthWrite  = opaque;
   f.cloneMat.needsUpdate = true;
 }

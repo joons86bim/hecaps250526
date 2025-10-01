@@ -1,683 +1,326 @@
-// /wwwroot/js/sidebar/task-wbs/ui/current-task-modal.js
-import { calendarSvg } from "./calendar-svg.js";
-import { apply4DAtMs, reset4D } from "../../task-wbs/4d/4d-simulation.js";
+// /wwwroot/js/task-wbs/4d/4d-simulation.js
+// 공개 API:
+//   apply4DAtMs(viewer, timeMs, config)
+//   apply4DAt(viewer, dateISO, config)  // 호환용
+//   reset4D(viewer)
+//
+// config 기본값:
+// {
+//   zOffset: 3.0,              // 모델 단위에 맞춰 조정
+//   useDateDuration: true,     // true: 시작~끝 날짜 비율, false: 고정시간(압축)
+//   fixedDurationSec: 2.0,     // useDateDuration=false일 때 1개 작업 진행시간(초)
+//   speedDaysPerSec: 1.0,      // 재생 속도(참조용)
+//   hideEdgeThreshold: 0.05    // 알파가 이 값 이하이면 완전 숨김(엣지 제거)
+// }
 
-export function showCurrentTaskModal() {
-  if (document.querySelector(".current-task-modal")) return;
+let _globalState = new Map(); // key: model.id
 
-  const todayStr = isoToday();
+export function reset4D(viewer) {
+  const model = (viewer.getVisibleModels?.()[0]) || viewer.model;
+  if (!model) return;
+  const st = _globalState.get(model.id);
+  if (!st) return;
 
-  // ─ UI
-  const modal = document.createElement("div");
-  modal.className = "current-task-modal";
-  modal.tabIndex = 0;
-  modal.innerHTML = `
-    <div class="current-task-modal-header">
-      <span class="modal-title">공정현황</span>
-      <button type="button" class="modal-close" title="닫기" aria-label="닫기">×</button>
-    </div>
-    <div class="current-task-modal-body">
-      <div class="current-task-date-row">
-        <input type="text" class="current-task-date-input" maxlength="10" placeholder="yyyy-mm-dd" value="${todayStr}" autocomplete="off" />
-        <button type="button" class="datepicker-btn" tabindex="-1" title="달력 열기">${calendarSvg}</button>
-        <button type="button" class="btn-today" title="오늘로 이동">오늘</button>
-      </div>
+  const { store } = st;
+  const fragList = _getFragList(viewer, model);
 
-      <div class="current-task-slider-row">
-        <input type="range" class="current-task-slider" min="-15" max="15" value="0" />
-      </div>
+  for (const f of store.items) {
+    try {
+      f.proxy.position.copy(f.startPos);
+      f.proxy.updateAnimTransform();
 
-      <div class="sim-toolbar" aria-label="시뮬레이션 컨트롤">
-        <!-- 순서: ㅣ< , ㅁ , > , >ㅣ -->
-        <button type="button" class="sim-btn sim-begin" title="5초 뒤로"   aria-label="5초 뒤로">${svgIcon('begin')}</button>
-        <button type="button" class="sim-btn sim-stop"  title="정지/맨앞"  aria-label="정지/맨앞">${svgIcon('stop')}</button>
-        <button type="button" class="sim-btn sim-play"  title="재생"      aria-label="재생">${svgIcon('play')}</button>
-        <button type="button" class="sim-btn sim-end"   title="5초 앞으로" aria-label="5초 앞으로">${svgIcon('end')}</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  applyInlineStyles(modal);
-  centerModal(modal);
-
-  // 핸들
-  const $input    = modal.querySelector(".current-task-date-input");
-  const $btnCal   = modal.querySelector(".datepicker-btn");
-  const $btnToday = modal.querySelector(".btn-today");
-  const $close    = modal.querySelector(".modal-close");
-  const $header   = modal.querySelector(".current-task-modal-header");
-  const $slider   = modal.querySelector(".current-task-slider");
-
-  // 컨트롤
-  const $btnBegin = modal.querySelector(".sim-begin"); // ㅣ< : 5초 '뒤로'
-  const $btnPlay  = modal.querySelector(".sim-play");  // >
-  const $btnStop  = modal.querySelector(".sim-stop");  // ㅁ
-  const $btnEnd   = modal.querySelector(".sim-end");   // >ㅣ : 5초 '앞으로'
-
-  // 상태 & 파라미터
-  const SIM = {
-    playing: false,
-    raf: 0,
-    lastTs: 0,
-    stepSec: 5,                                  // 버튼 스텝(초)
-    speedDaysPerSec: window.SIM4D_SPEED_DAYS_PER_SEC ?? 1.0, // 1초 = 며칠
-    zOffset: window.SIM4D_Z_OFFSET ?? 3.0,
-    useDateDuration: (window.SIM4D_USE_DATE_DURATION ?? true) === true,
-    fixedDurationSec: window.SIM4D_FIXED_DURATION_SEC ?? 2.0,
-    minISO: null, maxISO: null,                  // 경계(ISO)
-    minMs: null,  maxMs: null,                   // 경계(ms)
-    curMs: null,                                 // 내부 시계(ms)
-    lastPolicyISO: null                          // 색상/가시성 정책 업데이트 최적화
-  };
-
-  // IMask
-  let mask = null;
-  if (window.IMask) mask = window.IMask($input, { mask: "0000-00-00", lazy: false, autofix: true });
-  enforceSmartSelection($input);
-
-  // flatpickr
-  const fp = window.flatpickr($input, {
-    dateFormat: "Y-m-d",
-    defaultDate: todayStr,
-    allowInput: true,
-    clickOpens: false,
-    onChange: (_, dateStr) => { if (isISO(dateStr)) setSimMs(Date.parse(dateStr), { apply: true, from: "flatpickr" }); }
-  });
-
-  // 직접 입력
-  $input.addEventListener("change", () => {
-    const val = $input.value.trim();
-    if (isISO(val)) setSimMs(Date.parse(val), { apply: true, from: "input-change" });
-  });
-
-  // 달력 버튼
-  $btnCal.addEventListener("click", (e) => { e.stopPropagation(); fp.open(); });
-
-  // 오늘 버튼(범위 내 클램프)
-  $btnToday.addEventListener("click", () => {
-    const dISO = clampISO(isoToday(), SIM.minISO, SIM.maxISO);
-    setSimMs(Date.parse(dISO), { apply: true, from: "today" });
-  });
-
-  // ─ 타임라인 범위 계산 (전체 작업 기간 ±5일)
-  const tree = window.taskTree;
-  const rawBounds = computeGlobalBoundsFromTaskData(tree?.getRootNode()?.children || []);
-  let minISO = rawBounds.minISO, maxISO = rawBounds.maxISO;
-  if (isISO(minISO)) minISO = addDaysISO(minISO, -5);
-  if (isISO(maxISO)) maxISO = addDaysISO(maxISO, +5);
-
-  SIM.minISO = minISO; SIM.maxISO = maxISO;
-  SIM.minMs  = isISO(minISO) ? Date.parse(minISO) : null;
-  SIM.maxMs  = isISO(maxISO) ? Date.parse(maxISO) : null;
-
-  // 슬라이더 범위도 확장 값으로
-  updateSliderRangeFromBounds(SIM.minISO, SIM.maxISO, $slider);
-
-  // 슬라이더: 드래그 중 빠른 반응(40ms), 드롭 시 즉시
-  const debouncedApply = debounce((iso) => applyByPolicy(iso, "slider-input", modal), 40);
-  $slider.addEventListener("input", () => {
-    const dISO = isoOffsetFromToday(parseInt($slider.value, 10));
-    setSimMs(Date.parse(dISO), { apply: false, from: "slider-input" });
-    debouncedApply(dISO);
-  });
-  $slider.addEventListener("change", () => {
-    const dISO = isoOffsetFromToday(parseInt($slider.value, 10));
-    setSimMs(Date.parse(dISO), { apply: true, from: "slider-change" });
-  });
-
-  // 헤더 드래그
-  enableModalDrag(modal, $header);
-
-  // 닫기(완전 초기화)
-  $close.addEventListener("click", (e) => { e.stopPropagation(); resetViewerAndCloseEx(modal, SIM); });
-  modal.addEventListener("keydown", (ev) => { if (ev.key === "Escape") resetViewerAndCloseEx(modal, SIM); });
-
-  // ─ 컨트롤
-  const stepMs = () => SIM.stepSec * SIM.speedDaysPerSec * 86400000; // 5초 * (초당 며칠) → ms
-
-  // ㅣ< : 5초 '뒤로'
-  $btnBegin?.addEventListener("click", () => {
-    const next = (SIM.curMs ?? Date.parse($input.value)) - stepMs();
-    setSimMs(next, { apply: true, from: "nudge-back" });
-  });
-
-  // >ㅣ : 5초 '앞으로'
-  $btnEnd?.addEventListener("click", () => {
-    const next = (SIM.curMs ?? Date.parse($input.value)) + stepMs();
-    setSimMs(next, { apply: true, from: "nudge-forward" });
-  });
-
-  // ㅁ : 재생 중이면 정지, 정지면 '맨앞'(min)으로
-  $btnStop?.addEventListener("click", () => {
-    if (SIM.playing) {
-      SIM.playing = false;
-      if (SIM.raf) cancelAnimationFrame(SIM.raf);
-      SIM.raf = 0;
-    } else if (SIM.minMs != null) {
-      setSimMs(SIM.minMs, { apply: true, from: "stop-reset" });
-    }
-  });
-
-  // > : 재생 (현재가 max면 앞쪽으로 보정 후 시작)
-  $btnPlay?.addEventListener("click", () => {
-    if (SIM.playing) return;
-    if (SIM.curMs == null) SIM.curMs = Date.parse($input.value);
-    if (SIM.maxMs != null && SIM.curMs >= SIM.maxMs && SIM.minMs != null) {
-      setSimMs(SIM.minMs, { apply: true, from: "play-reset" });
-    }
-    SIM.playing = true;
-    SIM.lastTs = performance.now();
-    SIM.raf = requestAnimationFrame(loop);
-  });
-
-  // 최초 1회 적용(오늘 → 범위 내 클램프)
-  {
-    const initISO = clampISO(todayStr, SIM.minISO, SIM.maxISO);
-    setSimMs(Date.parse(initISO), { apply: true, from: "init" });
-  }
-
-  /* ───── 재생 루프 ───── */
-  function loop(now){
-    if (!SIM.playing) return;
-    const dtSec = Math.max(0, (now - SIM.lastTs) / 1000);
-    SIM.lastTs = now;
-
-    let nextMs = (SIM.curMs ?? Date.parse($input.value)) + dtSec * SIM.speedDaysPerSec * 86400000;
-    if (SIM.minMs != null) nextMs = Math.max(nextMs, SIM.minMs);
-    if (SIM.maxMs != null) nextMs = Math.min(nextMs, SIM.maxMs);
-
-    // 끝 도달 시 정지
-    if (SIM.maxMs != null && nextMs >= SIM.maxMs && SIM.curMs >= SIM.maxMs) {
-      SIM.playing = false;
-      if (SIM.raf) cancelAnimationFrame(SIM.raf);
-      SIM.raf = 0;
-      return;
-    }
-    setSimMs(nextMs, { apply: true, from: "play" });
-    SIM.raf = requestAnimationFrame(loop);
-  }
-
-  /* 내부 시계(ms) → UI/정책/4D 반영 */
-  function setSimMs(ms, { apply = true, from = "" } = {}) {
-    if (!Number.isFinite(ms)) return;
-    if (SIM.minMs != null && ms < SIM.minMs) ms = SIM.minMs;
-    if (SIM.maxMs != null && ms > SIM.maxMs) ms = SIM.maxMs;
-    SIM.curMs = ms;
-
-    const iso = msToISO(ms);
-    setDateInput(iso, { apply, from });
-  }
-
-  /* 날짜 입력 반영 */
-  function setDateInput(dateStr, { apply = true, from = "" } = {}) {
-    const safe = clampISO(dateStr, SIM.minISO, SIM.maxISO);
-    $input.value = safe;
-    if (mask) { try { mask.updateValue(); } catch(_) {} }
-    syncSliderFromDate($slider, safe);
-
-    if (apply) {
-      // 색/가시성 정책은 날짜 변경시에만(성능)
-      if (safe !== SIM.lastPolicyISO) {
-        applyByPolicy(safe, from, modal);
-        SIM.lastPolicyISO = safe;
+      if (f.originalMat) {
+        if (viewer.impl.setMaterial) viewer.impl.setMaterial(model, f.fragId, f.originalMat);
+        else if (fragList?.setMaterial) fragList.setMaterial(f.fragId, f.originalMat);
+        else if (viewer.impl.setFragmentMaterial) viewer.impl.setFragmentMaterial(f.fragId, f.originalMat);
       }
-      // 4D는 프레임마다 ms 기반으로 부드럽게
-      try {
-        apply4DAtMs(window.viewer, SIM.curMs, {
-          zOffset: SIM.zOffset,
-          useDateDuration: SIM.useDateDuration,
-          fixedDurationSec: SIM.fixedDurationSec,
-          speedDaysPerSec: SIM.speedDaysPerSec,
-          syncThemingAlpha: true
-        });
-      } catch (e) {
-        console.warn("[4D] apply error:", e);
-      }
-    }
+      if (f.cloneMat?.dispose) f.cloneMat.dispose();
+      f.cloneMat = null;
+    } catch(_) {}
   }
+  // 가시성 / 테마 초기화
+  try { viewer.impl.visibilityManager.setAllOn(); } catch(_) {}
+  try { viewer.clearThemingColors?.(model); } catch(_) {}
+  try { viewer.clearThemingColors?.(); } catch(_) {}
+  viewer.impl.invalidate?.(true, true, true);
+
+  _globalState.delete(model.id);
 }
 
-/* ───────────── 정책 적용: C/T/D 규칙(색/가시성) ─────────────
-   C(시공):  시작 전 숨김 / 기간 중 녹색 / 이후 보이기
-   T(가설):  시작 전 숨김 / 기간 중 파랑 / 이후 보이기
-   D(철거):  시작 전 보이기 / 기간 중 빨강 / 이후 숨김
-*/
-function applyByPolicy(dateStr, source, ctxEl){
-  const v = window.viewer; const tree = window.taskTree;
-  if (!v || !tree || !isISO(dateStr)) return;
+export function apply4DAt(viewer, dateISO, config = {}) {
+  if (!dateISO) return;
+  const ms = Date.parse(String(dateISO));
+  if (!Number.isFinite(ms)) return;
+  apply4DAtMs(viewer, ms, config);
+}
 
-  const model = (v.getVisibleModels && v.getVisibleModels()[0]) || v.model;
+export function apply4DAtMs(viewer, nowMs, config = {}) {
+  const cfg = {
+    zOffset: 3.0,
+    useDateDuration: true,
+    fixedDurationSec: 2.0,
+    speedDaysPerSec: 1.0,
+    hideEdgeThreshold: 0.05,
+    ...config,
+  };
+  if (!viewer || !Number.isFinite(nowMs)) return;
+  const model = (viewer.getVisibleModels?.()[0]) || viewer.model;
   if (!model) return;
 
+  // 초기화/캐시
+  let state = _globalState.get(model.id);
+  if (!state) {
+    const schedule = _buildSchedule(model);
+    const store = _prepareStore(viewer, model, schedule);
+    state = { schedule, store };
+    _globalState.set(model.id, state);
+  }
+  const { schedule, store } = state;
+  if (!schedule.allDbIds.size) return;
+
+  const vm = viewer.impl.visibilityManager;
+
+  // 컬러 정의(정책과 동일)
+  const V4 = (r,g,b,a=1) => (window.THREE ? new window.THREE.Vector4(r,g,b,a) : { r,g,b,a });
+  const C_GREEN = V4(0.16, 0.57, 0.20, 1);
+  const C_BLUE  = V4(0.12, 0.45, 0.90, 1);
+  const C_RED   = V4(0.95, 0.27, 0.23, 1);
+  const C_ZERO  = V4(0,0,0,0); // 테마 제거용(알파0)
+
+  // dbId 단위로 "현재 상태"를 계산해서 적용
+  for (const dbId of schedule.allDbIds) {
+    const tl = schedule.byDb.get(dbId) || { installs: [], demolitions: [] };
+    const inst = tl.installs;     // {cat:'C'|'T', startMs, endMs}
+    const demo = tl.demolitions;  // {startMs, endMs}
+
+    // 우선순위: 1) 철거 진행 중, 2) 가설/시공 진행 중, 3) 그 외(사전/사이/사후)
+    const activeInstall = _findActive(inst, nowMs);
+    const activeDemo    = _findActive(demo, nowMs);
+
+    // 기본값
+    let alpha = 1.0;
+    let dz = 0.0;
+    let theme = C_ZERO;
+
+    // 보조값
+    const zOff = cfg.zOffset;
+    const firstInstStart = _minStart(inst);
+    const firstDemoStart = _minStart(demo);
+    const lastDemoEnd    = _maxEnd(demo);
+
+    if (activeDemo) {
+      // 철거 중: 빨강, 0→zOff, 1→0
+      const p = _progress(nowMs, activeDemo.startMs, activeDemo.endMs, cfg);
+      alpha = 1 - p;
+      dz = _lerp(0, zOff, p);
+      theme = C_RED;
+    } else if (activeInstall) {
+      // 가설/시공 중: 파랑/초록, zOff→0, 0→1
+      const p = _progress(nowMs, activeInstall.startMs, activeInstall.endMs, cfg);
+      alpha = p;
+      dz = _lerp(zOff, 0, p);
+      theme = (activeInstall.cat === 'T') ? C_BLUE : C_GREEN;
+    } else if (inst.length > 0) {
+      // 설치가 있는 객체
+      if (firstInstStart != null && nowMs < firstInstStart) {
+        // 설치 전: 안 보임(+zOff)
+        alpha = 0;
+        dz = zOff;
+        theme = C_ZERO;
+      } else {
+        // 설치는 끝났고 철거는 아직 전/중/후?
+        if (demo.length === 0) {
+          // 철거가 없다: 설치 완료 상태 유지(원래색)
+          alpha = 1; dz = 0; theme = C_ZERO;
+        } else if (firstDemoStart != null && nowMs < firstDemoStart) {
+          // 철거 전: 원래색 유지
+          alpha = 1; dz = 0; theme = C_ZERO;
+        } else if (lastDemoEnd != null && nowMs > lastDemoEnd) {
+          // 철거 이후: 숨김(+zOff)
+          alpha = 0; dz = zOff; theme = C_ZERO;
+        } else {
+          // (이 구간은 activeDemo가 true였어야 하지만, 안전망)
+          alpha = 1; dz = 0; theme = C_ZERO;
+        }
+      }
+    } else if (demo.length > 0) {
+      // 설치 없이 철거만 있는(기존물) 객체
+      if (firstDemoStart != null && nowMs < firstDemoStart) {
+        // 철거 전: 기존물 보임(원래색)
+        alpha = 1; dz = 0; theme = C_ZERO;
+      } else if (lastDemoEnd != null && nowMs > lastDemoEnd) {
+        // 철거 이후: 숨김(+zOff)
+        alpha = 0; dz = zOff; theme = C_ZERO;
+      } else {
+        // 진행 중은 위 activeDemo에서 처리됨
+        alpha = 1; dz = 0; theme = C_ZERO;
+      }
+    } else {
+      // 작업 정보가 전혀 없으면 원래 상태 유지
+      alpha = 1; dz = 0; theme = C_ZERO;
+    }
+
+    // 적용: 프래그먼트 이동/투명도
+    const frags = store.fragsByDb.get(dbId);
+    if (frags) {
+      for (const f of frags) {
+        try {
+          f.proxy.position.z = f.startPos.z + dz;
+          f.proxy.updateAnimTransform();
+
+          if (f.cloneMat) {
+            f.cloneMat.opacity = alpha;
+            f.cloneMat.transparent = true;
+            f.cloneMat.depthWrite = false;
+            f.cloneMat.needsUpdate = true;
+          }
+        } catch(_) {}
+      }
+    }
+
+    // 엣지 처리: 충분히 투명하면 완전 숨김(라인패스까지 제거)
+    try {
+      if (alpha <= cfg.hideEdgeThreshold) vm.setNodeOff(dbId);
+      else vm.setNodeOn(dbId);
+    } catch(_) {}
+
+    // 테마: 진행 중일 때만 색 적용, 그 외엔 제거(알파0)
+    try {
+      const isColorPhase = !!activeInstall || !!activeDemo;
+      const col = isColorPhase ? theme : C_ZERO;
+      viewer.setThemingColor(dbId, col, model);
+    } catch(_) {}
+  }
+
+  viewer.impl.invalidate?.(true, true, true);
+}
+
+/* ------------------ 스케줄/스토어 구성 ------------------ */
+
+// schedule: { items, byDb: Map<dbId, { installs:[{cat,startMs,endMs}], demolitions:[{startMs,endMs}] }>, allDbIds:Set }
+function _buildSchedule(model) {
   const urnCur = String(window.CURRENT_MODEL_URN || "");
-  const showSet  = new Set();
-  const hideSet  = new Set();
-  const themeC   = new Set(); // green
-  const themeT   = new Set(); // blue
-  const themeD   = new Set(); // red
+  const tree = window.taskTree;
 
-  const inRange = (d, s, e) => (isISO(s) && isISO(e) && d >= s && d <= e);
-  const beforeS = (d, s)     => (isISO(s) && d < s);
-  const afterE  = (d, e)     => (isISO(e) && d > e);
+  const items = [];
+  const byDb = new Map();
+  const allDbIds = new Set();
 
-  tree.getRootNode()?.visit((n) => {
+  const normCat = (v) => {
+    const s = String(v || "").trim();
+    if (s === "C" || s.startsWith("시공")) return "C";
+    if (s === "T" || s.startsWith("가설")) return "T";
+    if (s === "D" || s.startsWith("철거")) return "D";
+    return "";
+  };
+  const isISO = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s||""));
+
+  tree?.getRootNode?.()?.visit((n) => {
     const d = n.data || {};
     const cat = normCat(d.selectedOption);
     if (!cat) return;
+    if (!isISO(d.start) || !isISO(d.end)) return;
+
+    const startMs = Date.parse(d.start + "T00:00:00Z");
+    const endMs   = Date.parse(d.end   + "T23:59:59Z");
 
     const objs = Array.isArray(d.linkedObjects) ? d.linkedObjects : [];
     for (const o of objs) {
       const urn = String(o.urn || urnCur);
-      if (!urnCur || urn !== urnCur) continue;
-      const id = Number(o.dbId);
-      if (!Number.isFinite(id)) continue;
+      if (urnCur && urn !== urnCur) continue;
+      const dbId = Number(o.dbId);
+      if (!Number.isFinite(dbId)) continue;
 
-      if (cat === "C") {
-        if (beforeS(dateStr, d.start)) { hideSet.add(id); }
-        else if (inRange(dateStr, d.start, d.end)) { showSet.add(id); themeC.add(id); }
-        else if (afterE(dateStr, d.end)) { showSet.add(id); }
-        else { showSet.add(id); }
-      } else if (cat === "T") {
-        if (beforeS(dateStr, d.start)) { hideSet.add(id); }
-        else if (inRange(dateStr, d.start, d.end)) { showSet.add(id); themeT.add(id); }
-        else if (afterE(dateStr, d.end)) { showSet.add(id); }
-        else { showSet.add(id); }
-      } else if (cat === "D") {
-        if (beforeS(dateStr, d.start)) { showSet.add(id); }
-        else if (inRange(dateStr, d.start, d.end)) { showSet.add(id); themeD.add(id); }
-        else if (afterE(dateStr, d.end)) { hideSet.add(id); }
-        else { showSet.add(id); }
-      }
+      items.push({ dbId, cat, startMs, endMs });
+      allDbIds.add(dbId);
+
+      let tl = byDb.get(dbId);
+      if (!tl) { tl = { installs: [], demolitions: [] }; byDb.set(dbId, tl); }
+      if (cat === 'D') tl.demolitions.push({ startMs, endMs });
+      else tl.installs.push({ cat, startMs, endMs });
     }
   });
 
-  // 충돌 해소: 보이기가 우선
-  for (const id of showSet) hideSet.delete(id);
+  return { items, byDb, allDbIds };
+}
 
-  try {
-    if (!ctxEl.__simVisInit) {
-      v.impl?.visibilityManager?.setAllOn?.();
-      ctxEl.__simVisInit = true;
-    }
+function _prepareStore(viewer, model, schedule) {
+  const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const matman = viewer.impl.matman ? viewer.impl.matman() : null;
+  const fragList = _getFragList(viewer, model);
+  const it = model.getData().instanceTree;
 
-    // 테마 초기화 후 다시 칠하기
-    try { v.clearThemingColors?.(model); } catch(_) {}
-    try { v.clearThemingColors?.(); } catch(_) {}
+  const fragsByDb = new Map();
+  const items = [];
+  const fragIdToDb = new Map();
 
-    const showArr = [...showSet];
-    const hideArr = [...hideSet];
-    if (showArr.length) v.show(showArr, model);
-    if (hideArr.length) v.hide(hideArr, model);
-
-    const V4 = (r,g,b,a=1) => (window.THREE ? new window.THREE.Vector4(r,g,b,a) : { r,g,b,a });
-    const cGreen = V4(0.16, 0.57, 0.20, 1);
-    const cBlue  = V4(0.12, 0.45, 0.90, 1);
-    const cRed   = V4(0.95, 0.27, 0.23, 1);
-
-    const paintChunk = (ids, color) => {
-      const CHUNK = 4000;
-      for (let i = 0; i < ids.length; i += CHUNK) {
-        const slice = ids.slice(i, i + CHUNK);
-        for (let j = 0; j < slice.length; j++) {
-          v.setThemingColor(slice[j], color, model);
-        }
-      }
-    };
-    if (themeC.size) paintChunk([...themeC], cGreen);
-    if (themeT.size) paintChunk([...themeT], cBlue);
-    if (themeD.size) paintChunk([...themeD], cRed);
-
-    v.impl?.sceneUpdated?.(true);
-    v.impl?.invalidate?.(true, true, true);
-  } catch (err) {
-    console.warn("[CurrentTask] policy apply error", err);
+  // dbId → fragId 수집
+  for (const dbId of schedule.allDbIds) {
+    const list = [];
+    it.enumNodeFragments(dbId, (fragId) => {
+      list.push(fragId);
+      fragIdToDb.set(fragId, dbId);
+    }, true);
+    if (list.length) fragsByDb.set(dbId, []);
   }
-}
 
-/* ───────── 스타일 ───────── */
-function applyInlineStyles(modal){
-  Object.assign(modal.style, {
-    zIndex: 10000,
-    width: "300px",
-    maxWidth: "90vw",
-    background: "#fff",
-    border: "1px solid #d9d9d9",
-    borderRadius: "10px",
-    boxShadow: "0 10px 24px rgba(0,0,0,.12)",
-    fontFamily: "'Noto Sans KR', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif",
-    position: "fixed",
-  });
+  // 각 frag에 프록시/머티리얼 클론
+  for (const [fragId, dbId] of fragIdToDb.entries()) {
+    const proxy = viewer.impl.getFragmentProxy(model, fragId);
+    proxy.getAnimTransform();
+    const startPos = new THREE.Vector3(proxy.position.x, proxy.position.y, proxy.position.z);
 
-  const header = modal.querySelector(".current-task-modal-header");
-  Object.assign(header.style, {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "6px",
-    padding: "6px 8px",
-    borderBottom: "1px solid #eee",
-    cursor: "grab",
-    userSelect: "none",
-    touchAction: "none"
-  });
+    const rp = viewer.impl.getRenderProxy(model, fragId);
+    const originalMat = rp?.material || null;
 
-  const close = modal.querySelector(".modal-close");
-  Object.assign(close.style, {
-    border: "none",
-    background: "transparent",
-    fontSize: "18px",
-    cursor: "pointer",
-    lineHeight: "1",
-  });
+    let cloneMat = null;
+    if (originalMat) {
+      cloneMat = (matman?.cloneMaterial) ? matman.cloneMaterial(originalMat) : originalMat.clone();
+      cloneMat.transparent = true;
+      cloneMat.opacity = originalMat.opacity ?? 1.0;
+      cloneMat.depthWrite = false;
+      cloneMat.side = originalMat.side;
+      cloneMat.needsUpdate = true;
 
-  const body = modal.querySelector(".current-task-modal-body");
-  Object.assign(body.style, {
-    padding: "8px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px"
-  });
-
-  const row = modal.querySelector(".current-task-date-row");
-  Object.assign(row.style, {
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-    justifyContent: "center",
-    margin: "0"
-  });
-
-  const input = modal.querySelector(".current-task-date-input");
-  Object.assign(input.style, {
-    width: "118px",
-    textAlign: "center",
-    padding: "4px 6px",
-    border: "1px solid #bbb",
-    borderRadius: "6px",
-    outline: "none",
-  });
-
-  const btnCal = modal.querySelector(".datepicker-btn");
-  Object.assign(btnCal.style, {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "28px",
-    height: "28px",
-    borderRadius: "6px",
-    border: "1px solid #ddd",
-    background: "#fafafa",
-    cursor: "pointer",
-    padding: "0"
-  });
-
-  const calSvg = btnCal.querySelector("svg");
-  if (calSvg) { calSvg.setAttribute("width","16"); calSvg.setAttribute("height","16"); }
-
-  const btnToday = modal.querySelector(".btn-today");
-  Object.assign(btnToday.style, {
-    height: "28px",
-    padding: "0 10px",
-    borderRadius: "6px",
-    border: "1px solid #1976d2",
-    background: "#1976d2",
-    color: "#fff",
-    cursor: "pointer"
-  });
-
-  const sliderRow = modal.querySelector(".current-task-slider-row");
-  Object.assign(sliderRow.style, {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "0",
-    margin: "0"
-  });
-
-  const slider = modal.querySelector(".current-task-slider");
-  Object.assign(slider.style, {
-    width: "100%",
-    maxWidth: "260px",
-    display: "block",
-    margin: "2px 0"
-  });
-
-  const sim = modal.querySelector(".sim-toolbar");
-  Object.assign(sim.style, {
-    display: "flex",
-    justifyContent: "center",
-    gap: "6px",
-    paddingTop: "4px",
-    borderTop: "1px dashed #eee",
-    marginTop: "0"
-  });
-  sim.querySelectorAll(".sim-btn").forEach(btn => {
-    Object.assign(btn.style, {
-      width: "36px",
-      height: "30px",
-      borderRadius: "8px",
-      border: "1px solid #ddd",
-      background: "#f8f9fb",
-      cursor: "pointer",
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "0"
-    });
-  });
-}
-
-function centerModal(modal){
-  modal.style.visibility = "hidden";
-  requestAnimationFrame(() => {
-    const { innerWidth: w, innerHeight: h } = window;
-    const r = modal.getBoundingClientRect();
-    modal.style.left = Math.max(8, (w / 2 - r.width / 2)) + "px";
-    modal.style.top  = Math.max(8, (h / 3 - r.height / 2)) + "px";
-    modal.style.visibility = "visible";
-  });
-}
-
-/* ───── 유틸 ───── */
-function svgIcon(name){
-  const stroke = "currentColor";
-  if (name === "play")  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M8 5v14l11-7-11-7z" fill="${stroke}"/></svg>`;
-  if (name === "stop")  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" rx="2" fill="${stroke}"/></svg>`;
-  if (name === "begin") return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 6l-7 6 7 6V6z" fill="${stroke}"/><rect x="5" y="6" width="2" height="12" fill="${stroke}"/></svg>`;
-  if (name === "end")   return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 6l7 6-7 6V6z" fill="${stroke}"/><rect x="17" y="6" width="2" height="12" fill="${stroke}"/></svg>`;
-  return "";
-}
-
-function isISO(s){ return /^\d{4}-\d{2}-\d{2}$/.test(String(s||"")); }
-
-function isoToday(){
-  // 로컬 날짜 기준 ISO(yyyy-mm-dd)
-  const d = new Date(); d.setHours(0,0,0,0);
-  const tzFixed = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return tzFixed.toISOString().slice(0,10);
-}
-
-function isoOffsetFromToday(offsetDays){
-  const base = new Date(); base.setHours(0,0,0,0);
-  base.setDate(base.getDate() + (Number(offsetDays) || 0));
-  const tzFixed = new Date(base.getTime() - base.getTimezoneOffset() * 60000);
-  return tzFixed.toISOString().slice(0,10);
-}
-
-function msToISO(ms){ return new Date(ms).toISOString().slice(0,10); }
-
-function addDaysISO(iso, days){
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + (Number(days)||0));
-  return d.toISOString().slice(0,10);
-}
-
-function clampISO(iso, minISO, maxISO){
-  if (!isISO(iso)) return iso;
-  let t = Date.parse(iso);
-  if (isISO(minISO)) t = Math.max(t, Date.parse(minISO));
-  if (isISO(maxISO)) t = Math.min(t, Date.parse(maxISO));
-  return new Date(t).toISOString().slice(0,10);
-}
-
-function updateSliderRangeFromBounds(minISO, maxISO, sliderEl){
-  if (!sliderEl || !isISO(minISO) || !isISO(maxISO)) return;
-  const t = isoToday();
-  const diffMin = Math.ceil((Date.parse(minISO) - Date.parse(t)) / 86400000);
-  const diffMax = Math.ceil((Date.parse(maxISO) - Date.parse(t)) / 86400000);
-  sliderEl.min = String(diffMin);
-  sliderEl.max = String(diffMax);
-  sliderEl.value = "0";
-}
-
-function computeGlobalBoundsFromTaskData(nodes){
-  const all = [];
-  (function walk(arr){
-    for (const n of arr) {
-      const d = n.data || n;
-      if (isISO(d.start)) all.push(d.start);
-      if (isISO(d.end))   all.push(d.end);
-      if (n.children) walk(n.children);
-    }
-  })(nodes);
-  if (!all.length) return { minISO: null, maxISO: null };
-  const minISO = all.reduce((a,b)=> a < b ? a : b);
-  const maxISO = all.reduce((a,b)=> a > b ? a : b);
-  return { minISO, maxISO };
-}
-
-function syncSliderFromDate(sliderEl, dateStr){
-  if (!sliderEl || !isISO(dateStr) || !isFinite(Number(sliderEl.min))) return;
-  const t = isoToday();
-  const diff = Math.round((Date.parse(dateStr) - Date.parse(t)) / 86400000);
-  const min = Number(sliderEl.min), max = Number(sliderEl.max);
-  sliderEl.value = String(Math.min(Math.max(diff, min), max));
-}
-
-function normCat(v){
-  const s = String(v || "").trim();
-  if (s === "C" || s.startsWith("시공")) return "C";
-  if (s === "T" || s.startsWith("가설")) return "T";
-  if (s === "D" || s.startsWith("철거")) return "D";
-  return "";
-}
-
-/* 입력칸 스마트 커서 */
-function enforceSmartSelection(input){
-  const digitIdx = [0,1,2,3,5,6,8,9];
-  const setSel = (pos) => { if (digitIdx.includes(pos)) input.setSelectionRange(pos, pos + 1); };
-  const getDigitPos = (pos) => digitIdx.includes(pos) ? pos : (digitIdx.find(d => d > pos) ?? 9);
-  const nextDigitIdx = (pos) => { const i = digitIdx.indexOf(pos); return (i !== -1 && i < digitIdx.length - 1) ? digitIdx[i+1] : pos; };
-  const prevDigitIdx = (pos) => { const i = digitIdx.indexOf(pos); return (i > 0) ? digitIdx[i-1] : pos; };
-
-  ["focus", "click"].forEach(evt => input.addEventListener(evt, () => setTimeout(() => setSel(getDigitPos(input.selectionStart)), 0)));
-  input.addEventListener("keydown", (e) => {
-    const pos = input.selectionStart;
-    if (e.key === "ArrowLeft"  && pos !== 0)  { e.preventDefault(); setSel(prevDigitIdx(pos)); }
-    if (e.key === "ArrowRight" && pos !== 9)  { e.preventDefault(); setSel(nextDigitIdx(pos)); }
-  });
-  input.addEventListener("input", () => {
-    const pos = input.selectionStart;
-    if (digitIdx.includes(pos - 1)) setSel(nextDigitIdx(pos - 1));
-    else setSel(getDigitPos(pos));
-  });
-}
-
-/* 포인터 캡처 기반 드래그 */
-function enableModalDrag(modal, handle){
-  let dragging = false, pid = null;
-  let startX = 0, startY = 0, startLeft = 0, startTop = 0;
-  let raf = 0, nextLeft = 0, nextTop = 0;
-
-  const isInteractive = (el) =>
-    el.closest?.('.modal-close, .datepicker-btn, .btn-today, .sim-toolbar, .sim-btn, input, button, svg, path, rect, circle');
-
-  const killDrag = (e) => e.preventDefault();
-  handle.addEventListener('dragstart', killDrag);
-  modal.addEventListener('dragstart', killDrag);
-
-  const onPointerDown = (e) => {
-    if (isInteractive(e.target)) return;
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-
-    pid = e.pointerId;
-    handle.setPointerCapture(pid);
-
-    const cs = window.getComputedStyle(modal);
-    const l = parseFloat(cs.left);
-    const t = parseFloat(cs.top);
-    if (Number.isFinite(l) && Number.isFinite(t)) {
-      startLeft = l; startTop = t;
-    } else {
-      const r = modal.getBoundingClientRect();
-      startLeft = r.left; startTop = r.top;
-      modal.style.left = `${startLeft}px`;
-      modal.style.top  = `${startTop}px`;
+      if (viewer.impl.setMaterial) viewer.impl.setMaterial(model, fragId, cloneMat);
+      else if (fragList?.setMaterial) fragList.setMaterial(fragId, cloneMat);
+      else if (viewer.impl.setFragmentMaterial) viewer.impl.setFragmentMaterial(fragId, cloneMat);
     }
 
-    startX = e.clientX;
-    startY = e.clientY;
-    dragging = true;
-    handle.style.cursor = "grabbing";
-  };
+    const f = { fragId, proxy, startPos, originalMat, cloneMat };
+    items.push(f);
+    const arr = fragsByDb.get(dbId);
+    if (arr) arr.push(f);
+  }
 
-  const onPointerMove = (e) => {
-    if (!dragging) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    nextLeft = Math.max(0, Math.round(startLeft + dx));
-    nextTop  = Math.max(0, Math.round(startTop  + dy));
-
-    if (!raf) {
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        modal.style.left = `${nextLeft}px`;
-        modal.style.top  = `${nextTop}px`;
-      });
-    }
-  };
-
-  const stopDrag = () => {
-    if (!dragging) return;
-    dragging = false;
-    if (pid !== null) { try { handle.releasePointerCapture(pid); } catch(_){} }
-    pid = null;
-    handle.style.cursor = "grab";
-  };
-
-  handle.addEventListener("pointerdown", onPointerDown);
-  handle.addEventListener("pointermove", onPointerMove);
-  handle.addEventListener("pointerup", stopDrag);
-  handle.addEventListener("pointercancel", stopDrag);
-  window.addEventListener("pointerup", stopDrag, { passive: true });
+  viewer.impl.invalidate?.(true, true, true);
+  return { items, fragsByDb };
 }
 
-/* 완전 초기화: 재생 정지 + 4D 원복 + 색/가시성 초기화 + 컷플레인 해제 */
-function resetViewerAndCloseEx(m, SIM){
-  try {
-    if (SIM) {
-      SIM.playing = false;
-      if (SIM.raf) cancelAnimationFrame(SIM.raf);
-      SIM.raf = 0;
-    }
-    const v = window.viewer;
-    try { reset4D(v); } catch(_) {}
+/* ------------------ 유틸 ------------------ */
 
-    try { v?.clearThemingColors?.(); } catch(_){}
-    const vm = v?.impl?.visibilityManager;
-    vm?.setAllOn?.();
-
-    try { v?.setCutPlanes?.([]); } catch(_){}
-    v?.impl?.invalidate?.(true, true, true);
-  } catch(_){}
-  m.remove();
+function _getFragList(viewer, model) {
+  if (model?.getFragmentList) return model.getFragmentList();
+  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();
+  return null;
 }
 
-/* debounce */
-function debounce(fn, ms){
-  let t=0;
-  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+function _findActive(segs, t){
+  for (const s of segs) { if (t >= s.startMs && t <= s.endMs) return s; }
+  return null;
 }
+function _minStart(segs){
+  if (!segs.length) return null;
+  return segs.reduce((a,s)=> a==null || s.startMs < a ? s.startMs : a, null);
+}
+function _maxEnd(segs){
+  if (!segs.length) return null;
+  return segs.reduce((a,s)=> a==null || s.endMs > a ? s.endMs : a, null);
+}
+function _progress(now, startMs, endMs, cfg){
+  const endEff = cfg.useDateDuration ? endMs : (startMs + cfg.fixedDurationSec * 1000 * cfg.speedDaysPerSec);
+  const denom = Math.max(1, endEff - startMs);
+  const p = (now - startMs) / denom;
+  return p <= 0 ? 0 : (p >= 1 ? 1 : p);
+}
+function _lerp(a,b,t){ return a + (b - a) * (t < 0 ? 0 : (t > 1 ? 1 : t)); }

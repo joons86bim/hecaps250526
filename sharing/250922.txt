@@ -4,7 +4,8 @@ export function apply4DAtMs(viewer, nowMs, config = {}) {
     useDateDuration: true,
     fixedDurationSec: 2.0,
     speedDaysPerSec: 1.0,
-    hideEdgeThreshold: 0.05, // (예비) 더 이상 쓰지 않지만 남겨둠
+    // alpha가 이 값 미만이면 엣지까지 완전 숨김(nodeOff)
+    edgeNodeOnAlpha: 0.4,
     ...config,
   };
   if (!viewer || !Number.isFinite(nowMs)) return;
@@ -23,7 +24,7 @@ export function apply4DAtMs(viewer, nowMs, config = {}) {
 
   const vm = viewer.impl.visibilityManager;
 
-  // 정책과 동일 색 (알파는 여기선 고정: 진행중=1, 그 외=0)
+  // 정책 색
   const V4 = (r,g,b,a=1) => (window.THREE ? new window.THREE.Vector4(r,g,b,a) : { r,g,b,a });
   const C_GREEN = V4(0.16, 0.57, 0.20, 1);
   const C_BLUE  = V4(0.12, 0.45, 0.90, 1);
@@ -32,8 +33,8 @@ export function apply4DAtMs(viewer, nowMs, config = {}) {
 
   for (const dbId of schedule.allDbIds) {
     const tl = schedule.byDb.get(dbId) || { installs: [], demolitions: [] };
-    const inst = tl.installs;
-    const demo = tl.demolitions;
+    const inst = tl.installs;     // [{cat:'C'|'T', startMs, endMs}]
+    const demo = tl.demolitions;  // [{startMs, endMs}]
 
     const firstInstStart = _minStart(inst);
     const lastInstEnd    = _maxEnd(inst);
@@ -47,34 +48,28 @@ export function apply4DAtMs(viewer, nowMs, config = {}) {
     let forceNodeOff = false;
 
     if (activeDemo) {
-      // 철거 중: 빨강, 0→zOff, 1→0
+      // 철거: 전반부 불투명, 후반부 페이드아웃 / z: 0→+z
       const p = _progress(nowMs, activeDemo.startMs, activeDemo.endMs, cfg);
-      alpha = 1 - p;
-      dz = _lerp(0, cfg.zOffset, p);
+      const half = (p <= 0.5);
+      alpha = half ? 1.0 : (2.0 * (1.0 - p));      // 0.5~1 구간 1→0
+      dz    = _lerp(0, cfg.zOffset, p);            // 전체 기간 0→+z
       theme = C_RED;
     } else if (activeInstall) {
-      // 가설/시공 중: 파랑/초록, zOff→0, 0→1
+      // 가설/시공: 전반부 페이드인, 후반부 불투명 / z: +z→0
       const p = _progress(nowMs, activeInstall.startMs, activeInstall.endMs, cfg);
-      alpha = p;
-      dz = _lerp(cfg.zOffset, 0, p);
+      const half = (p <= 0.5);
+      alpha = half ? (2.0 * p) : 1.0;              // 0~0.5 구간 0→1
+      dz    = _lerp(cfg.zOffset, 0, p);            // 전체 기간 +z→0
       theme = (activeInstall.cat === 'T') ? C_BLUE : C_GREEN;
     } else if (firstInstStart != null && nowMs < firstInstStart) {
-      // 설치(가설/시공) 시작 전: 완전 숨김(엣지 포함)
-      alpha = 0;
-      dz = cfg.zOffset;
-      theme = C_ZERO;
-      forceNodeOff = true;
+      // 설치 시작 전: 완전 숨김
+      alpha = 0; dz = cfg.zOffset; theme = C_ZERO; forceNodeOff = true;
     } else if (lastDemoEnd != null && nowMs > lastDemoEnd) {
-      // 철거 완료 후: 완전 숨김(엣지 포함)
-      alpha = 0;
-      dz = cfg.zOffset;
-      theme = C_ZERO;
-      forceNodeOff = true;
+      // 철거 완료 후: 완전 숨김
+      alpha = 0; dz = cfg.zOffset; theme = C_ZERO; forceNodeOff = true;
     } else {
-      // 그 외(설치 끝~철거 전, 또는 설치만 있고 철거 없음, 또는 철거만 있고 아직 전)
-      alpha = 1;
-      dz = 0;
-      theme = C_ZERO;
+      // 설치 완료 ~ 철거 시작 사이(또는 철거만 있고 아직 전): 원상 (불투명, 테마 없음)
+      alpha = 1; dz = 0; theme = C_ZERO;
     }
 
     // 프래그먼트 적용
@@ -84,37 +79,29 @@ export function apply4DAtMs(viewer, nowMs, config = {}) {
         try {
           f.proxy.position.z = f.startPos.z + dz;
           f.proxy.updateAnimTransform();
-          _applyFragMatState(f, alpha); // ★ 불투명 시 depthWrite=true, transparent=false
+          _applyFragMatState(f, alpha); // 불투명 시 depthWrite=true, transparent=false
         } catch(_) {}
       }
     }
 
-    // 가시성: 특정 구간은 엣지까지 숨김
+    // 가시성: alpha가 충분히 오르기 전엔 엣지 포함 완전 숨김
     try {
-      if (forceNodeOff) vm.setNodeOff(dbId);
-      else vm.setNodeOn(dbId);
+      const nodeOn = !forceNodeOff && (alpha >= cfg.edgeNodeOnAlpha);
+      if (nodeOn) vm.setNodeOn(dbId);
+      else vm.setNodeOff(dbId);
     } catch(_) {}
 
-    // 테마: 진행 중일 때만 색을 입힘, 그 외엔 제거
+    // 테마: 진행 중일 때만 색 적용, 그 외엔 제거
     try {
-      const isColorPhase = !!activeInstall || !!activeDemo;
-      viewer.setThemingColor(dbId, isColorPhase ? theme : C_ZERO, model);
+      const hasColor = !!activeInstall || !!activeDemo;
+      viewer.setThemingColor(dbId, hasColor ? theme : C_ZERO, model);
     } catch(_) {}
   }
 
   viewer.impl.invalidate?.(true, true, true);
 }
 
-/* 도우미: 구간 최대 종료 */
-function _maxEnd(segs){
-  if (!segs.length) return null;
-  return segs.reduce((a,s)=> a==null || s.endMs > a ? s.endMs : a, null);
-}
-
-/* 도우미: 머티리얼 상태 적용
-   - alpha>=0.999 : 완전 불투명(transparent=false, depthWrite=true) → 뒤 물체가 비치지 않음
-   - alpha<0.999  : 투명 페이드(transparent=true, depthWrite=false)
-*/
+/* 머티리얼 상태: 불투명은 깊이쓰기 ON, 투명 페이즈는 깊이쓰기 OFF */
 function _applyFragMatState(f, alpha){
   if (!f.cloneMat) return;
   const opaque = alpha >= 0.999;

@@ -1,6 +1,11 @@
 highlight.js:4 [hec] wbs/highlight.js loaded
 endpoints.js:236  getCdnRedirectUrl is deprecated and will be removed soon
 endp.getCdnRedirectUrl @ endpoints.js:236
+initializeCDN @ envinit.js:640
+Initializer @ envinit.js:759
+(anonymous) @ init-viewer.js:18
+initViewer @ init-viewer.js:17
+(anonymous) @ main.js:504
 WebGLRenderer.js:29 THREE.WebGLRenderer 71
 WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
 WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
@@ -24,72 +29,10 @@ main.js:582 [STEP 6] panel2 resizer bound
 main.js:583 [STEP 1] Task panel OK
 main.js:584 [STEP 2] panel2-ready dispatched
 gantt-view.js:171 [gantt-view] google loaded
-CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-GeometryList.js:344 Total geometry size: 0.03751945495605469 MB
-GeometryList.js:345 Number of meshes: 23
-GeometryList.js:346 Num Meshes on GPU: 26
-GeometryList.js:347 Net GPU geom memory used: 53208
-main.js:548 [WBS] roots: 3
-main.js:148 [persistTasksSnapshot] saved. count = 3
-main.js:276 [FA] fallback map ready (keys = 24 )
-main.js:310 [FA] getCounts bridged
-main.js:576 [STEP 5] WBS fancytree init OK
-main.js:582 [STEP 6] panel2 resizer bound
-main.js:583 [STEP 1] Task panel OK
-main.js:584 [STEP 2] panel2-ready dispatched
-// ===== WBS 디버그(1): 어떤 트리(들)가 존재하는지 스캔 =====
 (function(){
-  const out = {};
-  out.hasFancytree = !!(window.$ && $.ui && $.ui.fancytree);
-  out.hasInspireTree = !!window.InspireTree;
-
-  // DOM 내 fancytree 컨테이너들 수집
-  const $containers = $('.fancytree-container');
-  out.ftContainerCount = $containers.length;
-  out.ftContainerIds = $containers.map((i,el)=>el.id || ('#'+(el.className||'').split(' ').join('.'))).get();
-
-  // 각 컨테이너별 트리 인스턴스, 옵션, 선택 수량 덤프
-  out.trees = $containers.map((i,el)=>$.ui.fancytree.getTree(el)).get().filter(Boolean);
-  out.treesInfo = out.trees.map(t => ({
-    id: t.$div.attr('id'),
-    selectMode: t.options.selectMode,
-    checkbox: !!t.options.checkbox,
-    extensions: t.options.extensions,
-    selectedCount: (t.getSelectedNodes && t.getSelectedNodes().length) || 0
-  }));
-
-  // 혹시 우리가 쓰는 예상 ID들에도 트리가 있는지 같이 체크
-  out.treegridWbs = $.ui.fancytree.getTree("#treegrid-wbs") ? true : false;
-  out.wbsGroupList = $.ui.fancytree.getTree("#wbs-group-list") ? true : false;
-
-  console.table(out.treesInfo);
-  console.log(out);
-  return out;
+  const t = $.ui.fancytree.getTree("#wbs-tree");
+  const nodes = t ? t.getSelectedNodes(false).filter(n=>!n.partsel) : [];
+  console.log('[WBS Selected]', nodes.map(n => ({title:n.title, idx:n.getIndexHier()})));
 })();
-
-VM25807:26 (index)idselectModecheckboxextensionsselectedCount(index)idselectModecheckboxextensionsselectedCount0'treegrid'2falseArray(2)01'wbs-tree'3trueArray(2)0Array(2)0: {id: 'treegrid', selectMode: 2, checkbox: false, extensions: Array(2), selectedCount: 0}1: checkbox: trueextensions: (2) ['table', 'gridnav']id: "wbs-tree"selectMode: 3selectedCount: 0[[Prototype]]: Objectlength: 2lastIndex: (...)lastItem: (...)[[Prototype]]: Array(0)
-VM25807:27 {hasFancytree: true, hasInspireTree: true, ftContainerCount: 2, ftContainerIds: Array(2), trees: Array(2), …}ftContainerCount: 2ftContainerIds: (2) ['treegrid', 'wbs-tree']hasFancytree: truehasInspireTree: truetreegridWbs: falsetrees: (2) [I, I]treesInfo: (2) [{…}, {…}]wbsGroupList: false[[Prototype]]: Object
-{hasFancytree: true, hasInspireTree: true, ftContainerCount: 2, ftContainerIds: Array(2), trees: Array(2), …}
-// ===== WBS 디버그(2): select / click 이벤트 로그 =====
-(function(){
-  $('.fancytree-container')
-    .off('.dbgft')
-    .on('fancytreeinit.dbgft fancytreeclick.dbgft fancytreeactivate.dbgft fancytreeselect.dbgft', function(e, data){
-      const t = $.ui.fancytree.getTree(this);
-      console.log('[FT-EVT]', e.type, 'node=', data?.node?.title, 'selected=', data?.node?.selected, 'targetType=', data?.targetType, 'treeId=', t?.$div?.attr('id'));
-    });
-
-  console.log('>> 체크박스를 몇 개 클릭해 보세요. 위 로그에 fancytreeselect 가 찍히는지 확인!');
-})();
-VM25826:10 >> 체크박스를 몇 개 클릭해 보세요. 위 로그에 fancytreeselect 가 찍히는지 확인!
+VM28104:4 [WBS Selected] []length: 0lastIndex: (...)lastItem: (...)[[Prototype]]: Array(0)
 undefined
-VM25826:7 [FT-EVT] fancytreeclick node= 구조벽 selected= false targetType= checkbox treeId= wbs-tree
-VM25826:7 [FT-EVT] fancytreeselect node= 구조벽 selected= true targetType= checkbox treeId= wbs-tree
-VM25826:7 [FT-EVT] fancytreeclick node= 보 selected= false targetType= checkbox treeId= wbs-tree
-VM25826:7 [FT-EVT] fancytreeselect node= 보 selected= true targetType= checkbox treeId= wbs-tree

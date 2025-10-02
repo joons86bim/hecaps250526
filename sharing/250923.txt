@@ -1,68 +1,45 @@
-// WbsStore 초기화 (가능할 때만)
-ensureWbsStore().then((mod) => {
-  if (!mod) return;
-  try {
-    // ✅ 공용 헬퍼 사용: 실제 체크박스 WBS 트리 인스턴스
-    const wbsFT = findWbsTree();
-    mod.initWbsStore?.({ tree: wbsFT, provider: window.__WBS_PROVIDER, eager: "auto" });
-
-    // ✅ 전역 노출(콘솔/다른 모듈에서 사용 가능)
-    window.__WBS_STORE__ = mod;
-
-    // ✅ provider 교체 시 인덱스 재구축
-    window.__SET_WBS_PROVIDER__ = (p) => {
-      try { mod.setProvider?.(p); mod.refreshWbsStore?.(); } catch(_) {}
-    };
-  } catch(_) {}
-});
-
-
-// ✅ Store 우선: 부분선택(partsel)도 허용해서 경로→dbId를 인덱스에서 바로 회수
-let orderedDbIds = [];
-let pathByDbId = new Map();
-
-const store = window.__WBS_STORE__;
-if (store?.getOrderedDbIdsFromSelection) {
-  const { orderedDbIds: ids, pathByDbId: map } =
-    await store.getOrderedDbIdsFromSelection({ includePartsel: true });
-  orderedDbIds = ids;
-  pathByDbId   = map;
-} else {
-  // 🔁 폴백(이전 방식): 체크된 노드 직접 읽어서 provider/가시 트리에서 수집
-  const _wbs = findWbsTree();
-  if (!_wbs) { alert("WBS 트리를 찾을 수 없습니다(체크박스가 있는 트리)."); return; }
-
-  const checkedNodes = getCheckedNodesFT(); // (partsel 제외)
-  if (!checkedNodes.length) {
-    console.warn("[WBS] No checked nodes via API/DOM fallback.");
-    alert("WBS에서 '체크(V)'된 항목이 없습니다.\n(체크 후 다시 시도해 주세요)");
-    return;
-  }
-
-  checkedNodes.sort((a,b) => a.getIndexHier().localeCompare(b.getIndexHier(), undefined, { numeric:true }));
-
-  const seen = new Set();
-  for (const node of checkedNodes){
-    const path = node.data?.path || pathOfNodeFT(node);
-    const ids = await bfsCollectDescendantDbIds(provider, path, node);
-    for (const id of ids){
-      if (!seen.has(id)) {
-        seen.add(id);
-        orderedDbIds.push(id);
-        pathByDbId.set(id, path.slice());
-      }
-    }
-  }
-}
-
-if (!orderedDbIds.length) return alert("체크된 항목에서 연결 가능한 객체(dbId)를 찾지 못했습니다.");
-
-
-
-// 스토어 준비 상태
+highlight.js:4 [hec] wbs/highlight.js loaded
+endpoints.js:236  getCdnRedirectUrl is deprecated and will be removed soon
+endp.getCdnRedirectUrl @ endpoints.js:236
+WebGLRenderer.js:29 THREE.WebGLRenderer 71
+WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
+CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
+CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
+CustomViewerExtension.js:207 툴바 커스터마이징 완료.
+WebGLRenderer.js:29 THREE.WebGLRenderer 71
+WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
+(index):1 Autofocus processing was blocked because a document already has a focused element.
+GeometryList.js:344 Total geometry size: 22.579627990722656 MB
+GeometryList.js:345 Number of meshes: 6614
+GeometryList.js:346 Num Meshes on GPU: 6647
+GeometryList.js:347 Net GPU geom memory used: 75519924
+main.js:548 [WBS] roots: 5
+main.js:148 [persistTasksSnapshot] saved. count = 2
+main.js:276 [FA] fallback map ready (keys = 2391 )
+main.js:310 [FA] getCounts bridged
+main.js:576 [STEP 5] WBS fancytree init OK
+main.js:582 [STEP 6] panel2 resizer bound
+main.js:583 [STEP 1] Task panel OK
+main.js:584 [STEP 2] panel2-ready dispatched
+gantt-view.js:171 [gantt-view] google loaded
+main.js:348  Uncaught TypeError: Cannot read properties of undefined (reading 'total')
+    at countsForPath (main.js:348:20)
+    at repaintNode (main.js:367:18)
+    at j.visit (jquery.fancytree-all-deps.js:3931:11)
+    at j.visit (jquery.fancytree-all-deps.js:3938:24)
+    at j.visit (jquery.fancytree-all-deps.js:3938:24)
+    at j.visit (jquery.fancytree-all-deps.js:3938:24)
+    at j.visit (jquery.fancytree-all-deps.js:3938:24)
+    at j.visit (jquery.fancytree-all-deps.js:3938:24)
+    at j.visit (jquery.fancytree-all-deps.js:3938:24)
+    at I.visit (jquery.fancytree-all-deps.js:5320:25)
 window.__WBS_STORE__?.refreshWbsStore()
   .then(()=>console.log('store ready?', window.__WBS_STORE__?.WbsStore?.isReady));
-
-// 체크 몇 개 하고:
+VM1228:2 store ready? true
+Promise {<fulfilled>: undefined}
 window.__WBS_STORE__?.getOrderedDbIdsFromSelection({ includePartsel: true })
   .then(r => console.log('dbIds:', r.orderedDbIds.length, r.orderedDbIds.slice(0,30)));
+VM1232:2 dbIds: 197 (30) [35486, 35487, 35488, 35489, 35490, 35491, 35493, 35494, 35495, 35496, 35498, 35500, 35502, 35504, 35505, 35506, 35507, 35508, 35460, 35461, 35462, 35463, 35464, 35465, 35467, 35469, 35471, 35473, 35474, 35475]
+Promise {<fulfilled>: undefined}

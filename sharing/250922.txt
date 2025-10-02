@@ -1,47 +1,23 @@
-/** 사용 중인 WBS Fancytree 인스턴스를 찾는다.
- *  - 후보: 모든 .fancytree-container 중 #treegrid(작업 트리)는 제외
- *  - 우선순위: checkbox 옵션이 true 인 트리
- */
-function findWbsTree(){
-  const all = Array.from(document.querySelectorAll('.fancytree-container'))
-    .map(el => $.ui.fancytree.getTree(el))
-    .filter(Boolean);
-
-  // 작업용(treegrid) 제외
-  const taskTree = $.ui.fancytree.getTree('#treegrid');
-  const cand = all.filter(t => t !== taskTree);
-
-  // checkbox 지원 트리를 우선 반환
-  const withCk = cand.filter(t => !!t.options?.checkbox);
-  return withCk[0] || cand[0] || null;
-}
-
-/** ── Checked 노드 안전 수집(Fancytree)
- * 우선순위:
- *  1) tree.getSelectedNodes(false).filter(!partsel)
- *  2) 전체 방문해 node.selected && !node.partsel
- *  3) DOM 폴백: aria-checked="true" / .fancytree-selected → getNode(el)
- */
 function getCheckedNodesFT() {
   const tree = findWbsTree();
   if (!tree) { console.warn('[WBS] findWbsTree() = null'); return []; }
 
-  // 1) 공식 API
+  // 1) 공식 API: 부분선택 포함(필터 제거)
   try {
-    const nodes = tree.getSelectedNodes(false).filter(n => !n.partsel);
-    if (nodes.length) return nodes;
+    const nodes = tree.getSelectedNodes(false); // partsel도 허용
+    if (nodes.length) return uniqNodes(nodes);
   } catch(_) {}
 
-  // 2) 전체 방문
+  // 2) 전체 방문: selected===true 이면 수집 (partsel 여부 무시)
   try {
     const found = [];
     tree.getRootNode()?.visit((n) => {
-      if (n.selected && !n.partsel) found.push(n);
+      if (n.selected) found.push(n);
     });
-    if (found.length) return found;
+    if (found.length) return uniqNodes(found);
   } catch(_) {}
 
-  // 3) DOM 폴백 (tree.$div 기준!)
+  // 3) DOM 폴백 (부분선택 허용)
   try {
     const $cont = tree.$div || $(tree.$div);
     const $cand = $cont.find(
@@ -52,52 +28,36 @@ function getCheckedNodesFT() {
     const raw = $cand.toArray()
       .map(el => $.ui.fancytree.getNode(el))
       .filter(Boolean);
-
-    // 중복 제거 + partsel 제외
-    const out = [];
-    const seen = new Set();
-    raw.forEach(n => {
-      const key = n.key || n.getIndexHier?.() || n.title;
-      const isPart = n.partsel || $(n.span).hasClass("fancytree-partsel");
-      if (!isPart && key && !seen.has(key)) {
-        seen.add(key);
-        out.push(n);
-      }
-    });
-    return out;
+    if (raw.length) return uniqNodes(raw);
   } catch (e) {
     console.warn("[WBS] DOM fallback failed", e);
-    return [];
+  }
+  return [];
+
+  function uniqNodes(arr){
+    const out = [];
+    const seen = new Set();
+    arr.forEach(n => {
+      const key = n.key || n.getIndexHier?.() || n.title || n.data?.path?.join?.("¦");
+      if (key && !seen.has(key)) { seen.add(key); out.push(n); }
+    });
+    return out;
   }
 }
 
 
-window.__WBS_DBG__ = {
-  listTrees(){
-    const rows = Array.from(document.querySelectorAll('.fancytree-container'))
-      .map(el => $.ui.fancytree.getTree(el))
-      .filter(Boolean)
-      .map(t => ({
-        id: t.$div?.attr?.('id'),
-        checkbox: !!t.options?.checkbox,
-        selectMode: t.options?.selectMode,
-        selectedCount: (t.getSelectedNodes?.(false) || []).length
-      }));
-    console.table(rows);
-    return rows;
-  },
-  findWbsTree,
-  getCheckedNodesFT
-};
 
+window.__WBS_DBG__?.listTrees(); // WBS 트리 확인(checkbox=true, selectMode=3 인지)
 
+const t = (function(){
+  const all = Array.from(document.querySelectorAll('.fancytree-container'))
+    .map(el => $.ui.fancytree.getTree(el)).filter(Boolean);
+  const task = $.ui.fancytree.getTree('#treegrid');
+  return all.find(x => x !== task && !!x.options?.checkbox);
+})();
+console.log('selected via API =',
+  t?.getSelectedNodes(false).map(n=>({title:n.title, partsel:n.partsel, selected:n.selected}))
+);
 
-window.__WBS_DBG__.listTrees();              // 어떤 트리가 있는지 표로 보기
-window.__WBS_DBG__.getCheckedNodesFT();      // 현재 체크된 노드들 얻기
-window.__WBS_DBG__.getCheckedNodesFT()
-  .map(n => ({title:n.title, idx:n.getIndexHier()}));
-
-
-
-window.__WBS_DBG__.listTrees();
-window.__WBS_DBG__.getCheckedNodesFT().map(n=>n.title);
+window.__WBS_DBG__?.getCheckedNodesFT()
+  ?.map(n=>({title:n.title, idx:n.getIndexHier?.(), partsel:n.partsel}));

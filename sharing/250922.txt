@@ -1,107 +1,105 @@
 // /wwwroot/js/sidebar/task-wbs/core/wbs-store.js
-// 목적:
-//  - UI 트리(Fancytree)의 확장 여부와 무관하게, "선택(부분선택 포함)"된 노드들의
-//    모든 후손 leaf dbId를 안정적으로 획득하기 위한 스냅샷/인덱스 저장소.
-//
-// 요약 API:
-//   initWbsStore({ tree, provider })
-//   setProvider(provider)
-//   refreshWbsStore()
-//   getCheckedNodesInOrder({ includePartsel = true })
-//   getAllDescendantDbIdsByPath(pathArr)
-//   getOrderedDbIdsFromSelection({ includePartsel = true }) // (권장) 한 번에 ids + pathMap
-//   // 하위호환: getOrderedDbIdsFromCheckedExact() → partsel도 포함하도록 동작 변경
-//
-// 주의:
-//   - Fancytree 기준(title/key)을 사용. InspireTree의 node.text 사용 금지.
-//   - provider.getDbIdsForPath()가 있으면 그걸 최우선 사용(deep 옵션).
+// 목적: 첫 로딩시에 WBS "전체"를 인덱싱(경로 <-> dbId 맵)하여
+//       이후에는 UI 확장/프로바이더 없이도 즉시 조회 가능.
+// 지원 소스:
+//  1) provider가 있으면 provider.roots()/childrenByPath() BFS로 전체 수집
+//  2) provider가 없으면 Fancytree를 보이지 않게 deep-load 해서 전체 수집
 
 export const WbsStore = {
-  tree: null,
-  provider: null,
-  nodesInOrder: [],         // 현재 문서 순회 순서로 모든 노드
-  pathKeyToDbIds: new Map(),// "A␁B␁C" -> [dbId...](현재 보이는 자손 + lazy 확장 후 캐시)
-  dbIdToPath: new Map(),    // dbId -> ["A","B","C"]
+  tree: null,            // Fancytree instance
+  provider: null,        // { roots?, childrenByPath?, getDbIdsForPath? }
   isReady: false,
+
+  // 인덱스
+  nodesInOrder: [],      // Fancytree Node[] in document order (로깅/디버그용)
+  pathKeyToDbIds: new Map(), // "A␁B␁C" -> [dbId...](자손 leaf 포함, 정렬 유지)
+  dbIdToPath: new Map(),     // dbId -> ["A","B","C"]
+
+  // 경로 → 노드 title 규칙: title > key > data.text
+  normalizeLabel(n) {
+    return String(n?.title ?? n?.key ?? n?.data?.text ?? "").trim();
+  },
 };
 
-const SEP = "\u0001"; // 경로 키 구분자
+const SEP = "\u0001";
 
-export function initWbsStore({ tree, provider } = {}) {
+// === Public API ==============================================================
+export async function initWbsStore({ tree, provider, eager = "auto" } = {}) {
   if (tree) WbsStore.tree = tree;
   if (provider) WbsStore.provider = provider;
-  rebuildIndexFromVisibleTree();
 
-  // Fancytree 이벤트로 간단히 리빌드(너무 자주 하지 않도록 debounce)
+  resetWbsStore();
+
+  // 전체 인덱스 선구축
+  if (eager === "provider" || (eager === "auto" && provider)) {
+    await buildFullIndexFromProvider();
+  } else if (eager === "tree" || (eager === "auto" && tree)) {
+    await buildFullIndexFromFancytree();
+  }
+
+  // UI 이벤트에 맞춰 필요시 재색인(선택/확장 변화에 영향없도록 가볍게)
   try {
     const $root = $(WbsStore.tree?.$div || "#wbs-tree");
     $root.off(".wbsstore");
     $root.on(
-      "fancytreeselect.wbsstore " +      // 선택/해제
-      "fancytreeexpand.wbsstore " +      // 확장
-      "fancytreecollapse.wbsstore " +    // 접기
-      "fancytreeloadchildren.wbsstore " +// lazy 로드됨
-      "fancytreerendernode.wbsstore",    // 렌더링됨
-      debounce(rebuildIndexFromVisibleTree, 120)
+      "fancytreechange.wbsstore fancytreeexpand.wbsstore fancytreecollapse.wbsstore",
+      debounce(() => { /* 선택/렌더 변화: 전체 인덱스는 이미 준비돼 있으므로 noop */ }, 150)
     );
   } catch (_) {}
+
+  WbsStore.isReady = true;
 }
 
-export function setProvider(provider){
+export function setProvider(provider) {
   WbsStore.provider = provider || null;
 }
 
-export function resetWbsStore(){
+export function refreshWbsStore() {
+  // 필요 시 재구축(여기서는 안전상 provider 우선)
+  return initWbsStore({ tree: WbsStore.tree, provider: WbsStore.provider, eager: "auto" });
+}
+
+export function resetWbsStore() {
   WbsStore.nodesInOrder = [];
   WbsStore.pathKeyToDbIds.clear();
   WbsStore.dbIdToPath.clear();
   WbsStore.isReady = false;
 }
 
-export function refreshWbsStore(){
-  rebuildIndexFromVisibleTree();
-}
-
-/** Fancytree 노드 → 경로(문자열 배열). label은 title 우선, 그다음 key, data.text 순 */
-export function pathOfNode(n){
+export function pathOfNode(n) {
   const out = [];
   let cur = n;
-  const isRoot = x => (typeof x.isRoot === "function") ? x.isRoot() : !!x?.isRoot;
-  while (cur && !isRoot(cur)) {
-    const label = (cur.title ?? cur.key ?? cur.data?.text ?? "").toString().trim();
-    if (label) out.unshift(label);
+  while (cur && typeof cur.isRoot === "function" && !cur.isRoot()) {
+    out.unshift(WbsStore.normalizeLabel(cur));
     cur = cur.parent;
   }
   return out;
 }
 
-/** 현재 문서 순서대로 선택 노드 수집 (기본: partsel 포함) */
-export function getCheckedNodesInOrder({ includePartsel = true } = {}){
-  if (!WbsStore.isReady) rebuildIndexFromVisibleTree();
-  const out = [];
-  for (const n of WbsStore.nodesInOrder){
-    const sel = (typeof n.isSelected === "function") ? n.isSelected() : !!n.selected;
-    const part = (typeof n.isPartsel === "function") ? n.isPartsel() : !!n.partsel;
-    if (sel && (includePartsel || !part)) out.push(n);
-  }
-  return out;
+// 선택 노드(체크) 수집: includePartsel=true면 부분선택도 포함
+export function getCheckedNodesInOrder({ includePartsel = true } = {}) {
+  const t = WbsStore.tree;
+  if (!t) return [];
+  const nodes = t.getSelectedNodes?.(false) || [];
+  return nodes.filter(n => (includePartsel ? true : !n.partsel));
 }
 
-/** 하위호환: 'Exact'라는 이름이지만 partsel도 포함하도록 동작 변경 */
-export function getCheckedExactNodesInOrder(){
-  return getCheckedNodesInOrder({ includePartsel: true });
-}
+/** 체크된 노드들로부터 dbId들을 "인덱스(사전 구축)"에서 바로 회수 */
+export async function getOrderedDbIdsFromSelection({ includePartsel = true } = {}) {
+  if (!WbsStore.isReady) await refreshWbsStore();
 
-/** 선택 노드들의 자손 leaf dbId를 UI 확장 없이 수집 (WBS 순서 유지) */
-export async function getOrderedDbIdsFromSelection({ includePartsel = true } = {}){
-  const checked = getCheckedNodesInOrder({ includePartsel });
+  const selected = getCheckedNodesInOrder({ includePartsel });
+  // 문서 순서 정렬
+  selected.sort((a, b) => a.getIndexHier().localeCompare(b.getIndexHier(), undefined, { numeric: true }));
+
   const orderedDbIds = [];
   const pathByDbId = new Map();
   const seen = new Set();
 
-  for (const node of checked) {
+  for (const node of selected) {
     const pathArr = pathOfNode(node);
-    const ids = await getAllDescendantDbIdsByPath(pathArr);
+    const key = pathArr.join(SEP);
+    const ids = WbsStore.pathKeyToDbIds.get(key) || [];
     for (const id of ids) {
       if (!seen.has(id)) {
         seen.add(id);
@@ -113,205 +111,196 @@ export async function getOrderedDbIdsFromSelection({ includePartsel = true } = {
   return { orderedDbIds, pathByDbId };
 }
 
-/** 하위호환 alias */
-export async function getOrderedDbIdsFromCheckedExact(){
-  return getOrderedDbIdsFromSelection({ includePartsel: true });
+/** (호환용) 정확히 체크(V)만 대상으로 수집 */
+export async function getOrderedDbIdsFromCheckedExact() {
+  return getOrderedDbIdsFromSelection({ includePartsel: false });
 }
 
-/** 주어진 경로의 모든 자손 leaf dbId 반환(스냅샷에 없으면 provider로 lazy 확장 후 캐시) */
-export async function getAllDescendantDbIdsByPath(pathArr){
+/** 특정 경로의 모든 자손 leaf dbId 반환(이미 인덱스에 있음) */
+export async function getAllDescendantDbIdsByPath(pathArr) {
   if (!Array.isArray(pathArr) || !pathArr.length) return [];
-  if (!WbsStore.isReady) rebuildIndexFromVisibleTree();
+  if (!WbsStore.isReady) await refreshWbsStore();
+  return (WbsStore.pathKeyToDbIds.get(pathArr.join(SEP)) || []).slice();
+}
 
-  const key = pathArr.join(SEP);
-  const cached = WbsStore.pathKeyToDbIds.get(key);
-  if (Array.isArray(cached) && cached.length) return cached.slice();
+// === Internal: Build Index ====================================================
 
-  // 0) provider가 direct API를 제공하면 우선 사용
+async function buildFullIndexFromProvider() {
   const p = WbsStore.provider;
-  if (p && typeof p.getDbIdsForPath === "function") {
-    try {
-      const ids = await p.getDbIdsForPath(pathArr, { deep: true });
-      if (Array.isArray(ids) && ids.length) {
-        WbsStore.pathKeyToDbIds.set(key, ids.slice());
-        // 역인덱스 채움
-        ids.forEach(id => { if (Number.isFinite(+id)) WbsStore.dbIdToPath.set(+id, pathArr.slice()); });
-        return ids.slice();
-      }
-    } catch(_) {}
+  if (!p || typeof p.childrenByPath !== "function") return;
+
+  resetWbsStore();
+
+  let roots = [];
+  try {
+    // roots()가 없으면 빈 path에서 childrenByPath([])
+    roots = (typeof p.roots === "function") ? (await p.roots()) : (await p.childrenByPath([]));
+  } catch (_) { roots = []; }
+
+  const queue = [];
+  for (const r of (roots || [])) {
+    const label = String(r?.text ?? r?.name ?? "").trim();
+    if (!label) continue;
+    queue.push([label]);
   }
 
-  // 1) 없으면 provider로 BFS 확장
-  const ids = await ensureSubtreeAndCollect(pathArr);
-  if (ids.length) WbsStore.pathKeyToDbIds.set(key, ids.slice());
-  return ids;
+  while (queue.length) {
+    const cur = queue.shift();
+    const key = cur.join(SEP);
+
+    let children = [];
+    try { children = await p.childrenByPath(cur); } catch (_) { children = []; }
+
+    const ids = [];
+    for (const ch of (children || [])) {
+      const label = String(ch?.text ?? ch?.name ?? "").trim();
+      const id = Number(ch?.dbId ?? ch?.data?.dbId);
+      if (Number.isFinite(id)) {
+        // leaf
+        ids.push(id);
+        WbsStore.dbIdToPath.set(id, cur.concat(label));
+      } else if (label) {
+        queue.push(cur.concat(label));
+      }
+    }
+    if (ids.length) {
+      const merged = uniqKeepOrder([...(WbsStore.pathKeyToDbIds.get(key) || []), ...ids]);
+      WbsStore.pathKeyToDbIds.set(key, merged);
+    }
+  }
+
+  WbsStore.isReady = true;
 }
 
-/* ============= 내부 구현 ============= */
+async function buildFullIndexFromFancytree() {
+  const t = WbsStore.tree;
+  if (!t) return;
 
-function rebuildIndexFromVisibleTree(){
   resetWbsStore();
-  const tree = WbsStore.tree || window.wbsTree;
-  const root = tree?.getRootNode?.();
+
+  // 1) 전체 로드(보이지 않게). lazy 노드는 load(true) 사용
+  const root = t.getRootNode?.();
   if (!root) return;
 
-  // 모든 노드를 문서 순서로 수집
-  root.visit((n) => { WbsStore.nodesInOrder.push(n); });
+  await deepLoadNode(root);
 
-  // 현재 보이는 범위에서 leaf(dbId) 인덱스
-  root.visit((n) => {
-    if (isLeafWithDb(n)) {
+  // 2) 로드된 전체 트리를 순회하여 인덱싱
+  root.visit(n => {
+    WbsStore.nodesInOrder.push(n);
+    const hasKids = (n.hasChildren && n.hasChildren());
+    const id = Number(n.data?.dbId ?? n.dbId);
+    if (!hasKids && Number.isFinite(id)) {
       const path = pathOfNode(n);
-      const pkey = path.join(SEP);
-      const id = toNumber(n.data?.dbId ?? n.dbId);
-      if (Number.isFinite(id)) {
-        WbsStore.dbIdToPath.set(id, path);
-        appendToKeyArray(WbsStore.pathKeyToDbIds, pkey, id);
-      }
+      WbsStore.dbIdToPath.set(id, path);
     }
   });
 
-  // 그룹 경로에 대해 현재 보이는 자손 집계
-  root.visit((n) => {
-    if (n.hasChildren && n.hasChildren()) {
-      const path = pathOfNode(n);
-      const pkey = path.join(SEP);
-      const acc = [];
-      n.visit((c) => {
-        if (c !== n && isLeafWithDb(c)) {
-          const id = toNumber(c.data?.dbId ?? c.dbId);
-          if (Number.isFinite(id)) acc.push(id);
-        }
-      });
-      if (acc.length) WbsStore.pathKeyToDbIds.set(pkey, uniqKeepOrder(acc));
-    }
+  // 그룹 경로마다 자손 leaf 집계
+  root.visit(n => {
+    const hasKids = (n.hasChildren && n.hasChildren());
+    if (!hasKids) return;
+    const path = pathOfNode(n);
+    const key = path.join(SEP);
+    const acc = [];
+    n.visit(c => {
+      if (c === n) return;
+      const leaf = !(c.hasChildren && c.hasChildren());
+      const id = Number(c.data?.dbId ?? c.dbId);
+      if (leaf && Number.isFinite(id)) acc.push(id);
+    });
+    if (acc.length) WbsStore.pathKeyToDbIds.set(key, uniqKeepOrder(acc));
   });
 
   WbsStore.isReady = true;
 }
 
-async function ensureSubtreeAndCollect(pathArr){
-  const p = WbsStore.provider;
-  if (!p || typeof p.childrenByPath !== "function") return [];
-
-  const queue = [ pathArr.slice() ];
-  const leafIds = [];
-  const seenPathKey = new Set();
-
-  while (queue.length) {
-    const curPath = queue.shift();
-    const key = curPath.join(SEP);
-    if (seenPathKey.has(key)) continue;
-    seenPathKey.add(key);
-
-    let children = [];
-    try {
-      children = await p.childrenByPath(curPath); // [{text, dbId?}] child list
-    } catch(_){ children = []; }
-
-    // 버킷(flatten)
-    if (children?.some?.(x => x && x._isBucket && Array.isArray(x.__bucket))) {
-      const flat = [];
-      children.forEach(ch => {
-        if (ch && ch._isBucket && Array.isArray(ch.__bucket)) flat.push(...ch.__bucket);
-        else flat.push(ch);
-      });
-      children = flat;
-    }
-
-    const subIds = [];
-    for (const ch of (children || [])) {
-      const label = (ch.text ?? ch.name ?? "").toString().trim();
-      if (!label) continue;
-      const nextPath = curPath.concat(label);
-      const id = toNumber(ch.dbId ?? ch.data?.dbId);
-      if (Number.isFinite(id)) {
-        // leaf
-        WbsStore.dbIdToPath.set(id, nextPath);
-        subIds.push(id);
-      } else {
-        // group
-        queue.push(nextPath);
-      }
-    }
-
-    if (subIds.length) {
-      const pkey = curPath.join(SEP);
-      const merged = uniqKeepOrder([...(WbsStore.pathKeyToDbIds.get(pkey) || []), ...subIds]);
-      WbsStore.pathKeyToDbIds.set(pkey, merged);
-      leafIds.push(...subIds);
+// Fancytree: lazy node들을 실제로 children까지 모두 로드(확장하지 않고)
+async function deepLoadNode(node) {
+  // node.load(true): 데이터만 로드(렌더/확장 X) — 없으면 setExpanded 시도 후 다시 닫기
+  if (node.lazy && !node.children && typeof node.load === "function") {
+    try { await node.load(true); } catch(_) {}
+  } else if (node.lazy && !node.children) {
+    const wasExpanded = node.expanded;
+    try { await node.setExpanded(true, { noAnimation: true, noEvents: true }); } catch(_) {}
+    if (!wasExpanded) {
+      try { await node.setExpanded(false, { noAnimation: true, noEvents: true }); } catch(_) {}
     }
   }
 
-  // 최상위 pathArr의 자손 통합 결과
-  const key = pathArr.join(SEP);
-  return uniqKeepOrder([...(WbsStore.pathKeyToDbIds.get(key) || []), ...leafIds]);
+  if (node.children && node.children.length) {
+    // chunked load 방지: 순차 await
+    for (const ch of node.children) {
+      await deepLoadNode(ch);
+    }
+  }
 }
 
-/* 유틸 */
-
-function isLeafWithDb(n){
-  const hasKids = (n.hasChildren && n.hasChildren());
-  const id = toNumber(n.data?.dbId ?? n.dbId);
-  return !hasKids && Number.isFinite(id);
-}
-
-function appendToKeyArray(map, key, val){
-  const arr = map.get(key) || [];
-  arr.push(val);
-  map.set(key, arr);
-}
-
-function uniqKeepOrder(arr){
-  const s = new Set(), out = [];
+// === Utils ===================================================================
+function uniqKeepOrder(arr) {
+  const s = new Set(); const out = [];
   for (const x of arr) if (!s.has(x)) { s.add(x); out.push(x); }
   return out;
 }
 
-function toNumber(v){
-  const n = Number(v);
-  return Number.isFinite(n) ? n : NaN;
+function debounce(fn, ms) {
+  let t = 0;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
-function debounce(fn, ms){
-  let t=0;
-  return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); };
+// === expose to window for console/debug ======================================
+if (typeof window !== "undefined") {
+  window.__WBS_STORE__ = {
+    WbsStore,
+    initWbsStore,
+    setProvider,
+    refreshWbsStore,
+    pathOfNode,
+    getCheckedNodesInOrder,
+    getOrderedDbIdsFromSelection,
+    getOrderedDbIdsFromCheckedExact,
+    getAllDescendantDbIdsByPath,
+  };
 }
 
 
 
+const wbsFT = (function(){
+  // #wbs-tree가 가장 흔함, 아니면 checkbox 트리 자동 탐색
+  return $.ui.fancytree.getTree('#wbs-tree') ||
+         Array.from(document.querySelectorAll('.fancytree-container'))
+           .map(el => $.ui.fancytree.getTree(el))
+           .filter(Boolean)
+           .find(t => t.$div?.attr?.('id') !== 'treegrid') || null;
+})();
+mod.initWbsStore?.({ tree: wbsFT, provider: window.__WBS_PROVIDER, eager: "auto" });
 
-// 1) 어떤 WBS 트리인지
+
+
+const store = window.__WBS_STORE__;
+let orderedDbIds = [];
+let pathByDbId = new Map();
+
+if (store && typeof store.getOrderedDbIdsFromSelection === "function") {
+  const { orderedDbIds: ids, pathByDbId: map } =
+    await store.getOrderedDbIdsFromSelection({ includePartsel: true });
+  orderedDbIds = ids; pathByDbId = map;
+} else {
+  // (폴백 로직 남겨둬도 되지만, 이제는 거의 타지 않을 겁니다)
+}
+
+
+
+// 1) 트리/스토어 상태
 window.__WBS_DBG__?.listTrees();
+window.__WBS_STORE__?.refreshWbsStore()
+  .then(()=>console.log('store ready:', window.__WBS_STORE__?.WbsStore?.isReady));
 
-// 2) store가 보는 '선택 노드'와 '경로'
-(function(){
-  const mod = window.__WBS_STORE__ || (await import('/wwwroot/js/sidebar/task-wbs/core/wbs-store.js').catch(()=>null));
-  if (!mod) return console.warn('no store module');
-  const sel = mod.getCheckedNodesInOrder({ includePartsel: true });
-  console.log('selected count=', sel.length);
-  sel.forEach(n => console.log(' -', n.title, 'path=', mod.pathOfNode(n)));
-})();
+// 2) 체크해 보고…
+window.__WBS_STORE__?.getOrderedDbIdsFromSelection({ includePartsel:true })
+  .then(r => console.log('dbIds:', r.orderedDbIds.length, r.orderedDbIds.slice(0,30)))
+  .catch(console.warn);
 
-// 3) 첫 번째 선택 경로로 provider 조회가 되는지
-(async function(){
-  const t = (function(){
-    const all = Array.from(document.querySelectorAll('.fancytree-container'))
-      .map(el => $.ui.fancytree.getTree(el)).filter(Boolean);
-    const task = $.ui.fancytree.getTree('#treegrid');
-    return all.find(x => x !== task && !!x.options?.checkbox);
-  })();
-  const first = t?.getSelectedNodes(false)[0];
-  if (!first) return console.warn('no selection');
-  const path = (first.title ? [first.title] : []);
-  console.log('first title=', first.title, 'path=', path);
-
-  const p = window.__WBS_PROVIDER;
-  if (!p) return console.warn('no provider');
-  const children = await p.childrenByPath(path).catch(e=>{console.warn('childrenByPath error', e); return [];});
-  console.log('childrenByPath size=', children?.length, children?.slice?.(0,5));
-  if (p.getDbIdsForPath) {
-    const ids = await p.getDbIdsForPath(path, { deep:true }).catch(()=>[]);
-    console.log('getDbIdsForPath(deep) size=', ids.length, ids.slice(0,20));
-  }
-})();
+// 3) 특정 경로로도 테스트
+//   체크한 항목이 '기초'라면:
+window.__WBS_STORE__?.getAllDescendantDbIdsByPath(['기초'])
+  .then(ids => console.log('기초 deep size=', ids.length));

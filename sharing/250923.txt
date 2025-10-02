@@ -1,3 +1,55 @@
+highlight.js:4 [hec] wbs/highlight.js loaded
+endpoints.js:236  getCdnRedirectUrl is deprecated and will be removed soon
+endp.getCdnRedirectUrl @ endpoints.js:236
+initializeCDN @ envinit.js:640
+Initializer @ envinit.js:759
+(anonymous) @ init-viewer.js:18
+initViewer @ init-viewer.js:17
+(anonymous) @ main.js:504
+await in (anonymous)
+(anonymous) @ main.js:591
+WebGLRenderer.js:29 THREE.WebGLRenderer 71
+WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
+CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
+CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
+CustomViewerExtension.js:207 툴바 커스터마이징 완료.
+WebGLRenderer.js:29 THREE.WebGLRenderer 71
+WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
+(index):1 Autofocus processing was blocked because a document already has a focused element.
+GeometryList.js:344 Total geometry size: 22.579627990722656 MB
+GeometryList.js:345 Number of meshes: 6614
+GeometryList.js:346 Num Meshes on GPU: 6647
+GeometryList.js:347 Net GPU geom memory used: 75519924
+main.js:548 [WBS] roots: 5
+main.js:148 [persistTasksSnapshot] saved. count = 2
+main.js:276 [FA] fallback map ready (keys = 2391 )
+main.js:310 [FA] getCounts bridged
+main.js:576 [STEP 5] WBS fancytree init OK
+main.js:582 [STEP 6] panel2 resizer bound
+main.js:583 [STEP 1] Task panel OK
+main.js:584 [STEP 2] panel2-ready dispatched
+gantt-view.js:171 [gantt-view] google loaded
+window.__WBS_DBG__?.listTrees(); // WBS 트리 확인(checkbox=true, selectMode=3 인지)
+
+const t = (function(){
+  const all = Array.from(document.querySelectorAll('.fancytree-container'))
+    .map(el => $.ui.fancytree.getTree(el)).filter(Boolean);
+  const task = $.ui.fancytree.getTree('#treegrid');
+  return all.find(x => x !== task && !!x.options?.checkbox);
+})();
+console.log('selected via API =',
+  t?.getSelectedNodes(false).map(n=>({title:n.title, partsel:n.partsel, selected:n.selected}))
+);
+
+window.__WBS_DBG__?.getCheckedNodesFT()
+  ?.map(n=>({title:n.title, idx:n.getIndexHier?.(), partsel:n.partsel}));
+VM2476:9 selected via API = [{…}]0: partsel: trueselected: truetitle: "기초"[[Prototype]]: Objectlength: 1lastIndex: (...)lastItem: (...)[[Prototype]]: Array(0)
+undefined
+
+
+
 // /wwwroot/js/sidebar/task-wbs/core/wbs-store.js
 // 목적: UI 트리 확장 여부와 무관하게, "정확히 체크된(V) 노드"의 모든 후손 leaf dbId를
 //       가져올 수 있는 스냅샷/인덱스 저장소.

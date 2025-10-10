@@ -1,359 +1,1145 @@
-// /wwwroot/js/sidebar/task-wbs/core/wbs-store.js
-// 목적: 첫 로딩시에 WBS "전체"를 인덱싱(경로 <-> dbId 맵)하여
-//       이후에는 UI 확장 없이도 즉시 조회 가능.
-// 전략:
-//   1) provider가 있으면 provider.roots()/childrenByPath() BFS로 '전체' 수집(권장)
-//   2) provider가 없으면 현재 '보이는' Fancytree만 스캔(visible-only 인덱스)
-//      ※ Fancytree를 강제로 deep-load 하지 않음(트리 내부 상태 변경 금지)
-//
-// 중요: 이 모듈은 Fancytree UI를 변경(확장/children 주입)하지 않습니다.
-
-export const WbsStore = {
-  tree: null,            // Fancytree instance (optional)
-  provider: null,        // { roots?, childrenByPath?, countAt? }
-  isReady: false,
-
-  // 인덱스
-  nodesInOrder: [],          // Fancytree Node[] in document order (디버그용)
-  pathKeyToDbIds: new Map(), // "A␁B␁C" -> [dbId...](자손 leaf 포함, 순서 유지)
-  dbIdToPath: new Map(),     // dbId -> ["A","B","C"]
-
-  // 경로 → 노드 title 규칙
-  normalizeLabel(n) {
-    return String(n?.title ?? n?.key ?? n?.data?.text ?? "").trim();
-  },
-};
-
-const SEP = "\u0001";
-
-/* =============================================================================
- * Public API
- * ========================================================================== */
-export async function initWbsStore({ tree, provider, eager = "auto" } = {}) {
-  if (tree) WbsStore.tree = tree;
-  if (provider) WbsStore.provider = provider;
-
-  resetWbsStore();
-
-  // 1) provider가 있으면 전체 BFS 인덱스(가장 안전/빠름)
-  if (eager === "provider" || (eager === "auto" && WbsStore.provider)) {
-    await buildIndexFromProvider();
-  }
-  // 2) provider가 없으면 현재 보이는 트리만 스캔(딥로드 없음)
-  else if (eager === "tree" || (eager === "auto" && WbsStore.tree)) {
-    buildVisibleIndex();
-  }
-
-  // UI 이벤트 훅: 이 스토어는 전체 인덱스를 이미 가지고 있으므로 noop.
-  // (단, 눈에 보이는 영역만 사용하는 모드에서는 재스캔)
-  try {
-    const $root = $(WbsStore.tree?.$div || "#wbs-tree");
-    $root.off(".wbsstore");
-    $root.on(
-      "fancytreeexpand.wbsstore fancytreecollapse.wbsstore fancytreechange.wbsstore",
-      debounce(() => {
-        // provider가 없을 때만 보이는 인덱스 유지
-        if (!WbsStore.provider) buildVisibleIndex();
-      }, 120)
-    );
-  } catch (_) {}
-
-  WbsStore.isReady = true;
-}
-
-export function setProvider(provider) {
-  WbsStore.provider = provider || null;
-}
-
-export function resetWbsStore() {
-  WbsStore.nodesInOrder = [];
-  WbsStore.pathKeyToDbIds.clear();
-  WbsStore.dbIdToPath.clear();
-  WbsStore.isReady = false;
-}
-
-export function refreshWbsStore() {
-  // 안전상 provider가 있으면 provider로 전체 재구축, 없으면 보이는 것만
-  if (WbsStore.provider) return initWbsStore({ tree: WbsStore.tree, provider: WbsStore.provider, eager: "provider" });
-  buildVisibleIndex();
-  WbsStore.isReady = true;
-  return Promise.resolve();
-}
-
-export function pathOfNode(n) {
-  const out = [];
-  let cur = n;
-  while (cur && typeof cur.isRoot === "function" && !cur.isRoot()) {
-    out.unshift(WbsStore.normalizeLabel(cur));
-    cur = cur.parent;
-  }
-  return out;
-}
-
-// 선택 노드(체크) 수집: includePartsel=true면 부분선택도 포함
-export function getCheckedNodesInOrder({ includePartsel = true } = {}) {
-  const t = WbsStore.tree;
-  if (!t) return [];
-  const nodes = t.getSelectedNodes?.(false) || [];
-  return nodes.filter(n => (includePartsel ? true : !n.partsel));
-}
-
-/** 체크된 노드들로부터 dbId들을 인덱스에서 회수 (문서 순서 유지) */
-export async function getOrderedDbIdsFromSelection({ includePartsel = true } = {}) {
-  if (!WbsStore.isReady) await refreshWbsStore();
-
-  const selected = getCheckedNodesInOrder({ includePartsel });
-  // 문서 순서 정렬
-  selected.sort((a, b) => a.getIndexHier().localeCompare(b.getIndexHier(), undefined, { numeric: true }));
-
-  const orderedDbIds = [];
-  const pathByDbId = new Map();
-  const seen = new Set();
-
-  for (const node of selected) {
-    const pathArr = pathOfNode(node);
-    const key = pathArr.join(SEP);
-    let ids = WbsStore.pathKeyToDbIds.get(key);
-
-    // 캐시에 없고 provider가 있다면 한 번 채움
-    if ((!ids || !ids.length) && WbsStore.provider) {
-      ids = await getAllDescendantDbIdsByPath(pathArr);
-    }
-
-    (ids || []).forEach(id => {
-      if (!seen.has(id)) {
-        seen.add(id);
-        orderedDbIds.push(id);
-        pathByDbId.set(id, pathArr.slice());
-      }
-    });
-  }
-  return { orderedDbIds, pathByDbId };
-}
-
-/** (호환용) 정확히 체크(V)만 대상으로 수집 */
-export async function getOrderedDbIdsFromCheckedExact() {
-  return getOrderedDbIdsFromSelection({ includePartsel: false });
-}
-
-/** 특정 경로의 모든 자손 leaf dbId 반환(캐시 → provider BFS) */
-export async function getAllDescendantDbIdsByPath(pathArr) {
-  if (!Array.isArray(pathArr) || !pathArr.length) return [];
-  if (!WbsStore.isReady) await refreshWbsStore();
-
-  const key = pathArr.join(SEP);
-  const cached = WbsStore.pathKeyToDbIds.get(key);
-  if (Array.isArray(cached) && cached.length) return cached.slice();
-
-  // provider로 BFS해서 채워 넣기
-  if (WbsStore.provider) {
-    const ids = await bfsByProvider(pathArr);
-    if (ids.length) WbsStore.pathKeyToDbIds.set(key, ids.slice());
-    return ids;
-  }
-
-  // provider가 없으면 현재 인덱스 수준(visible-only)까지만
-  return [];
-}
-
-/** 경로 건수(leaf 개수) */
-export function countAt(pathArr) {
-  if (!Array.isArray(pathArr)) return 0;
-  if (!WbsStore.isReady) {
-    try { /* sync-안전 */ } catch (_) {}
-  }
-  const key = pathArr.join(SEP);
-  const ids = WbsStore.pathKeyToDbIds.get(key);
-  if (Array.isArray(ids)) return ids.length;
-
-  // provider가 빠른 countAt 제공하면 사용
-  if (WbsStore.provider?.countAt) {
-    try { return Number(WbsStore.provider.countAt(pathArr)) || 0; } catch {}
-  }
-  return 0;
-}
-
-/* =============================================================================
- * Internal: Build Index
- * ========================================================================== */
-
-/** 1) Provider 전체 BFS (권장 경로) */
-async function buildIndexFromProvider() {
-  resetWbsStore();
-
-  const p = WbsStore.provider;
-  if (!p || typeof p.childrenByPath !== "function") {
-    // provider가 없으면 보이는 것만 스캔
-    buildVisibleIndex();
-    WbsStore.isReady = true;
-    return;
-  }
-
-  // roots 가져오기
-  let roots = [];
-  try {
-    roots = (typeof p.roots === "function") ? (await p.roots()) : (await p.childrenByPath([]));
-  } catch (_) { roots = []; }
-
-  // 큐에 최상위 경로 push
-  const queue = [];
-  for (const r of (roots || [])) {
-    const label = String(r?.text ?? r?.name ?? "").trim();
-    if (label) queue.push([label]);
-  }
-
-  // BFS
-  while (queue.length) {
-    const cur = queue.shift();
-    const key = cur.join(SEP);
-
-    let children = [];
-    try { children = await p.childrenByPath(cur); } catch (_) { children = []; }
-
-    const leaf = [];
-    for (const ch of (children || [])) {
-      const label = String(ch?.text ?? ch?.name ?? "").trim();
-      const id = Number(ch?.dbId ?? ch?.data?.dbId);
-      if (Number.isFinite(id)) {
-        leaf.push(id);
-        WbsStore.dbIdToPath.set(id, cur.concat(label));
-      } else if (label) {
-        queue.push(cur.concat(label));
-      }
-    }
-
-    if (leaf.length) {
-      const merged = uniqKeepOrder([...(WbsStore.pathKeyToDbIds.get(key) || []), ...leaf]);
-      WbsStore.pathKeyToDbIds.set(key, merged);
-    }
-  }
-
-  WbsStore.isReady = true;
-}
-
-/** 2) Provider가 없을 때: 현재 보이는 Fancytree만 스캔(딥로드 없음) */
-function buildVisibleIndex() {
-  resetWbsStore();
-
-  const t =
-    WbsStore.tree ||
-    $.ui.fancytree.getTree('#wbs-tree') ||
-    Array.from(document.querySelectorAll('.fancytree-container'))
-      .map(el => $.ui.fancytree.getTree(el))
-      .filter(Boolean)
-      .find(tr => tr.$div?.attr?.('id') !== 'treegrid');
-
-  const root = t?.getRootNode?.();
-  if (!root) return;
-
-  // 보이는 노드만 순회(여기서 lazy-load 유발 X)
-  root.visit(n => {
-    WbsStore.nodesInOrder.push(n);
-    const hasKids = (n.hasChildren && n.hasChildren());
-    const id = Number(n.data?.dbId ?? n.dbId);
-    if (!hasKids && Number.isFinite(id)) {
-      const path = pathOfNode(n);
-      const key = path.join(SEP);
-      appendToKeyArray(WbsStore.pathKeyToDbIds, key, id);
-      WbsStore.dbIdToPath.set(id, path);
-    }
-  });
-
-  // 그룹 경로에 대해 현재 '보이는' 자손만 집계
-  root.visit(n => {
-    if (n.hasChildren && n.hasChildren()) {
-      const path = pathOfNode(n);
-      const key = path.join(SEP);
-      const acc = [];
-      n.visit(c => {
-        if (c !== n && !(c.hasChildren && c.hasChildren())) {
-          const id = Number(c.data?.dbId ?? c.dbId);
-          if (Number.isFinite(id)) acc.push(id);
-        }
-      });
-      if (acc.length) WbsStore.pathKeyToDbIds.set(key, uniqKeepOrder(acc));
-    }
-  });
-
-  WbsStore.isReady = true;
-}
-
-/** Provider로 지정 경로 이하 자손 leaf dbId BFS */
-async function bfsByProvider(pathArr) {
-  const p = WbsStore.provider;
-  if (!p || typeof p.childrenByPath !== "function") return [];
-
-  const queue = [ pathArr.slice() ];
-  const seen = new Set();
-  const collected = [];
-
-  while (queue.length) {
-    const cur = queue.shift();
-    const curKey = cur.join(SEP);
-    if (seen.has(curKey)) continue;
-    seen.add(curKey);
-
-    let children = [];
-    try { children = await p.childrenByPath(cur); } catch (_) { children = []; }
-
-    const subLeaf = [];
-    for (const ch of (children || [])) {
-      const label = String(ch?.text ?? ch?.name ?? "").trim();
-      if (!label) continue;
-      const id = Number(ch?.dbId ?? ch?.data?.dbId);
-      if (Number.isFinite(id)) {
-        subLeaf.push(id);
-        WbsStore.dbIdToPath.set(id, cur.concat(label));
-      } else {
-        queue.push(cur.concat(label));
-      }
-    }
-
-    if (subLeaf.length) {
-      const exist = WbsStore.pathKeyToDbIds.get(curKey) || [];
-      WbsStore.pathKeyToDbIds.set(curKey, uniqKeepOrder(exist.concat(subLeaf)));
-      collected.push(...subLeaf);
-    }
-  }
-
-  const topKey = pathArr.join(SEP);
-  return uniqKeepOrder([...(WbsStore.pathKeyToDbIds.get(topKey) || []), ...collected]);
-}
-
-/* =============================================================================
- * Utils
- * ========================================================================== */
-function appendToKeyArray(map, key, val) {
-  const arr = map.get(key) || [];
-  arr.push(val);
-  map.set(key, arr);
-}
-
-function uniqKeepOrder(arr) {
-  const s = new Set(); const out = [];
-  for (const x of arr) if (!s.has(x)) { s.add(x); out.push(x); }
-  return out;
-}
-
-function debounce(fn, ms) {
-  let t = 0;
-  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
-}
-
-/* =============================================================================
- * expose to window for console/debug
- * ========================================================================== */
-if (typeof window !== "undefined") {
-  window.__WBS_STORE__ = {
-    WbsStore,
-    initWbsStore,
-    setProvider,
-    refreshWbsStore,
-    pathOfNode,
-    getCheckedNodesInOrder,
-    getOrderedDbIdsFromSelection,
-    getOrderedDbIdsFromCheckedExact,
-    getAllDescendantDbIdsByPath,
-    countAt,
-  };
-}
+<tbody><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 0px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">기초</span></span></td><td role="gridcell" class="text-center">477</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">477</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 0px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">마감벽</span></span></td><td role="gridcell" class="text-center">197</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">197</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-exp-c fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 0px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">수직재</span></span></td><td role="gridcell" class="text-center">5570</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">5570</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">101동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">14</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">14</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">102동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">12</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">12</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">103동, 109동 지붕층</span></span></td><td role="gridcell" class="text-center">38</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">38</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">105동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">10</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">106동 지붕층</span></span></td><td role="gridcell" class="text-center">25</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">25</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">108동 21F SL</span></span></td><td role="gridcell" class="text-center">6</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">6</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">108동 22F SL</span></span></td><td role="gridcell" class="text-center">50</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">50</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">108동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">19</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">19</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">110동 지붕층</span></span></td><td role="gridcell" class="text-center">21</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">21</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 10층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 11층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 12층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 13층 SL</span></span></td><td role="gridcell" class="text-center">187</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">187</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 14층 SL</span></span></td><td role="gridcell" class="text-center">184</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">184</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 15층 SL</span></span></td><td role="gridcell" class="text-center">212</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">212</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 16층 SL</span></span></td><td role="gridcell" class="text-center">156</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">156</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 17층 SL</span></span></td><td role="gridcell" class="text-center">157</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">157</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 18층 SL</span></span></td><td role="gridcell" class="text-center">154</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">154</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 19층 SL</span></span></td><td role="gridcell" class="text-center">154</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">154</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 1층 SL</span></span></td><td role="gridcell" class="text-center">217</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">217</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 20층 SL</span></span></td><td role="gridcell" class="text-center">140</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">140</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 21층 SL</span></span></td><td role="gridcell" class="text-center">74</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">74</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 2층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 3층 SL</span></span></td><td role="gridcell" class="text-center">195</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">195</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 4층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 5층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 6층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 7층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 8층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 9층 SL</span></span></td><td role="gridcell" class="text-center">192</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">192</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지하 1층 SL</span></span></td><td role="gridcell" class="text-center">831</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">831</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lastsib fancytree-lazy fancytree-exp-cdl fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지하 2층 SL</span></span></td><td role="gridcell" class="text-center">794</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">794</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-exp-c fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 0px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">수평재</span></span></td><td role="gridcell" class="text-center">302</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">63</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">101동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">7</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">102동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">2</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">103동, 109동 지붕층</span></span></td><td role="gridcell" class="text-center">3</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">105동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">3</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">106동 지붕층</span></span></td><td role="gridcell" class="text-center">2</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">108동 21F SL</span></span></td><td role="gridcell" class="text-center">2</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">108동 22F SL</span></span></td><td role="gridcell" class="text-center">9</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">108동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">3</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">110동 지붕층</span></span></td><td role="gridcell" class="text-center">6</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 10층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 11층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 12층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 13층 SL</span></span></td><td role="gridcell" class="text-center">11</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 14층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 15층 SL</span></span></td><td role="gridcell" class="text-center">12</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 16층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 17층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 18층 SL</span></span></td><td role="gridcell" class="text-center">9</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 19층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 1층 SL</span></span></td><td role="gridcell" class="text-center">37</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">37</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 20층 SL</span></span></td><td role="gridcell" class="text-center">17</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 21층 SL</span></span></td><td role="gridcell" class="text-center">7</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 2층 SL</span></span></td><td role="gridcell" class="text-center">5</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 3층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 4층 SL</span></span></td><td role="gridcell" class="text-center">11</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 5층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 6층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 7층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 8층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lazy fancytree-exp-cd fancytree-ico-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 9층 SL</span></span></td><td role="gridcell" class="text-center">10</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="false" class="fancytree-has-children fancytree-lastsib fancytree-lazy fancytree-exp-cdl fancytree-ico-c wbs-c" style="display: none;"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지하 1층 SL</span></span></td><td role="gridcell" class="text-center">26</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">26</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="true" aria-selected="true" class="fancytree-expanded fancytree-has-children fancytree-lastsib fancytree-partsel fancytree-selected fancytree-exp-el fancytree-ico-e" id="ui-id-7"><td role="gridcell"><span class="fancytree-node" style="padding-left: 0px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">창</span></span></td><td role="gridcell" class="text-center">5490</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="true" aria-selected="true" class="fancytree-expanded fancytree-has-children fancytree-partsel fancytree-selected fancytree-exp-e fancytree-ico-e"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">101동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">18</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="true" aria-selected="true" class="fancytree-expanded fancytree-has-children fancytree-partsel fancytree-selected fancytree-exp-e fancytree-ico-e"><td role="gridcell"><span class="fancytree-node" style="padding-left: 28px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">101동</span></span></td><td role="gridcell" class="text-center">3</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="true" aria-selected="true" class="fancytree-expanded fancytree-has-children fancytree-partsel fancytree-selected fancytree-exp-e fancytree-ico-e"><td role="gridcell"><span class="fancytree-node" style="padding-left: 42px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">그릴(AL)_1P(1)</span></span></td><td role="gridcell" class="text-center">1</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lastsib fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cdl fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 56px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">AG_1200x1510</span></span></td><td role="gridcell" class="text-center">1</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lastsib fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cdl fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 42px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">A_WIN_AW</span></span></td><td role="gridcell" class="text-center">2</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 28px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">103동</span></span></td><td role="gridcell" class="text-center">2</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 28px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">107동</span></span></td><td role="gridcell" class="text-center">3</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 28px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">108동</span></span></td><td role="gridcell" class="text-center">6</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lastsib fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cdl fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 28px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">109동</span></span></td><td role="gridcell" class="text-center">4</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">103동, 109동 지붕층</span></span></td><td role="gridcell" class="text-center">24</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">105동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">9</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">108동 22F SL</span></span></td><td role="gridcell" class="text-center">13</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">108동 지붕층 SL</span></span></td><td role="gridcell" class="text-center">6</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">110동 지붕층</span></span></td><td role="gridcell" class="text-center">32</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 10층 SL</span></span></td><td role="gridcell" class="text-center">307</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 11층 SL</span></span></td><td role="gridcell" class="text-center">307</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 12층 SL</span></span></td><td role="gridcell" class="text-center">307</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 13층 SL</span></span></td><td role="gridcell" class="text-center">292</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 14층 SL</span></span></td><td role="gridcell" class="text-center">286</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 15층 SL</span></span></td><td role="gridcell" class="text-center">264</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 16층 SL</span></span></td><td role="gridcell" class="text-center">267</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 17층 SL</span></span></td><td role="gridcell" class="text-center">198</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 18층 SL</span></span></td><td role="gridcell" class="text-center">246</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 19층 SL</span></span></td><td role="gridcell" class="text-center">158</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 1층 SL</span></span></td><td role="gridcell" class="text-center">105</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 20층 SL</span></span></td><td role="gridcell" class="text-center">90</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 21층 SL</span></span></td><td role="gridcell" class="text-center">78</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 2층 SL</span></span></td><td role="gridcell" class="text-center">312</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 3층 SL</span></span></td><td role="gridcell" class="text-center">328</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 4층 SL</span></span></td><td role="gridcell" class="text-center">307</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 5층 SL</span></span></td><td role="gridcell" class="text-center">307</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 6층 SL</span></span></td><td role="gridcell" class="text-center">307</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 7층 SL</span></span></td><td role="gridcell" class="text-center">307</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 8층 SL</span></span></td><td role="gridcell" class="text-center">307</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cd fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지상 9층 SL</span></span></td><td role="gridcell" class="text-center">307</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr><tr role="row" aria-expanded="false" aria-selected="true" class="fancytree-has-children fancytree-lastsib fancytree-lazy fancytree-partsel fancytree-selected fancytree-exp-cdl fancytree-ico-c"><td role="gridcell"><span class="fancytree-node" style="padding-left: 14px;"><span role="button" class="fancytree-expander"></span><span role="checkbox" class="fancytree-checkbox"></span><span class="eye-toggle none" title="가시성 토글">
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 5c5 0 9 4 10 7-1 3-5 7-10 7S3 15 2 12c1-3 5-7 10-7Zm0 3a4 4 0 100 8 4 4 0 000-8Z"></path>
+</svg></span><span role="presentation" class="fancytree-icon eye-hidden" style="display: none;"></span><span class="fancytree-title">지하 1층 SL</span></span></td><td role="gridcell" class="text-center">1</td><td role="gridcell" class="text-center">
+              <div class="wbs-status" style="justify-content: center;">
+                <div class="nums">
+                  <span class="b c" title="시공">0</span>
+                  <span class="b t" title="가설">0</span>
+                  <span class="b d" title="철거">0</span>
+                </div>
+              </div>
+            </td></tr></tbody>

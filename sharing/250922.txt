@@ -1,6 +1,7 @@
-// wbs-store.js  ──────────────────────────────────────────────────────────────
+// wbs-store.js
 (function(global){
   const PHASE_MAP = { '시공': 'c', '가설': 't', '철거': 'd' };
+  // 창 카테고리로 인정할 목록(현장에 맞게 추가/삭제 가능)
   const WINDOW_WHITELIST = new Set(['Window','Curtain Panel','Generic Models','Curtain Wall Mullion']);
 
   const norm = (s) => (s ?? '')
@@ -10,7 +11,6 @@
     .trim();
 
   const makePathKey = (path) => norm(Array.isArray(path) ? path.join(' / ') : path);
-
   const inc = (obj, k, v=1) => (obj[k] = (obj[k] || 0) + v);
 
   function makeZero() { return { c:0, t:0, d:0, total:0, dbIds:[] }; }
@@ -20,21 +20,34 @@
     return dst;
   }
 
-  // elements: [{dbId, wbsPath, top, category, familyName, typeName, workPhase}, ...]
+  /**
+   * ⚠️ 여기 필드 매핑만 본인 데이터 구조에 맞게 확인하세요.
+   * elements: [
+   *  { dbId, wbsPath, top, category, familyName, typeName, workPhase }, ...
+   * ]
+   * - 이름이 다르면 아래 루프 안에서 e.xxx 읽는 부분만 고치면 됩니다.
+   */
   function buildIndexes(elements){
-    const byPathAgg = new Map();      // 정규화된 pathKey(모든 prefix 포함) -> 집계
-    const byFamTypeAgg = new Map();   // "fam::type" -> 집계 (창 전용)
-    const elementsByPath = new Map(); // leaf 직접연결이 필요하면 사용
+    const byPathAgg = new Map();      // path prefix -> 합계(상위노드까지 함께)
+    const byFamTypeAgg = new Map();   // "family::type" -> 합계 (창)
+    const elementsByPath = new Map(); // leaf 조회용
     const elementsByFamType = new Map();
 
     for (const e of elements){
+      // ▼▼▼▼▼ 여기서 자기 데이터 구조에 맞게 키만 맞춰주세요 ▼▼▼▼▼
       const dbId = e.dbId ?? e.dbid ?? e.id;
-      const phaseKey = PHASE_MAP[e.workPhase] || 'c'; // 기본은 시공
+      const rawPath = e.wbsPath || e.path || e.wbs_path;  // WBS 경로
+      const cat = norm(e.category);
+      const top = norm(e.top);
+      const family = norm(e.familyName || e.family || e.family_name);
+      const type = norm(e.typeName || e.type || e.type_name);
+      const phaseKey = PHASE_MAP[e.workPhase] || 'c';
+      // ▲▲▲▲▲ 여기까지 ▲▲▲▲▲
+
       const unit = { c:0, t:0, d:0, total:1, dbIds:[dbId] };
       unit[phaseKey] = 1;
 
-      // 1) Path 기반 집계 (모든 prefix에 누적: 상위노드도 항상 값이 나옴)
-      const rawPath = e.wbsPath || e.path || e.wbs_path;
+      // 1) 경로 prefix에 누적(상위 노드 집계 자동 보장)
       if (rawPath){
         const parts = norm(rawPath).split('/').map(s=>s.trim()).filter(Boolean);
         let acc = [];
@@ -45,26 +58,22 @@
           addAgg(agg, unit);
           byPathAgg.set(key, agg);
         }
-        // leaf 직접조회용
         const leafKey = makePathKey(parts);
         const arr = elementsByPath.get(leafKey) || [];
-        arr.push(e);
+        arr.push({ dbId, top, cat, family, type, phaseKey, rawPath });
         elementsByPath.set(leafKey, arr);
       }
 
-      // 2) 창: Family+Type 집계
-      const cat = norm(e.category);
-      if (WINDOW_WHITELIST.has(cat) || norm(e.top) === '창'){
-        const fam = norm(e.familyName || e.family || e.family_name);
-        const typ = norm(e.typeName || e.type || e.type_name);
-        if (fam || typ){
-          const k = `${fam}::${typ}`;
+      // 2) 창은 Family+Type 기준 합계도 병행
+      if (WINDOW_WHITELIST.has(cat) || top === '창'){
+        if (family || type){
+          const k = `${family}::${type}`;
           const agg = byFamTypeAgg.get(k) || makeZero();
           addAgg(agg, unit);
           byFamTypeAgg.set(k, agg);
 
           const arr2 = elementsByFamType.get(k) || [];
-          arr2.push(e);
+          arr2.push({ dbId, top, cat, family, type, phaseKey, rawPath });
           elementsByFamType.set(k, arr2);
         }
       }
@@ -73,14 +82,12 @@
     return { byPathAgg, byFamTypeAgg, elementsByPath, elementsByFamType };
   }
 
-  // 가시 트리에서 subtree -> dbIds 재구성 (선택 하이라이트 등에 사용)
+  // (누락되어 터지던) 가시 트리 기준 dbId 인덱스 재작성
   function rebuildIndexFromVisibleTree(tree){
-    const map = new Map(); // node.key -> dbId[]
+    const map = new Map();
     tree.visit(node => {
       let ids = [];
-      // 이미 노드에 모아둔 게 있으면 사용
       if (Array.isArray(node.data?.dbIds)) ids = node.data.dbIds.slice();
-      // 자식에서 끌어올림
       if (node.children && node.children.length){
         for (const ch of node.children){
           if (Array.isArray(ch.data?.dbIds)) ids.push(...ch.data.dbIds);
@@ -100,50 +107,54 @@
       this.visibleDbIndex = null;
       this._tree = null;
     }
-
     attachTree(tree){ this._tree = tree; }
 
+    // elements: 위 설명 참조
     refresh(elements){
       this.index = buildIndexes(elements || []);
       this.isReady = true;
       return true;
     }
 
-    // node: FancytreeNode
+    // FancytreeNode -> 집계
     countAt(node){
       if (!this.isReady || !this.index) return makeZero();
 
       const top = norm(node.data?.top || node.parent?.data?.top || node.parent?.title);
       const family = norm(node.data?.family || node.data?.familyName);
       const type = norm(node.data?.type || node.data?.typeName);
-      const pathKey = makePathKey(node.data?.path || node.data?.wbsPath || node.data?.titlePath);
+      const pathKey = makePathKey(node.data?.path || node.data?.wbsPath || node.data?.titlePath || node.title);
 
-      // 창: Family+Type leaf 우선
+      // 창 leaf: Family+Type 우선
       if (top === '창' && (family || type)){
         const k = `${family}::${type}`;
         const agg = this.index.byFamTypeAgg.get(k);
-        if (agg) return { ...agg, dbIds: (this.index.elementsByFamType.get(k)||[]).map(e=>e.dbId ?? e.id) };
+        if (agg) {
+          const ids = (this.index.elementsByFamType.get(k)||[]).map(x=>x.dbId);
+          return { ...agg, dbIds: ids };
+        }
       }
 
-      // 공통: path prefix 기준 집계
+      // 그 외: 경로 prefix
       if (pathKey){
         const agg = this.index.byPathAgg.get(pathKey);
-        if (agg) return { ...agg, dbIds: (this.index.elementsByPath.get(pathKey)||[]).map(e=>e.dbId ?? e.id) };
+        if (agg) {
+          const ids = (this.index.elementsByPath.get(pathKey)||[]).map(x=>x.dbId);
+          return { ...agg, dbIds: ids };
+        }
       }
 
-      // 마지막 폴백: 로컬 visible subtree에서 끌어오기
+      // 마지막 폴백: 보이는 서브트리 취합
       if (this._tree){
         const ids = [];
-        node.visit(n => {
-          if (Array.isArray(n.data?.dbIds)) ids.push(...n.data.dbIds);
-        });
+        node.visit(n => { if (Array.isArray(n.data?.dbIds)) ids.push(...n.data.dbIds); });
         const uniq = Array.from(new Set(ids));
         return { c:0, t:0, d:0, total:uniq.length, dbIds:uniq };
       }
       return makeZero();
     }
 
-    // DOM을 건드리지 않고 각 노드 data에 집계와 dbIds만 채워둠
+    // 트리 전체에 counts/dbIds를 채움(렌더 호출 안 함)
     populateCountsForTree(tree){
       this.attachTree(tree);
       tree.visit(node => {
@@ -152,12 +163,11 @@
         node.data.dbIds = agg.dbIds;
         node.data.counts = { c:agg.c, t:agg.t, d:agg.d, total:agg.total };
       });
-      // 가시트리 인덱스도 최신화
       this.visibleDbIndex = rebuildIndexFromVisibleTree(tree);
     }
   }
 
-  // 전역 export (기존 호출과 호환)
+  // 전역 export(기존 코드와 호환)
   const store = new WbsStore();
   global.__WBS_STORE__ = Object.assign(global.__WBS_STORE__ || {}, {
     WbsStore: store,
@@ -166,67 +176,19 @@
     rebuildIndexFromVisibleTree: (tree) => (store.visibleDbIndex = rebuildIndexFromVisibleTree(tree)),
     populateCountsForTree: (tree) => store.populateCountsForTree(tree),
   });
-
 })(window);
 
 
+// fancy-tree-init.js
+// 필요한 경우 상단에 유틸 import
+// import $ from "jquery";
 
-// fancy-tree-init.js  ───────────────────────────────────────────────────────
-
-// (중요) renderColumns에서 칸(시공/가설/철거)만 채움. 여기서 재렌더 금지!
-const options = {
-  // ... 기존 옵션 유지 ...
-  extensions: ["table", /* ... */],
-  renderColumns: function(event, data){
-    const node = data.node;
-    const $tds = $(node.tr).find(">td");
-    // [0]=타이틀, [1]=합계, [2]=상태칸(시공/가설/철거)라고 가정
-    const counts = node.data?.counts || {c:0,t:0,d:0,total:0};
-    $tds.eq(1).text(counts.total);
-    const $status = $tds.eq(2);
-    $status.find(".b.c").text(counts.c);
-    $status.find(".b.t").text(counts.t);
-    $status.find(".b.d").text(counts.d);
-  },
-
-  // lazyLoad에서는 데이터만 반환. 여기서 render 호출하지 마세요.
-  lazyLoad: async function(event, data){
-    const node = data.node;
-    // children data 만들어서 넘기기
-    const children = await fetchChildren(node); // <- 기존 비동기 로더
-    data.result = children;
-    // ★ 여기서 node.render()/tree.render(true) 호출 금지!
-  },
-
-  // loadChildren 이후: 전체 트리 기준으로 한번에 safe paint
-  loadChildren: function(event, data){
-    const tree = data.tree;
-    // 여러 노드가 한꺼번에 열릴 수 있으니 batch 처리
-    tree.enableUpdate(false);
-    window.__WBS_STORE__?.populateCountsForTree(tree);
-    tree.enableUpdate(true);
-    // 재렌더 하나만: 테이블 확정 후 전체 렌더
-    tree.render(true);
-  },
-
-  init: function(event, data){
-    const tree = data.tree;
-    // 초기 한 번만 집계 채우기 (elements는 별도 로딩 완료 후 호출)
-    if (window.__WBS_STORE__?.WbsStore?.isReady){
-      tree.enableUpdate(false);
-      window.__WBS_STORE__?.populateCountsForTree(tree);
-      tree.enableUpdate(true);
-      tree.render(true);
-    }
-  }
-};
-
-// “직접 DOM 페인트” 유틸(재렌더 대신 칸만 덮어씀)
-export function paintCounts(node){
+function paintCounts(node){
   const counts = node.data?.counts || {c:0,t:0,d:0,total:0};
   const $tr = $(node.tr);
   if (!$tr || !$tr.length) return;
   const $tds = $tr.find(">td");
+  // [0]=타이틀, [1]=합계, [2]=상태칸(.b.c/.b.t/.b.d)
   $tds.eq(1).text(counts.total);
   const $status = $tds.eq(2);
   $status.find(".b.c").text(counts.c);
@@ -234,8 +196,7 @@ export function paintCounts(node){
   $status.find(".b.d").text(counts.d);
 }
 
-// 필요 시 서브트리만 안전히 업데이트(렌더 금지)
-export function ensureCountsForSubtree(node){
+function ensureCountsForSubtree(node){
   const tree = node.tree;
   tree.enableUpdate(false);
   node.visit(n => {
@@ -248,12 +209,50 @@ export function ensureCountsForSubtree(node){
   tree.enableUpdate(true);
 }
 
+export const fancytreeOptions = {
+  // ...기존 옵션 유지...
+  extensions: ["table" /*, ...*/],
+
+  // 컬럼 숫자 채우기 (여기서는 렌더만 한다: 계산 X)
+  renderColumns: function(event, data){
+    paintCounts(data.node);
+  },
+
+  // ⚠️ lazyLoad에서는 절대 node.render()/tree.render() 호출하지 마세요
+  lazyLoad: async function(event, data){
+    const node = data.node;
+    const children = await fetchChildren(node); // ← 기존 비동기 로더 그대로 사용
+    data.result = children; // 데이터만 넘김
+    // 여기서 DOM 재렌더 호출 금지!
+  },
+
+  // 자식 로딩 끝난 뒤, 트리 전체 카운트/DBID 채우고 딱 한 번만 렌더
+  loadChildren: function(event, data){
+    const tree = data.tree;
+    tree.enableUpdate(false);
+    window.__WBS_STORE__?.populateCountsForTree(tree); // 계산/주입
+    tree.enableUpdate(true);
+    tree.render(true); // 한 번만
+  },
+
+  // 초기화 시에도 한 번만
+  init: function(event, data){
+    const tree = data.tree;
+    if (window.__WBS_STORE__?.WbsStore?.isReady){
+      tree.enableUpdate(false);
+      window.__WBS_STORE__?.populateCountsForTree(tree);
+      tree.enableUpdate(true);
+      tree.render(true);
+    }
+  }
+};
+
+// 필요하면 다른 파일에서 import해서 사용
+export { paintCounts, ensureCountsForSubtree };
 
 
-// main.js  ──────────────────────────────────────────────────────────────────
-
-// 기존 repaintNode에서 node.render() 하던 부분 제거하고 paintCounts만 호출
-import { ensureCountsForSubtree, paintCounts } from './fancy-tree-init.js';
+// main.js
+import { paintCounts } from './fancy-tree-init.js';
 
 function countsForPath(node){
   const agg = window.__WBS_STORE__?.countAt(node);
@@ -265,11 +264,9 @@ function repaintNode(node){
   node.data = node.data || {};
   node.data.dbIds = agg.dbIds;
   node.data.counts = { c:agg.c, t:agg.t, d:agg.d, total:agg.total };
-  // 안전 DOM 업데이트 (재렌더 금지)
-  paintCounts(node);
+  paintCounts(node); // DOM에 숫자만 반영 (렌더 호출 X)
 }
 
-// 전체 트리 리페인트할 때
 function repaintTree(){
   const tree = $("#wbs").fancytree("getTree");
   tree.enableUpdate(false);
@@ -277,13 +274,9 @@ function repaintTree(){
   tree.enableUpdate(true);
 }
 
-// 예: 패널 준비 후 한 번 호출
+// 패널 준비 이후 한 번 전체 반영
 document.addEventListener('panel2-ready', ()=>{
   const tree = $("#wbs").fancytree("getTree");
   window.__WBS_STORE__?.populateCountsForTree(tree);
   repaintTree();
 });
-
-
-
-

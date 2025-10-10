@@ -1,60 +1,14 @@
-highlight.js:4 [hec] wbs/highlight.js loaded
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-(index):1 Autofocus processing was blocked because a document already has a focused element.
-GeometryList.js:344 Total geometry size: 22.579627990722656 MB
-GeometryList.js:345 Number of meshes: 6614
-GeometryList.js:346 Num Meshes on GPU: 6647
-GeometryList.js:347 Net GPU geom memory used: 75519924
-main.js:580 [WBS] roots: 5
-main.js:148 [persistTasksSnapshot] saved. count = 2
-main.js:276 [FA] fallback map ready (keys = 2391 )
-main.js:310 [FA] getCounts bridged
-main.js:608 [STEP 5] WBS fancytree init OK
-main.js:614 [STEP 6] panel2 resizer bound
-main.js:615 [STEP 1] Task panel OK
-main.js:616 [STEP 2] panel2-ready dispatched
-wbs-store.js:267  Uncaught ReferenceError: rebuildIndexFromVisibleTree is not defined
-    at Module.countAt (wbs-store.js:267:26)
-    at countsForPath (main.js:369:34)
-    at repaintNode (main.js:399:18)
-    at j.visit (jquery.fancytree-all-deps.js:3931:11)
-    at j.visit (jquery.fancytree-all-deps.js:3938:24)
-    at I.visit (jquery.fancytree-all-deps.js:5320:25)
-    at repaintTree (main.js:408:8)
-    at step (main.js:417:5)
-countAt @ wbs-store.js:267
-countsForPath @ main.js:369
-repaintNode @ main.js:399
-visit @ jquery.fancytree-all-deps.js:3931
-visit @ jquery.fancytree-all-deps.js:3938
-visit @ jquery.fancytree-all-deps.js:5320
-repaintTree @ main.js:408
-step @ main.js:417
-gantt-view.js:171 [gantt-view] google loaded
-CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
-CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
-CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
-CustomViewerExtension.js:207 툴바 커스터마이징 완료.
-WebGLRenderer.js:29 THREE.WebGLRenderer 71
-WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
-WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
-GeometryList.js:344 Total geometry size: 22.579627990722656 MB
-GeometryList.js:345 Number of meshes: 6614
-GeometryList.js:346 Num Meshes on GPU: 6647
-GeometryList.js:347 Net GPU geom memory used: 75519924
-main.js:580 [WBS] roots: 5
-main.js:148 [persistTasksSnapshot] saved. count = 2
-main.js:276 [FA] fallback map ready (keys = 2391 )
-main.js:310 [FA] getCounts bridged
-main.js:608 [STEP 5] WBS fancytree init OK
-main.js:614 [STEP 6] panel2 resizer bound
-main.js:615 [STEP 1] Task panel OK
-main.js:616 [STEP 2] panel2-ready dispatched
+window.__WBS_STORE__?.refreshWbsStore();
+console.log('store ready =', window.__WBS_STORE__?.WbsStore?.isReady);
+
+console.log('sample count =', (function(){
+  const t = $.ui.fancytree.getTree('#wbs-tree') ||
+            Array.from(document.querySelectorAll('.fancytree-container'))
+              .map(el => $.ui.fancytree.getTree(el)).filter(Boolean)
+              .find(x => x.$div?.attr?.('id') !== 'treegrid');
+  const n = t?.getRootNode()?.getFirstChild();
+  const path = [];
+  let cur = n;
+  while (cur && !cur.isRoot()) { path.unshift(cur.title); cur = cur.parent; }
+  return window.__WBS_STORE__?.countAt(path);
+})());

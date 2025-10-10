@@ -1,191 +1,1691 @@
-/* 패널2 좌/우 스플릿 기본 레이아웃 */
-#vertical-split-container {
-  display: flex;
-  min-height: 0;            /* flex 자식이 높이/스크롤 제대로 */
+// /wwwroot/js/sidebar/task-wbs/wbs-tree.js
+import { ensureEyeButton, installWbsVisibilityDelegate } from "./ui/wbs-visibility.js";
+import { applyHighlightForSubtreeUI } from "./ui/wbs-highlight.js";
+import { activateFixedPaint, refreshFixedPaint, requestDebouncedRepaint, paintSubtreeNow } from "./ui/wbs-fixed-paint.js";
+
+/* ───────────────────────── 공통 유틸/상태 ───────────────────────── */
+
+const rIC = typeof requestIdleCallback === "function"
+  ? requestIdleCallback
+  : (fn)=>setTimeout(()=>fn({ timeRemaining:()=>5 }),0);
+
+// 체크 프리픽스 규칙(전역 공유: path prefix on/off)
+const CHECK_RULES = (window.__WBS_CHECK_RULES = window.__WBS_CHECK_RULES || { on:new Set(), off:new Set() });
+const PSEP = "¦";
+const pkey = (path) => (path||[]).join(PSEP);
+const startsWithKey = (full, key) => (full===key || full.startsWith(key + PSEP));
+
+function registerAutoCheck(pathArr, turnOn){
+  const k = pkey(pathArr);
+  if (turnOn){
+    Array.from(CHECK_RULES.off).forEach(x => { if (startsWithKey(x,k) || startsWithKey(k,x)) CHECK_RULES.off.delete(x); });
+    Array.from(CHECK_RULES.on).forEach(x => { if (startsWithKey(x,k)) CHECK_RULES.on.delete(x); });
+    CHECK_RULES.on.add(k);
+  }else{
+    Array.from(CHECK_RULES.on).forEach(x => { if (startsWithKey(x,k) || startsWithKey(k,x)) CHECK_RULES.on.delete(x); });
+    CHECK_RULES.off.add(k);
+  }
+}
+function shouldBeChecked(pathArr){
+  const k = pkey(pathArr);
+  for (const off of CHECK_RULES.off) if (startsWithKey(k,off)) return false;
+  for (const on  of CHECK_RULES.on ) if (startsWithKey(k,on )) return true;
+  return null; // 규칙 없음
 }
 
-/* 좌/우 패널은 수축 가능해야 함(min-width:0 중요) */
-#task-list-panel,
-#wbs-group-list-panel {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+/* ───────────────────────── 경로/노드 도우미 ───────────────────────── */
+
+export function pathOfNodeFT(n){
+  const out = [];
+  let cur = n;
+  while (cur && !cur.isRoot()){
+    out.unshift(cur.title || cur.key || cur.data?.text || "");
+    cur = cur.parent;
+  }
+  return out;
 }
 
-/* 각 패널의 스크롤 영역 */
-#task-list-content,
-#wbs-group-list-panel .panel-content {
-  flex: 1 1 auto;
-  overflow: auto;
+function ensureCountBadge(ftNode, provider){
+  const span = ftNode?.span; if (!span) return;
+  const titleEl = span.querySelector('.fancytree-title') || span;
+  let badge = span.querySelector('.count-badge');
+  if (!badge){
+    badge = document.createElement('span');
+    badge.className = 'count-badge';
+    badge.style.marginLeft = '6px';
+    badge.style.opacity = '0.8';
+    titleEl.after(badge);
+  }
+
+  const isLeaf = Number.isFinite(Number(ftNode.data?.dbId));
+  if (isLeaf){
+    badge.textContent = '';
+    badge.style.display = 'none';
+    return;
+  }
+
+  let cnt = (typeof ftNode.data?.leafCount === 'number') ? ftNode.data.leafCount : undefined;
+  if (cnt == null && provider && typeof provider.countAt === 'function'){
+    try { cnt = provider.countAt(pathOfNodeFT(ftNode)); } catch {}
+  }
+
+  badge.textContent = (typeof cnt === 'number') ? String(cnt) : '…';
+  badge.style.display = '';
 }
 
-/* 내부 좌우 스플리터 */
-#resizer {
-  flex: 0 0 6px;            /* 클릭 가능한 두께 */
-  cursor: col-resize;
-  user-select: none;
-  touch-action: none;
-  position: relative;
-  z-index: 2;
-}
-#resizer::after {
-  content: "";
-  position: absolute;
-  left: 2px; top: 0; bottom: 0;
-  width: 2px;
-  background: #e5e7eb;     /* 얇은 가이드 라인 */
+function ensureDecor(ftNode, provider){
+  try { ensureCountBadge(ftNode, provider); } catch {}
+  try { ensureEyeButton(ftNode); } catch {}
 }
 
-/* Task 테이블이 컨테이너 폭에 맞게 수축되도록 */
-#treegrid {
-  width: 100%;
-  table-layout: fixed;
+/* ───────────────────────── 데이터 매퍼(Provider → Fancytree) ───────────────────────── */
+
+function mapItemsToFt(items, parentPath = []){
+  if (!Array.isArray(items)) return [];
+  const out = [];
+  for (const item of items){
+    if (item?._isBucket && Array.isArray(item.__bucket)){
+      out.push(...mapItemsToFt(item.__bucket, parentPath)); // 버킷 평탄화
+      continue;
+    }
+    const label = String(item?.text ?? "").trim();
+    const dbId  = Number(item?.dbId);
+    const isLeaf = Number.isFinite(dbId);
+
+    const path = parentPath.concat([label]);
+    const want = shouldBeChecked(path);
+
+    out.push({
+      title: label || "(빈 항목)",
+      key: pkey(path),              // 경로 기반 고유키
+      folder: !isLeaf,
+      lazy: !isLeaf,                // 비-리프면 확장시 로드
+      selected: (want === true) ? true : (want === false ? false : !!item?.selected),
+      data: {
+        dbId: isLeaf ? dbId : null,
+        path
+      }
+    });
+  }
+  return out;
 }
-#treegrid th, #treegrid td {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+
+/* ───────────────────────── FancyTree 찾기/수집 ───────────────────────── */
+
+export function findWbsTree(){
+  if (!window.$ || !$.ui || !$.ui.fancytree) return null;
+  const all = Array.from(document.querySelectorAll('.fancytree-container'))
+    .map(el => $.ui.fancytree.getTree(el))
+    .filter(Boolean);
+
+  const taskTree = $.ui.fancytree.getTree('#treegrid');
+  const cand = all.filter(t => t !== taskTree);
+
+  const withCk = cand.filter(t => !!t.options?.checkbox);
+  return withCk[0] || cand[0] || null;
 }
 
-/* (선택) colgroup 강제 폭을 누그러뜨리고 싶으면: */
-/* #treegrid col { width: auto !important; } */
+export function getCheckedNodesFT() {
+  const tree = findWbsTree();
+  if (!tree) { console.warn('[WBS] findWbsTree() = null'); return []; }
 
+  // 1) 공식 API: 부분선택 포함(필터 제거)
+  try {
+    const nodes = tree.getSelectedNodes(false); // partsel도 허용
+    if (nodes.length) return uniqNodes(nodes);
+  } catch(_) {}
 
-// /wwwroot/js/sidebar/task-wbs/layout/panel-resizer.js
-// 패널2(Tasks) 내부 좌/우 스플리터(#resizer) 전용
+  // 2) 전체 방문: selected===true 이면 수집 (partsel 여부 무시)
+  try {
+    const found = [];
+    tree.getRootNode()?.visit((n) => {
+      if (n.selected) found.push(n);
+    });
+    if (found.length) return uniqNodes(found);
+  } catch(_) {}
 
-export function bindPanel2Resizer(viewer) {
-  const container = document.getElementById('vertical-split-container');
-  const splitter  = document.getElementById('resizer');
-  const leftPane  = document.getElementById('task-list-panel');
-  const rightPane = document.getElementById('wbs-group-list-panel');
-  if (!container || !splitter || !leftPane || !rightPane) return;
+  // 3) DOM 폴백 (부분선택 허용)
+  try {
+    const $cont = tree.$div || $(tree.$div);
+    const $cand = $cont.find(
+      '.fancytree-checkbox[aria-checked="true"], ' +
+      '.fancytree-node.fancytree-selected, ' +
+      '.fancytree-title.fancytree-selected'
+    );
+    const raw = $cand.toArray()
+      .map(el => $.ui.fancytree.getNode(el))
+      .filter(Boolean);
+    if (raw.length) return uniqNodes(raw);
+  } catch (e) {
+    console.warn("[WBS] DOM fallback failed", e);
+  }
+  return [];
 
-  leftPane.style.flex  = '0 0 auto';
-  rightPane.style.flex = '1 1 auto';
+  function uniqNodes(arr){
+    const out = [];
+    const seen = new Set();
+    arr.forEach(n => {
+      const key = n.key || n.getIndexHier?.() || n.title || n.data?.path?.join?.("¦");
+      if (key && !seen.has(key)) { seen.add(key); out.push(n); }
+    });
+    return out;
+  }
+}
 
-  const MIN_LEFT  = 320;
-  const MIN_RIGHT = 360;
-  const LS_KEY    = 'panel2LeftPx';
+/* ───────────────────────── Provider BFS (공용) ───────────────────────── */
 
-  const getW = () => container.clientWidth || container.getBoundingClientRect().width || 0;
-  const clamp = (px) => {
-    const total = getW();
-    const maxLeft = Math.max(MIN_LEFT, total - MIN_RIGHT);
-    return Math.min(maxLeft, Math.max(MIN_LEFT, Math.round(px)));
-  };
-  const getLeft = () => {
-    const n = parseInt((leftPane.style.width || '').replace('px','') || '0', 10);
-    return Number.isFinite(n) && n > 0 ? n : Math.round(getW() * 0.48);
-  };
-  const apply = (px) => {
-    const w = clamp(px);
-    leftPane.style.width = w + 'px';
-    try { localStorage.setItem(LS_KEY, String(w)); } catch {}
-    try {
-      viewer?.resize?.();
-      viewer?.impl?.invalidate?.(true, true, true);
-      requestAnimationFrame(() => {
-        viewer?.resize?.();
-        viewer?.impl?.invalidate?.(true, true, true);
+export async function bfsCollectDescendantDbIds(provider, pathArr, visibleNode){
+  // 1) 화면 표시 서브트리에서 leaf 수집
+  const fromVisible = [];
+  try {
+    visibleNode?.visit?.((n) => {
+      if (n !== visibleNode && !(n.hasChildren && n.hasChildren())) {
+        const id = Number(n.data?.dbId ?? n.dbId);
+        if (Number.isFinite(id)) fromVisible.push(id);
+      }
+    });
+  } catch(_){}
+
+  // 2) provider BFS
+  const fromProvider = [];
+  if (provider && typeof provider.childrenByPath === "function") {
+    const queue = [ pathArr.slice() ];
+    const seenKey = new Set();
+    const SEP = "\u0001";
+
+    while (queue.length) {
+      const cur = queue.shift();
+      const key = cur.join(SEP);
+      if (seenKey.has(key)) continue;
+      seenKey.add(key);
+
+      let children = [];
+      try { children = await provider.childrenByPath(cur); } catch{ children = []; }
+
+      for (const ch of (children || [])) {
+        const text = String(ch.text || ch.name || "").trim();
+        if (!text) continue;
+        const id = Number(ch.dbId ?? ch.data?.dbId);
+        if (Number.isFinite(id)) fromProvider.push(id);
+        else queue.push(cur.concat(text));
+      }
+    }
+  }
+
+  // (화면 → provider) 순서 유지 유니크
+  const out = [];
+  const s = new Set();
+  for (const x of fromVisible.concat(fromProvider)) if (!s.has(x)) { s.add(x); out.push(x); }
+  return out;
+}
+
+/* ───────────────────────── 메인: WBS 패널 초기화(Fancytree만) ───────────────────────── */
+
+export async function initWbsPanel(input){
+  // CSS: 확장 깜빡임 억제(옵션)
+  if (!document.getElementById('wbs-expanding-css')){
+    const st = document.createElement('style');
+    st.id = 'wbs-expanding-css';
+    st.textContent = `
+      #wbs-tree .count-badge{ font-size: 12px; padding:0 4px; border-radius: 8px; background:rgba(0,0,0,.06); }
+    `;
+    document.head.appendChild(st);
+  }
+
+  // 컨테이너 확보(#wbs-tree가 표준)
+  let cont = document.querySelector('#wbs-tree');
+  if (!cont){
+    const wrap = document.getElementById('wbs-group-content') || document.body;
+    cont = document.createElement('div');
+    cont.id = 'wbs-tree';
+    wrap.appendChild(cont);
+  }
+
+  // Provider 감싸기(초기 선택 상태 주입)
+  const rawProvider = (input && input.__provider) ? input : null;
+  const usingProvider = !!rawProvider;
+  let provider = rawProvider;
+
+  if (usingProvider){
+    const coerceCheckOnData = (items, parentPath=[]) => {
+      if (!Array.isArray(items)) return items;
+      return items.map(item => {
+        if (item?._isBucket && Array.isArray(item.__bucket)){
+          item.__bucket = coerceCheckOnData(item.__bucket, parentPath);
+          return item;
+        }
+        const label = item?.text ?? "";
+        const path = parentPath.concat([label]);
+        const want = shouldBeChecked(path);
+        if (want !== null) item.selected = !!want;
+        return item;
       });
+    };
+    provider = {
+      __provider: true,
+      async roots(){
+        const items = await rawProvider.roots();
+        return coerceCheckOnData(items, []);
+      },
+      async childrenByPath(path){
+        const items = await rawProvider.childrenByPath(path);
+        return coerceCheckOnData(items, path);
+      },
+      countAt: (...a)=>rawProvider.countAt?.(...a),
+      getDbIdsForPath: (...a)=>rawProvider.getDbIdsForPath?.(...a),
+      ensurePathMapForDbIds: (...a)=>rawProvider.ensurePathMapForDbIds?.(...a)
+    };
+    window.__WBS_PROVIDER = provider;
+  }
+
+  // 이미 만들어진 WBS Fancytree가 있으면 재사용
+  let tree = $.ui.fancytree.getTree('#wbs-tree');
+  if (!tree){
+    $('#wbs-tree').fancytree({
+      checkbox: true,
+      selectMode: 3,
+      clickFolderMode: 3, // 클릭 시 확장/축소
+      titlesTabbable: true,
+      debugLevel: 0
+    });
+    tree = $.ui.fancytree.getTree('#wbs-tree');
+  }
+
+  // 루트 데이터 주입
+  if (usingProvider){
+    try {
+      const roots = await provider.roots();
+      await tree.reload(mapItemsToFt(roots, []));
+    } catch(e) {
+      console.warn('[WBS] provider.roots() 실패:', e);
+      await tree.reload([]);
+    }
+  }else if (Array.isArray(input)){
+    await tree.reload(mapItemsToFt(input, []));
+  }
+
+  // 핸들러 바인딩(한 번만)
+  const $div = tree.$div;
+  $div.off('.wbs');
+
+  if (usingProvider){
+    // Lazy load
+    $div.on('fancytreelazyLoad.wbs', async (e, data)=>{
+      const node = data.node;
+      const path = node.data?.path || pathOfNodeFT(node);
+      data.result = provider.childrenByPath(path).then(items => mapItemsToFt(items, path));
+    });
+  }
+
+  // Children loaded → 규칙/하이라이트/고정칠
+  $div.on('fancytreeloadChildren.wbs', (e, data)=>{
+    try {
+      (data.node.children || []).forEach(ch => {
+        const want = shouldBeChecked(ch.data?.path || pathOfNodeFT(ch));
+        if (want === true) ch.setSelected(true);
+        else if (want === false) ch.setSelected(false);
+      });
+      paintSubtreeNow?.(data.node);
     } catch {}
-  };
+  });
 
-  // Drag support
-  let dragging = false, startX = 0, startW = 0;
-  const cx = (e) => (e.touches?.[0]?.clientX ?? e.clientX ?? 0);
+  // Render → 데코레이션/하이라이트
+  $div.on('fancytreerenderNode.wbs', (e, data)=>{
+    const n = data.node;
+    requestAnimationFrame(()=>{
+      try { ensureDecor(n, provider); } catch {}
+      try {
+        const map = window.__WBS_CATMAP;
+        if (!window.__WBS_FIXED_MODE && map) applyHighlightForSubtreeUI(n, map);
+      } catch {}
+    });
+  });
 
-  const onDown = (e) => {
-    dragging = true;
-    startX = cx(e);
-    startW = getLeft();
-    document.body.classList.add('resizing-x');
-    document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', onMove, { passive: false });
-    window.addEventListener('mouseup', onUp, { once: true });
-    window.addEventListener('touchmove', onMove, { passive: false });
-    window.addEventListener('touchend', onUp, { once: true });
-    e.preventDefault?.();
-  };
-  const onMove = (e) => {
-    if (!dragging) return;
-    const dx = cx(e) - startX;
-    apply(startW + dx);
-    e.preventDefault?.();
-  };
-  const onUp = () => {
-    dragging = false;
-    document.body.classList.remove('resizing-x');
-    document.body.style.userSelect = '';
-    window.removeEventListener('mousemove', onMove);
-    window.removeEventListener('touchmove', onMove);
-    apply(getLeft()); // final clamp
-  };
+  // Expanded → 고정색칠/하이라이트 갱신
+  $div.on('fancytreeexpand.wbs', async (e, data)=>{
+    try { paintSubtreeNow?.(data.node); } catch {}
+    try { await refreshFixedPaint?.({ repaint:true }); } catch {}
+    try {
+      const map = window.__WBS_CATMAP;
+      if (!window.__WBS_FIXED_MODE && map) applyHighlightForSubtreeUI(data.node, map);
+    } catch {}
+  });
 
-  splitter.addEventListener('mousedown', onDown);
-  splitter.addEventListener('touchstart', onDown, { passive: true });
-  splitter.addEventListener('dblclick', () => apply(Math.round(getW() * 0.5)));
+  // Select(체크) → 규칙 갱신 + 자식 전파
+  $div.on('fancytreeselect.wbs', (e, data)=>{
+    const n = data.node;
+    const sel = !!n.selected;
+    const path = n.data?.path || pathOfNodeFT(n);
+    registerAutoCheck(path, sel);
+    // 표시된 자식에는 즉시 전파(미표시는 규칙에 의해 lazy-load 시 적용)
+    try { if (n.hasChildren()) n.visit(ch => { if (ch !== n && !ch.partsel) ch.setSelected(sel); }); } catch {}
+  });
 
-  // 창 또는 컨테이너 크기 변화에 반응(사이드바 드래그 포함)
-  const ro = new ResizeObserver(() => apply(getLeft()));
-  try { ro.observe(container); } catch {}
+  // 첫 페인트 + 고정 칠
+  requestAnimationFrame(()=>{ try { activateFixedPaint(); } catch {} });
 
-  // 좌측 사이드바 모듈이 커스텀 이벤트를 쏘면 즉시 반응
-  window.addEventListener('sidebar-width-changed', () => apply(getLeft()));
+  // 가시성 토글 위임
+  installWbsVisibilityDelegate();
 
-  // 초기 복원
-  const stored = parseInt(localStorage.getItem(LS_KEY) || '0', 10);
-  const initial = clamp(Number.isFinite(stored) && stored > 0 ? stored : Math.round(getW() * 0.48));
-  apply(initial);
-}
+  // 전역 노출(다른 모듈에서 사용)
+  window.wbsTree = tree;
 
-
-
-// wwwroot/js/sidebar/sidebar-resizer.js
-const sidebar = document.getElementById("sidebar");
-const resizer = document.getElementById("sidebar-resizer");
-const preview = document.getElementById("preview");
-const minWidth = 220;
-const maxWidth = 750;
-
-function setSidebarWidth(px) {
-  sidebar.style.width = px + "px";
-  resizer.style.left = px + "px";
-  if (preview) preview.style.left = px + "px";
-
-  // ★ 변경: 사이드바 폭 변경 이벤트 브로드캐스트
+  // DOM 추가 변경(보수)
   try {
-    window.dispatchEvent(new CustomEvent('sidebar-width-changed', { detail: { width: px } }));
+    const obs = new MutationObserver(()=> requestDebouncedRepaint?.(32));
+    obs.observe(tree.$div.get(0), { childList:true, subtree:true });
   } catch {}
 }
 
-resizer.addEventListener("mousedown", function (e) {
-  e.preventDefault();
-  document.body.style.cursor = "ew-resize";
 
-  function onMouseMove(e2) {
-    let newWidth = e2.clientX;
-    if (newWidth < minWidth) newWidth = minWidth;
-    if (newWidth > maxWidth) newWidth = maxWidth;
-    setSidebarWidth(newWidth);
+// /wwwroot/js/sidebar/task-wbs/task-buttons.js
+import { normalizeTaskCategory, enforceCategoryInheritance } from "./core/categories.js";
+import { aggregateTaskFields } from "./logic/task-aggregate.js";
+import { scheduleWbsRepaint } from "./ui/wbs-highlight.js";
+import { showCurrentTaskModal } from "./ui/current-task-modal.js";
+import { notifyCoverageDirtyAndRepaint } from "./ui/wbs-fixed-paint.js";
+import { ensureElementIdIndexForDbIds, getElementIdFor, formatObjectLabel } from "./core/element-id.js";
+
+// ★ WBS(팬시트리) 공용 헬퍼: 중복 제거(이 모듈에서는 정의하지 않음)
+import { findWbsTree } from "./wbs-tree.js";
+
+/* =============================================================================
+   Optional WbsStore (있으면 사용, 없어도 동작)
+============================================================================= */
+let __WBS_STORE__ = (typeof window !== "undefined" && window.__WBS_STORE__) || null;
+function ensureWbsStore() {
+  if (__WBS_STORE__) return Promise.resolve(__WBS_STORE__);
+  return import("./core/wbs-store.js").then(mod => { __WBS_STORE__ = mod; return mod; }).catch(()=>null);
+}
+
+/* =============================================================================
+   상태 반영/페인트 유틸
+============================================================================= */
+function notifyWbsStatusRefresh(){
+  try { window.__WBS_MARK_TASKS_CHANGED?.(); } catch {}
+}
+async function runWbsHighlightBatch(cb){
+  const prev = window.__WBS_PAINT_LOCK === true;
+  window.__WBS_PAINT_LOCK = true;
+  try { await cb(); }
+  finally {
+    window.__WBS_PAINT_LOCK = prev;
+    requestAnimationFrame(()=>{ try{ window.updateWBSHighlight?.(); } catch{} });
+  }
+}
+
+/* =============================================================================
+   외부 저장 스냅샷
+============================================================================= */
+export function setSavedTaskData(data) {
+  window.savedTaskData = JSON.parse(JSON.stringify(data ?? []));
+}
+
+/* =============================================================================
+   초기화 본체
+============================================================================= */
+export function initTaskListButtons() {
+  window.__ALLOW_WBS_UPDATE = window.__ALLOW_WBS_UPDATE ?? false;
+
+  // WbsStore 초기화 (가능할 때만)
+  ensureWbsStore().then((mod) => {
+    if (!mod) return;
+    try {
+      // ✅ 공용 헬퍼 사용: 실제 체크박스 WBS 트리 인스턴스
+      const wbsFT = findWbsTree();
+      mod.initWbsStore?.({ tree: wbsFT, provider: window.__WBS_PROVIDER, eager: "auto" });
+
+      // ✅ 전역 노출(콘솔/다른 모듈에서 사용 가능)
+      window.__WBS_STORE__ = mod;
+
+      // ✅ provider 교체 시 인덱스 재구축
+      window.__SET_WBS_PROVIDER__ = (p) => {
+        try { mod.setProvider?.(p); mod.refreshWbsStore?.(); } catch(_) {}
+      };
+    } catch(_) {}
+  });
+
+  function withWbsGate(fn){
+    const prev = window.__ALLOW_WBS_UPDATE;
+    window.__ALLOW_WBS_UPDATE = true;
+    try { return fn(); }
+    finally { window.__ALLOW_WBS_UPDATE = prev; }
   }
 
-  function onMouseUp() {
-    document.body.style.cursor = "";
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
+  function flush(recalc = false) {
+    if (recalc && window.requestTaskRecalcAndFlush) {
+      window.requestTaskRecalcAndFlush();
+    } else if (window.requestTaskTreeFlush) {
+      window.requestTaskTreeFlush();
+    } else {
+      const tree = $.ui.fancytree.getTree("#treegrid");
+      tree.render(true, true);
+    }
+    if (!window.__WBS_PAINT_LOCK) scheduleWbsRepaint();
   }
 
-  document.addEventListener("mousemove", onMouseMove);
-  document.addEventListener("mouseup", onMouseUp);
-});
+  /* ───────── 추가 ───────── */
+  $("#btn-add").off("click").on("click", function () {
+    const tree = $.ui.fancytree.getTree("#treegrid");
+    const sel = tree.getActiveNode();
+    const parentNode = sel || null;
+    const baseCat = (parentNode?.data?.selectedOption) || "시공";
+    const no = generateNo(parentNode);
+    const nodeData = {
+      no,
+      selectOptions: ["시공", "가설", "철거"],
+      selectedOption: baseCat,
+      title: "새 작업",
+      start: "",
+      end: "",
+      linkedObjects: []
+    };
+    if (parentNode) {
+      if (Array.isArray(parentNode.data?.linkedObjects) && parentNode.data.linkedObjects.length) {
+        parentNode.data.linkedObjects = [];
+        parentNode.render && parentNode.render();
+      }
+      parentNode.addChildren(nodeData);
+      parentNode.setExpanded(true);
+      parentNode.data.start = "";
+      parentNode.data.end = "";
+      parentNode.render && parentNode.render();
+    } else {
+      tree.getRootNode().addChildren(nodeData);
+    }
+    enforceCategoryInheritance(tree);
+    flush(true);
+  });
 
-window.addEventListener("DOMContentLoaded", () => {
-  const sidebarRect = sidebar.getBoundingClientRect();
-  setSidebarWidth(sidebarRect.width);
-  // 초기 진입에서도 한 번 알려주기
+  /* ───────── 삭제 ───────── */
+  $("#btn-delete").off("click").on("click", function(){
+    const tree = $.ui.fancytree.getTree("#treegrid");
+    const sel = tree.getActiveNode();
+    if (sel && !sel.isRoot()) {
+      sel.remove();
+      flush(true);
+    }
+  });
+
+  /* ───────── 객체선택 → 3D viewer select ───────── */
+  $("#btn-select").off("click").on("click", function() {
+    const taskTree = $.ui.fancytree.getTree("#treegrid");
+    const selected = taskTree.getActiveNode();
+    if (!selected) return alert("Task를 선택하세요!");
+
+    const objects = aggregateTaskFields(selected).objects;
+    if (!objects || objects.length === 0) return alert("이 Task(및 하위 Task)에 연결된 객체가 없습니다.");
+
+    const byUrn = {};
+    objects.forEach(obj => {
+      if (!byUrn[obj.urn]) byUrn[obj.urn] = [];
+      byUrn[obj.urn].push(obj.dbId);
+    });
+    Object.entries(byUrn).forEach(([urn, dbIds]) => {
+      if (urn === window.CURRENT_MODEL_URN && window.viewer) {
+        window.viewer.select(dbIds);
+      }
+    });
+  });
+
+  /* ───────── 업데이트(저장) ───────── */
+  $("#btn-update").off("click").on("click", async function () {
+    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
+    const url = `/api/tasks?urn=${safeUrnVal}`;
+    const currentTaskData = getCurrentTaskDataFromTree();
+    const current = JSON.stringify(currentTaskData ?? []);
+    const saved   = JSON.stringify(window.savedTaskData ?? []);
+
+    if (!window.savedTaskData || (Array.isArray(window.savedTaskData) && window.savedTaskData.length === 0 && currentTaskData.length > 0)) {
+      // 최초 저장 허용
+    } else if (current === saved) {
+      alert("수정된 데이터가 없습니다.");
+      return;
+    }
+
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(currentTaskData),
+      });
+      if (resp.ok) {
+        alert("Task 데이터가 저장되었습니다!");
+        window.savedTaskData = JSON.parse(JSON.stringify(currentTaskData));
+      } else {
+        alert("Task 데이터 저장 실패!");
+      }
+    } catch (err) {
+      alert("저장 중 오류 발생: " + err.message);
+    }
+  });
+
+  /* ───────── 데이터연결: 체크된 WBS → 경로 → leaf dbId 수집 ───────── */
+  $("#btn-link").off("click").on("click", async function () {
+    const taskTree = $.ui.fancytree.getTree("#treegrid");
+    const selectedTaskNode = taskTree.getActiveNode();
+    if (!selectedTaskNode) return alert("Task를 선택하세요!");
+    if (selectedTaskNode.hasChildren && selectedTaskNode.hasChildren()) {
+      alert("하위 작업이 있는 Task에는 연결할 수 없습니다.\n 최하위 Task를 선택해 주세요.");
+      return;
+    }
+
+    const urn = window.CURRENT_MODEL_URN;
+    const provider = window.__WBS_PROVIDER;
+    const catSel = normalizeTaskCategory(selectedTaskNode.data?.selectedOption); // "C"|"T"|"D"
+    const catLabel = catSel === "C" ? "시공" : (catSel === "T" ? "가설" : "철거");
+
+    // ✅ Store 우선: 부분선택(partsel)도 허용해서 경로→dbId를 인덱스에서 바로 회수
+    let orderedDbIds = [];
+    let pathByDbId = new Map();
+
+    const store = window.__WBS_STORE__;
+    if (store?.getOrderedDbIdsFromSelection) {
+      const { orderedDbIds: ids, pathByDbId: map } =
+        await store.getOrderedDbIdsFromSelection({ includePartsel: true });
+      orderedDbIds = ids;
+      pathByDbId   = map;
+    } else {
+      // 🔁 폴백(이전 방식): 체크된 노드 직접 읽어서 provider/가시 트리에서 수집
+      const _wbs = findWbsTree();
+      if (!_wbs) { alert("WBS 트리를 찾을 수 없습니다(체크박스가 있는 트리)."); return; }
+
+      const checkedNodes = getCheckedNodesFT(); // (partsel 제외)
+      if (!checkedNodes.length) {
+        console.warn("[WBS] No checked nodes via API/DOM fallback.");
+        alert("WBS에서 '체크(V)'된 항목이 없습니다.\n(체크 후 다시 시도해 주세요)");
+        return;
+      }
+
+      checkedNodes.sort((a,b) => a.getIndexHier().localeCompare(b.getIndexHier(), undefined, { numeric:true }));
+
+      const seen = new Set();
+      for (const node of checkedNodes){
+        const path = node.data?.path || pathOfNodeFT(node);
+        const ids = await bfsCollectDescendantDbIds(provider, path, node);
+        for (const id of ids){
+          if (!seen.has(id)) {
+            seen.add(id);
+            orderedDbIds.push(id);
+            pathByDbId.set(id, path.slice());
+          }
+        }
+      }
+    }
+
+    if (!orderedDbIds.length) return alert("체크된 항목에서 연결 가능한 객체(dbId)를 찾지 못했습니다.");
+
+    // ElementId 프리페치
+    try { await ensureElementIdIndexForDbIds(orderedDbIds); } catch {}
+
+    // 저장용 오브젝트(라벨: "A - B - C - [ElementId|dbId]")
+    const toLink = orderedDbIds.map((d) => {
+      const p = pathByDbId.get(d) || [];
+      const el = getElementIdFor(urn, d);
+      const bracket = `[${el || d}]`;
+      const pathLabel = p.length ? (p.join(" - ") + " - " + bracket) : bracket;
+      return { urn, dbId: d, elementId: el || null, text: pathLabel };
+    });
+
+    // ==== 점유/충돌 처리(기존 로직 유지) ====
+    await (async () => {
+      const occupancy = new Map();
+      taskTree.getRootNode().visit(n => {
+        const cat = normalizeTaskCategory(n.data?.selectedOption);
+        if (!cat) return;
+        (n.data?.linkedObjects || []).forEach(o => {
+          const key = `${o.urn || urn}:${o.dbId}`;
+          const slot = occupancy.get(key) || { C: null, T: null, D: null };
+          if (cat === "C" && !slot.C) slot.C = n;
+          if (cat === "T" && !slot.T) slot.T = n;
+          if (cat === "D" && !slot.D) slot.D = n;
+          occupancy.set(key, slot);
+        });
+      });
+
+      const allowed = [];
+      const conflictsForC = [];
+      const conflictsC = [];
+      const conflictsSame = [];
+
+      toLink.forEach(obj => {
+        const key = `${obj.urn}:${obj.dbId}`;
+        const slot = occupancy.get(key) || { C: null, T: null, D: null };
+
+        if (catSel === "C") {
+          if (!slot.C && !slot.T && !slot.D) allowed.push(obj);
+          else conflictsForC.push({ obj, slot });
+        } else if (catSel === "T") {
+          if (slot.C) conflictsC.push({ obj, slot });
+          else if (slot.T) conflictsSame.push({ obj, slot });
+          else allowed.push(obj);
+        } else if (catSel === "D") {
+          if (slot.C) conflictsC.push({ obj, slot });
+          else if (slot.D) conflictsSame.push({ obj, slot });
+          else allowed.push(obj);
+        }
+      });
+
+      function unlinkFromNode(node, obj) {
+        if (!node) return;
+        node.data.linkedObjects = (node.data.linkedObjects || []).filter(
+          o => !(String(o.urn || urn) === String(obj.urn) && Number(o.dbId) === Number(obj.dbId))
+        );
+        node.render && node.render();
+      }
+
+      if (catSel === "C" && conflictsForC.length) {
+        const res = prompt([
+          `선택한 객체 중 ${conflictsForC.length}개는 이미 다른 Task에 연결되어 있습니다.`,
+          `규칙상 '시공'은 단독 연결만 가능합니다.`,
+          ``,
+          `1. 기존 연결 해제 후 이 Task(시공)로 새로 연결`,
+          `2. 이미 연결된 객체만 제외하고 진행`,
+          `3. 취소`,
+          ``,
+          `번호를 입력하세요 (1/2/3)`
+        ].join("\n"), "2");
+        if (res === "3" || res == null) return;
+        if (res === "1") {
+          conflictsForC.forEach(({ obj, slot }) => {
+            unlinkFromNode(slot.C, obj);
+            unlinkFromNode(slot.T, obj);
+            unlinkFromNode(slot.D, obj);
+            allowed.push(obj);
+          });
+        }
+      }
+
+      if ((catSel === "T" || catSel === "D") && conflictsC.length) {
+        const res = prompt([
+          `다음 객체는 '시공'에 이미 연결되어 있어 ${catLabel}과(와) 병행할 수 없습니다.`,
+          ``,
+          `1. 시공 연결 해제 후 이 Task(${catLabel})로 새로 연결`,
+          `2. 이미 연결된 객체만 제외하고 진행`,
+          `3. 취소`,
+          ``,
+          `번호를 입력하세요 (1/2/3)`
+        ].join("\n"), "2");
+        if (res === "3" || res == null) return;
+        if (res === "1") {
+          conflictsC.forEach(({ obj, slot }) => { unlinkFromNode(slot.C, obj); allowed.push(obj); });
+        }
+      }
+
+      if ((catSel === "T" || catSel === "D") && conflictsSame.length) {
+        const label = catLabel;
+        const res = prompt([
+          `다음 객체는 이미 '${label}'에 연결되어 있습니다.`,
+          ``,
+          `1. 기존 '${label}' 연결을 이 Task로 교체 (해당 카테고리만 교체)`,
+          `2. 이미 연결된 객체만 제외하고 진행`,
+          `3. 취소`,
+          ``,
+          `번호를 입력하세요 (1/2/3)`
+        ].join("\n"), "2");
+        if (res === "3" || res == null) return;
+        if (res === "1") {
+          conflictsSame.forEach(({ obj, slot }) => {
+            if (catSel === "T") unlinkFromNode(slot.T, obj);
+            if (catSel === "D") unlinkFromNode(slot.D, obj);
+            allowed.push(obj);
+          });
+        }
+      }
+
+      if (allowed.length > 0) {
+        const existing = selectedTaskNode.data.linkedObjects || [];
+        const merged = [];
+        const seenKey = new Set();
+        const pushUniq = (o) => { const k = o.urn + ":" + o.dbId; if (!seenKey.has(k)) { seenKey.add(k); merged.push(o); } };
+        allowed.forEach(pushUniq);  // WBS 순서 우선
+        existing.forEach(pushUniq); // 기존 뒤에
+        selectedTaskNode.data.linkedObjects = merged;
+      }
+
+      const prev = window.__ALLOW_WBS_UPDATE;
+      window.__ALLOW_WBS_UPDATE = true;
+      try {
+        if (window.requestTaskRecalcAndFlush) window.requestTaskRecalcAndFlush(); 
+        else if (window.requestTaskTreeFlush) window.requestTaskTreeFlush();
+        try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_) {}
+      } finally {
+        window.__ALLOW_WBS_UPDATE = prev;
+      }
+
+      try { await notifyCoverageDirtyAndRepaint(); } catch {}
+    })();
+
+    try { window.__WBS_MARK_TASKS_CHANGED?.(); } catch {}
+  });
+
+  /* ───────── 연결 해제 ───────── */
+  $("#btn-unlink").off("click").on("click", async function () {
+    const taskTree = $.ui.fancytree.getTree("#treegrid");
+    const selectedNode = taskTree.getActiveNode();
+    if (!selectedNode) return alert("연결을 해제할 Task를 선택하세요!");
+
+    await runWbsHighlightBatch(async () => {
+      (function unlinkAll(node){
+        node.data.linkedObjects = [];
+        if (node.hasChildren()) node.children.forEach(unlinkAll);
+      })(selectedNode);
+
+      withWbsGate(() => {
+        flush(true);
+        try { window.gantt?.renderFromTrees(window.taskTree, window.wbsTree); } catch(_) {}
+      });
+
+      try { await notifyCoverageDirtyAndRepaint(); } catch {}
+    });
+    notifyWbsStatusRefresh();
+  });
+
+  /* ───────── 공정현황 ───────── */
+  $("#btn-date").off("click").on("click", function(){
+    showCurrentTaskModal();
+  });
+
+  /* ───────── TEST 버튼 ───────── */
+  $("#btn-test").off("click").on("click", async function() {
+    initTaskWbsButtons(window.viewer);
+  });
+}
+
+/* =============================================================================
+   Task 트리 저장 변환/번호 생성
+============================================================================= */
+function getCurrentTaskDataFromTree() {
+  const tree = $.ui.fancytree.getTree("#treegrid");
+  const urn = window.CURRENT_MODEL_URN;
+  function nodeToData(node) {
+    const obj = {
+      no: node.data.no,
+      selectOptions: node.data.selectOptions ?? ["시공", "가설", "철거"],
+      selectedOption: node.data.selectedOption ?? "시공",
+      title: node.data.title ?? node.title,
+      start: node.data.start,
+      end: node.data.end,
+      linkedObjects: (node.data.linkedObjects || []).map(o => ({
+        urn: o.urn ?? urn,
+        dbId: o.dbId,
+        elementId: o.elementId ?? null,
+        text: o.text ?? formatObjectLabel(o),
+      })),
+    };
+    if (node.hasChildren()) obj.children = node.children.map(nodeToData);
+    return obj;
+  }
+  return (tree.getRootNode().children || []).map(nodeToData);
+}
+
+function generateNo(parentNode) {
+  if (!parentNode || parentNode.isRoot()) {
+    const roots = $.ui.fancytree.getTree("#treegrid").getRootNode().children || [];
+    return String(roots.length + 1);
+  } else {
+    const siblings = parentNode.children || [];
+    const baseNo = parentNode.data.no || parentNode.title;
+    return baseNo + "." + (siblings.length + 1);
+  }
+}
+
+/* =============================================================================
+   TEST 애니메이션(기존 유지)
+============================================================================= */
+export function initTaskWbsButtons(viewer) {
+  let btn = document.getElementById('btn-test');
+  if (!btn || !viewer) return;
+
+  const clone = btn.cloneNode(true);
+  btn.parentNode.replaceChild(clone, btn);
+  btn = clone;
+
+  btn.addEventListener('click', async () => {
+    try { await runTestAnimation(viewer); }
+    catch (e) { console.error('[test-btn] error:', e); }
+  });
+}
+
+async function runTestAnimation(viewer) {
+  const sel = getSelectionSmart(viewer);
+  if (!sel || !sel.model || !sel.dbIds.length) {
+    console.warn('[test-btn] 먼저 객체를 선택하세요.');
+    return;
+  }
+  const { model, dbIds } = sel;
+  viewer.clearSelection();
+
+  const fragIds = collectFragIds(model, dbIds);
+  if (!fragIds.length) return;
+
+  const store = prepareFragStates(viewer, model, fragIds);
+
+  const MOVE_Z = 5.0;
+  const D1 = 2000;
+  const HOLD = 1000;
+  const D2 = 2000;
+
+  const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const FALLBACK_COLOR = new THREE.Color(1.0, 0.45, 0.0);
+
+  await animate(D1, (t) => {
+    const k = easeInOutSine(t);
+    const alphaOut = 1 - k;
+    const dz = lerp(0, MOVE_Z, k);
+    for (const f of store) {
+      f.proxy.position.z = f.startPos.z + dz;
+      f.proxy.updateAnimTransform();
+      if (f.cloneMat) {
+        f.cloneMat.opacity = alphaOut;
+        f.cloneMat.transparent = true;
+        f.cloneMat.needsUpdate = true;
+        if (f.cloneMat.color && f.originalColor) {
+          f.cloneMat.color.copy(f.originalColor).lerp(FALLBACK_COLOR, k);
+        }
+      }
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+
+  await delay(HOLD);
+
+  await animate(D2, (t) => {
+    const k = easeInOutSine(t);
+    const alphaIn = k;
+    const dz = lerp(MOVE_Z, 0, k);
+    for (const f of store) {
+      f.proxy.position.z = f.startPos.z + dz;
+      f.proxy.updateAnimTransform();
+      if (f.cloneMat) {
+        f.cloneMat.opacity = alphaIn;
+        f.cloneMat.transparent = true;
+        f.cloneMat.needsUpdate = true;
+        if (f.cloneMat.color && f.originalColor) {
+          f.cloneMat.color.copy(FALLBACK_COLOR).lerp(f.originalColor, k);
+        }
+      }
+    }
+    viewer.impl.invalidate(true, true, true);
+  });
+
+  restoreFragStates(viewer, store);
+}
+
+function getSelectionSmart(viewer) {
+  const agg = viewer.getAggregateSelection?.();
+  if (agg && agg.length > 0) {
+    const a = agg[0];
+    const ids = (a.selection || []).slice();
+    return ids.length ? { model: a.model, dbIds: ids, aggregate: true } : null;
+  }
+  const ids = viewer.getSelection?.() || [];
+  return (ids && ids.length) ? { model: viewer.model, dbIds: ids, aggregate: false } : null;
+}
+
+function collectFragIds(model, dbIds) {
+  const it = model.getData().instanceTree;
+  const fragIds = [];
+  dbIds.forEach((dbId) => {
+    it.enumNodeFragments(dbId, (fragId) => fragIds.push(fragId), true);
+  });
+  return fragIds;
+}
+
+function getFragList(viewer, model) {
+  if (model?.getFragmentList) return model.getFragmentList();
+  if (viewer?.model?.getFragmentList) return viewer.model.getFragmentList();
+  return null;
+}
+
+function prepareFragStates(viewer, model, fragIds) {
+  const THREE = window.THREE || Autodesk.Viewing.THREE;
+  const matman = viewer.impl.matman ? viewer.impl.matman() : null;
+  const fragList = getFragList(viewer, model);
+  const store = [];
+
+  const fragToDb = {};
+  if (fragList) {
+    fragIds.forEach((fragId) => {
+      try { fragToDb[fragId] = fragList.getDbId(fragId); } catch (_) {}
+    });
+  }
+
+  for (const fragId of fragIds) {
+    const proxy = viewer.impl.getFragmentProxy(model, fragId);
+    proxy.getAnimTransform();
+    const startPos = new THREE.Vector3(proxy.position.x, proxy.position.y, proxy.position.z);
+
+    const rp = viewer.impl.getRenderProxy(model, fragId);
+    const originalMat = rp?.material || null;
+
+    let originalColor = null;
+    if (originalMat && originalMat.color) originalColor = originalMat.color.clone();
+
+    let cloneMat = null;
+    if (originalMat) {
+      cloneMat = (matman && matman.cloneMaterial) ? matman.cloneMaterial(originalMat) : originalMat.clone();
+      cloneMat.transparent = true;
+      cloneMat.opacity = 1.0;
+      cloneMat.depthWrite = false;
+      cloneMat.side = originalMat.side;
+      cloneMat.needsUpdate = true;
+
+      if (viewer.impl.setMaterial) {
+        viewer.impl.setMaterial(model, fragId, cloneMat);
+      } else if (fragList?.setMaterial) {
+        fragList.setMaterial(fragId, cloneMat);
+      } else if (viewer.impl.setFragmentMaterial) {
+        viewer.impl.setFragmentMaterial(fragId, cloneMat);
+      }
+    }
+
+    store.push({
+      model, fragId,
+      dbId: fragToDb[fragId],
+      proxy, startPos,
+      renderProxy: rp,
+      originalMat, cloneMat,
+      originalColor
+    });
+  }
+  viewer.impl.invalidate(true, true, true);
+  return store;
+}
+
+function restoreFragStates(viewer, store) {
+  if (!store.length) return;
+  const model = store[0].model;
+  const fragList = getFragList(viewer, model);
+
+  for (const f of store) {
+    f.proxy.position.copy(f.startPos);
+    f.proxy.updateAnimTransform();
+
+    if (f.originalMat) {
+      if (viewer.impl.setMaterial) {
+        viewer.impl.setMaterial(f.model, f.fragId, f.originalMat);
+      } else if (fragList?.setMaterial) {
+        fragList.setMaterial(f.fragId, f.originalMat);
+      } else if (viewer.impl.setFragmentMaterial) {
+        viewer.impl.setFragmentMaterial(f.fragId, f.originalMat);
+      }
+    }
+    if (f.cloneMat?.dispose) f.cloneMat.dispose();
+  }
+
+  viewer.impl.invalidate(true, true, true);
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function delay(ms) { return new Promise((res) => setTimeout(res, ms)); }
+function animate(duration, step) {
+  return new Promise((resolve) => {
+    const start = performance.now();
+    function frame(now) {
+      const t = Math.min(1, (now - start) / duration);
+      step(t);
+      if (t < 1) requestAnimationFrame(frame);
+      else resolve();
+    }
+    requestAnimationFrame(frame);
+  });
+}
+function easeInOutSine(t){ return 0.5 - 0.5 * Math.cos(Math.PI * t); }
+
+
+
+// /wwwroot/js/main.js — 첫 로딩 WBS 셀 색칠 보장 (배지 제거/최적화)
+
+import { initTabs } from "./sidebar/init-tabs.js";
+import { initTree } from "./sidebar/init-tree.js";
+import { initViewer, loadModel } from "./viewer/init-viewer.js";
+import { buildWbsProviderLazy } from "./sidebar/task-wbs/wbs/loader.js";
+import { bindPanel2Resizer } from "./sidebar/task-wbs/layout/panel-resizer.js";
+
+import {
+  initMatrix,
+  bulkEnsureForVisible,
+  computePathState,
+  getCounts as _getCountsImported,   // 로컬 import는 디버그 브릿지 대상 아님(참고용)
+  markTasksChanged,
+} from "./sidebar/task-wbs/core/matrix-index.js";
+
+import { toKey } from "./sidebar/task-wbs/core/path-key.js";
+
+import {
+  initTaskPanel,
+  initTaskListButtons,
+  setSavedTaskData,
+  disableViewerEscReset,
+  initWbsPanelWithFancytree,
+} from "./sidebar/index.js";
+
+/* ──────────────────────────────────────────────────────────────
+   전역/기본 설정
+────────────────────────────────────────────────────────────── */
+try {
+  window.__WBS_DEBUG = window.__WBS_DEBUG || {};
+  window.getCounts = _getCountsImported;
+  window.markTasksChanged = markTasksChanged;
+} catch {}
+
+const SIDEBAR_MIN = 360;
+const SIDEBAR_DEFAULT = 900;
+const PREVIEW_MIN = 520;
+
+window.__FA_FALLBACK_BY_KEY = Object.create(null); // 폴백 count 저장소
+
+function initSidebarWidth() {
+  const root = document.documentElement;
+  const stored = parseInt(localStorage.getItem("sidebarWidthPx") || "0", 10);
+  const maxNow = Math.max(SIDEBAR_MIN, window.innerWidth - PREVIEW_MIN);
+  const initial = Number.isFinite(stored) && stored >= SIDEBAR_MIN
+    ? Math.min(maxNow, stored)
+    : Math.min(maxNow, SIDEBAR_DEFAULT);
+  root.style.setProperty("--sidebar-width", initial + "px");
+  return initial;
+}
+
+function resetViewerInputAndCamera(viewer) {
   try {
-    window.dispatchEvent(new CustomEvent('sidebar-width-changed', { detail: { width: sidebarRect.width } }));
+    const tc = viewer.toolController;
+    if (tc?.isToolActivated?.("BoxSelectionTool")) tc.deactivateTool("BoxSelectionTool");
+    viewer.setNavigationLock(false);
+    const fallbackNav = viewer.impl?.is2d ? "pan" : "orbit";
+    viewer.setActiveNavigationTool?.(fallbackNav);
+    viewer.setSelectionMode(Autodesk.Viewing.SelectionMode.MIXED);
+    viewer.clearSelection?.();
+    if (!viewer.impl?.is2d) {
+      viewer.navigation.setWorldUpVector(new THREE.Vector3(0, 0, 1), true);
+      const bb = viewer.model?.getBoundingBox?.();
+      if (bb) {
+        const center = bb.getCenter(new THREE.Vector3());
+        viewer.navigation.setPivotPoint(center);
+        viewer.navigation.setTarget(center);
+      }
+    }
+    viewer.fitToView?.();
   } catch {}
-});
+}
+
+/* ──────────────────────────────────────────────────────────────
+   뷰어 대기 유틸
+────────────────────────────────────────────────────────────── */
+function onceViewer(viewer, type) {
+  return new Promise((resolve) => {
+    const h = () => { try { viewer.removeEventListener(type, h); } catch {} ; resolve(); };
+    viewer.addEventListener(type, h);
+  });
+}
+function hasObjectTree(viewer) {
+  return !!viewer.model?.getData?.()?.instanceTree;
+}
+async function waitObjectTree(viewer) {
+  if (hasObjectTree(viewer)) return;
+  await onceViewer(viewer, Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT);
+}
+async function waitGeometry(viewer, timeoutMs = 180000) {
+  await new Promise((resolve) => {
+    let done = false;
+    const h = () => { if (done) return; done = true; try { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h); } catch {} ; resolve(); };
+    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h, { once: true });
+    setTimeout(h, timeoutMs);
+  });
+}
+async function waitPropertyDb(viewer, timeoutMs = 120000) {
+  try { if (viewer?.model?.getPropertyDb?.()) return; } catch {}
+  await new Promise((resolve) => {
+    let done = false;
+    const h = () => { if (done) return; done = true; try { viewer.removeEventListener(Autodesk.Viewing.PROPERTY_DB_CREATED_EVENT, h); } catch {} ; resolve(); };
+    viewer.addEventListener(Autodesk.Viewing.PROPERTY_DB_CREATED_EVENT, h, { once: true });
+    setTimeout(h, timeoutMs);
+  });
+}
+function waitIdle(timeout = 60) {
+  return new Promise((resolve) => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => resolve(), { timeout });
+    } else setTimeout(resolve, timeout);
+  });
+}
+async function waitViewerReady(viewer) {
+  await Promise.all([ waitObjectTree(viewer), waitPropertyDb(viewer), waitGeometry(viewer) ]);
+  await waitIdle(60);
+}
+async function focusCameraAndWait(viewer) {
+  return new Promise((resolve) => {
+    const onCam = () => { try { viewer.removeEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam); } catch {}; requestAnimationFrame(() => resolve()); };
+    viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, onCam, { once: true });
+    resetViewerInputAndCamera(viewer);
+  });
+}
+
+/* ──────────────────────────────────────────────────────────────
+   태스크/URN 유틸
+────────────────────────────────────────────────────────────── */
+function safeUrn(urn) { return urn.replace(/[^a-zA-Z0-9]/g, "_"); }
+function fillUrnRecursive(task, defaultUrn) {
+  if (Array.isArray(task.linkedObjects)) {
+    task.linkedObjects.forEach((o) => { if (!o.urn) o.urn = defaultUrn || window.CURRENT_MODEL_URN; });
+  }
+  if (Array.isArray(task.children)) {
+    task.children.forEach((child) => fillUrnRecursive(child, defaultUrn));
+  }
+}
+function persistTasksSnapshot(tasks) {
+  const RAW  = window.CURRENT_MODEL_URN;
+  const SAFE = window.CURRENT_MODEL_SAFE_URN;
+  if (!RAW || !SAFE) return;
+  try {
+    const json = JSON.stringify(tasks || []);
+    localStorage.setItem(`hec:tasks:${RAW}`, json);
+    localStorage.setItem(`hec:tasks:${SAFE}`, json);
+    window.__SAVED_TASKS = (tasks || []);
+    console.log("[persistTasksSnapshot] saved. count =", window.__SAVED_TASKS.length);
+  } catch (e) {
+    console.warn("[persistTasksSnapshot] failed:", e);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Provider 워밍업 / 폴백 집계
+────────────────────────────────────────────────────────────── */
+async function seedDbIdMappings(provider, { maxDepth = 3, cap = 6000 } = {}) {
+  const roots = await provider.roots().catch(() => []) || [];
+  const q = roots.map(r => ({ path: [r.text], depth: 0 }));
+  let visited = 0;
+  while (q.length && visited < cap) {
+    const { path, depth } = q.shift();
+    try { provider.getDbIdsForPath?.(path, { includeDescendants: true, allowUnbuilt: true }); } catch {}
+    if (depth < maxDepth) {
+      let kids = [];
+      try { kids = await provider.childrenByPath(path) || []; } catch {}
+      visited += kids.length;
+      for (const ch of kids) {
+        const np = ch.__path || [...path, ch.text];
+        q.push({ path: np, depth: depth + 1 });
+      }
+    }
+  }
+}
+
+async function collectKeysForRoots(provider, { maxDepth = 3, cap = 6000 } = {}) {
+  const roots = (await provider.roots().catch(() => [])) || [];
+  const q = roots.map(r => ({ path: [r.text], depth: 0 }));
+  const keys = new Set();
+  let seen = 0;
+
+  while (q.length && seen < cap) {
+    const { path, depth } = q.shift();
+    keys.add(toKey(path));
+
+    let kids = [];
+    try { kids = await provider.childrenByPath(path) || []; } catch {}
+    seen += kids.length;
+
+    if (depth < maxDepth) {
+      for (const ch of kids) {
+        const np = ch.__path || [...path, ch.text];
+        q.push({ path: np, depth: depth + 1 });
+      }
+    }
+  }
+  return Array.from(keys);
+}
+
+// 태스크 → 상태별 dbId 세트
+function buildStatusSetsFromTasks(tasks) {
+  const stateById = new Map();
+  const norm = (raw) => {
+    if (!raw) return "";
+    const s = String(raw).trim();
+    const S = s.toUpperCase();
+    if (s.includes("시공") || S.startsWith("C")) return "C";
+    if (s.includes("가설") || S.startsWith("T")) return "T";
+    if (s.includes("철거") || s.includes("해체") || S.startsWith("D")) return "D";
+    if (S === "TD" || s.includes("동시") || s.includes("복합") || S.startsWith("X")) return "TD";
+    return "";
+  };
+  const prio = { C:3, TD:2, D:1, T:0, "":-1 };
+  function apply(id, sNew) {
+    if (!id || !sNew) return;
+    const cur = stateById.get(id);
+    if (!cur) { stateById.set(id, sNew); return; }
+    if ((cur === "T" && sNew === "D") || (cur === "D" && sNew === "T")) { stateById.set(id, "TD"); return; }
+    stateById.set(id, prio[sNew] > prio[cur] ? sNew : cur);
+  }
+  (function walk(arr, inherited="") {
+    (arr||[]).forEach(t => {
+      const sTask = norm(t.status || t.selectedOption || inherited);
+      (t.linkedObjects||[]).forEach(o => apply(o.dbId, norm(o.status || o.phase || sTask)));
+      if (t.children) walk(t.children, sTask);
+    });
+  })(tasks);
+  const S = { C:new Set(), T:new Set(), D:new Set(), TD:new Set() };
+  for (const [id, s] of stateById.entries()) if (S[s]) S[s].add(id);
+  return S;
+}
+
+function calcCountsForPath(provider, path, S) {
+  let ids = [];
+  try {
+    ids = provider.getDbIdsForPath(path, { includeDescendants:true, allowUnbuilt:true }) || [];
+  } catch {}
+  if (!ids.length) return { total:0, c:0, t:0, d:0, td:0 };
+  const set = new Set(ids);
+  let c=0,t=0,d=0,td=0;
+  for (const id of set) {
+    if (S.C.has(id)) c++;
+    if (S.T.has(id)) t++;
+    if (S.D.has(id)) d++;
+    if (S.TD.has(id)) td++;
+  }
+  return { total:set.size, c,t,d,td };
+}
+
+function keyFromPath(path) {
+  const D = window.__WBS_DEBUG;
+  return (D?.toKey ? D.toKey(path) : toKey(path));
+}
+
+async function buildFallbackMap(provider, { maxDepth=3, cap=6000 } = {}) {
+  window.__FA_FALLBACK_BY_KEY = Object.create(null);
+  const tasks = window.__SAVED_TASKS || [];
+  const S = buildStatusSetsFromTasks(tasks);
+
+  const roots = (await provider.roots().catch(()=>[])) || [];
+  const q = roots.map(r => ({ path:[r.text], depth:0 }));
+  let seen = 0;
+
+  while (q.length && seen < cap) {
+    const { path, depth } = q.shift();
+    const key = keyFromPath(path);
+    window.__FA_FALLBACK_BY_KEY[key] = calcCountsForPath(provider, path, S);
+
+    let kids = [];
+    try { kids = await provider.childrenByPath(path) || []; } catch {}
+    seen += kids.length;
+    if (depth < maxDepth) {
+      for (const ch of kids) q.push({ path: (ch.__path || [...path, ch.text]), depth: depth+1 });
+    }
+  }
+  console.log("[FA] fallback map ready (keys =", Object.keys(window.__FA_FALLBACK_BY_KEY).length, ")");
+}
+
+function patchGetCountsToUseFallback() {
+  const D = window.__WBS_DEBUG;
+  const fbMap = () => window.__FA_FALLBACK_BY_KEY || Object.create(null);
+
+  if (!window.__FA_BRIDGED_GLOBAL) {
+    const origGlobal = window.getCounts;
+    window.getCounts = function (k) {
+      const r = origGlobal ? (origGlobal(k) || {}) : {};
+      const sum = ((r.c|0)+(r.t|0)+(r.d|0)+(r.td|0));
+      if (sum > 0) return r;
+      const fb = fbMap()[k];
+      if (fb) { const total = Math.max((r.total|0), (fb.total|0)); return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 }; }
+      return r;
+    };
+    window.__FA_BRIDGED_GLOBAL = true;
+  }
+
+  if (D?.getCounts && !D.__patchedForFallback) {
+    const orig = D.getCounts.bind(D);
+    D.__origGetCounts = orig;
+    D.getCounts = function (k) {
+      const r = orig(k) || {};
+      const sum = ((r.c|0)+(r.t|0)+(r.d|0)+(r.td|0));
+      if (sum > 0) return r;
+      const fb = fbMap()[k];
+      if (fb) { const total = Math.max((r.total|0), (fb.total|0)); return { total, c:fb.c|0, t:fb.t|0, d:fb.d|0, td:fb.td|0 }; }
+      return r;
+    };
+    D.__patchedForFallback = true;
+  }
+
+  console.log("[FA] getCounts bridged");
+}
+
+/* ──────────────────────────────────────────────────────────────
+   WBS FancyTree 셀 색칠 (배지 제거)
+────────────────────────────────────────────────────────────── */
+const CELL_COLOR = {
+  C:  "#ef4444", // 시공(빨강)
+  T:  "#f59e0b", // 가설(주황)
+  D:  "#6b7280", // 철거(회색)
+  TD: "#2563eb"  // 가설+철거(파랑)
+};
+
+function injectWbsCellCss() {
+  if (document.getElementById("wbs-cell-style")) return;
+  const css = `
+    .fancytree-node .fancytree-title {
+      border-left: 4px solid transparent;
+      padding-left: 8px;
+      border-radius: 6px;
+      transition: background-color .15s ease, border-color .15s ease;
+    }
+    .wbsCell--C  .fancytree-title  { background: ${CELL_COLOR.C}1a;  border-left-color: ${CELL_COLOR.C}; }
+    .wbsCell--T  .fancytree-title  { background: ${CELL_COLOR.T}1a;  border-left-color: ${CELL_COLOR.T}; }
+    .wbsCell--D  .fancytree-title  { background: ${CELL_COLOR.D}1a;  border-left-color: ${CELL_COLOR.D}; }
+    .wbsCell--TD .fancytree-title  { background: ${CELL_COLOR.TD}1a; border-left-color: ${CELL_COLOR.TD}; }
+  `.trim();
+  const s = document.createElement("style");
+  s.id = "wbs-cell-style";
+  s.textContent = css;
+  document.head.appendChild(s);
+}
+
+function normalizeCounts(x){
+  // 어떤 형태로 와도 안전하게 객체로 변환
+  if (x == null) return { total: 0, C: 0, T: 0, D: 0 };
+  if (typeof x === "number") return { total: x, C: x, T: 0, D: 0 }; // 총합만 아는 형태
+  // 객체일 때 필드 보정
+  return {
+    total: Number(x.total ?? x.count ?? 0),
+    C:     Number(x.C ?? x.c ?? 0),
+    T:     Number(x.T ?? x.t ?? 0),
+    D:     Number(x.D ?? x.d ?? 0),
+  };
+}
+
+function countsForPath(path){
+  // 1) 브리지 함수가 있으면 우선 사용
+  if (typeof window.__FA_GET_COUNTS__ === "function") {
+    return normalizeCounts(window.__FA_GET_COUNTS__(path));
+  }
+  // 2) Provider에 countAt가 있으면 사용
+  const provider = window.__WBS_PROVIDER;
+  if (provider?.countAt) {
+    return normalizeCounts(provider.countAt(path));
+  }
+  // 3) WbsStore가 있으면 스토어의 countAt 사용
+  const store = window.__WBS_STORE__;
+  if (store?.countAt) {
+    return normalizeCounts(store.countAt(path));
+  }
+  // 4) 사전 계산 맵이 있다면 (키 조인은 스토어와 동일한 구분자 사용)
+  const SEP = "\u0001";
+  const key = (path || []).join(SEP);
+  const m = window.__FA_COUNT_MAP__;
+  if (m && typeof m.get === "function") {
+    return normalizeCounts(m.get(key));
+  }
+  // 5) 전부 없으면 0으로
+  return normalizeCounts(null);
+}
+
+function classForCounts(c) {
+  if (!c) return null;
+  if ((c.td|0) > 0) return "wbsCell--TD";
+  if ((c.c|0)  > 0) return "wbsCell--C";
+  if ((c.t|0)  > 0) return "wbsCell--T";
+  if ((c.d|0)  > 0) return "wbsCell--D";
+  return null;
+}
+
+function repaintNode(node) {
+  const $ = window.jQuery || window.$;
+  if (!$ || !node || !node.span || node.isRoot?.()) return;
+
+  // __path가 없으면 아직 매핑 전 → 이번 프레임 스킵 (재시도 루프가 다시 칠함)
+  const path = node.data?.__path;
+  if (!path) return;
+
+  const counts = countsForPath(path);
+  const $li = $(node.li);
+  $li.removeClass("wbsCell--C wbsCell--T wbsCell--D wbsCell--TD");
+  const cls = classForCounts(counts);
+  if (cls) $li.addClass(cls);
+}
+
+function repaintTree(tree) {
+  if (!tree) return;
+  tree.visit(repaintNode);
+}
+
+// 첫 로딩 셀 칠하기 재시도 루프(최대 1초)
+function startFirstPaintRetry(tree) {
+  let tries = 0;
+  const maxTries = 10;
+  const step = () => {
+    tries++;
+    repaintTree(tree);
+    if (tries >= maxTries) return;
+    setTimeout(step, 100);
+  };
+  setTimeout(step, 0);
+}
+
+function installWbsDecorators(tree) {
+  const $ = window.jQuery || window.$;
+  if (!tree) tree = $.ui?.fancytree?.getTree("#wbs-tree");
+  if (!tree) return;
+
+  injectWbsCellCss();
+
+  // 기존 훅 체이닝
+  const prevRenderNode = tree.options.renderNode;
+  tree.$div.fancytree("option", "renderNode", function(event, data) {
+    try { if (typeof prevRenderNode === "function") prevRenderNode.call(this, event, data); } catch {}
+    try { repaintNode(data.node); } catch {}
+  });
+  tree.$div.fancytree("option", "createNode", function(_ev, data) {
+    try { repaintNode(data.node); } catch {}
+  });
+  tree.$div.fancytree("option", "expand", function(_ev, data) {
+    if (data.node?.expanded) setTimeout(() => { try { repaintTree(tree); } catch {} }, 0);
+  });
+
+  // 초기 두 프레임 + 재시도 루프
+  try { repaintTree(tree); } catch {}
+  requestAnimationFrame(() => { try { repaintTree(tree); } catch {} });
+  startFirstPaintRetry(tree);
+
+  // 디버그 훅
+  tree.__wbsHelpers = tree.__wbsHelpers || {};
+  tree.__wbsHelpers.repaintTree = () => { try { repaintTree(tree); } catch {} };
+}
+
+/* ──────────────────────────────────────────────────────────────
+   태스크 로드(API 대체 샘플)
+────────────────────────────────────────────────────────────── */
+const SAMPLE_TASK_DATA = [
+  {
+    no: "1", title: "Task A", selectedOption: "시공",
+    start: "2024-06-25", end: "2024-07-01",
+    linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1001, text: "벽체1" }],
+    children: [
+      { no: "1.1", title: "Subtask A1", selectedOption: "시공",
+        start: "2024-06-26", end: "2024-06-30",
+        linkedObjects: [{ urn: "SAMPLE_URN", dbId: 1002, text: "벽체2" }] }
+    ],
+  },
+  { no: "2", title: "Task B", selectedOption: "가설", start: "", end: "", linkedObjects: [] },
+];
+
+async function fetchTaskDataForCurrentModel() {
+  try {
+    const safeUrnVal = window.CURRENT_MODEL_SAFE_URN;
+    const url = `/api/tasks?urn=${safeUrnVal}`;
+    const resp = await fetch(url, { credentials: "include" });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch (err) {
+    console.warn("task 데이터를 불러오지 못했습니다. 샘플로 대체:", err);
+  }
+  return SAMPLE_TASK_DATA.map(x => structuredClone(x));
+}
+
+/* ──────────────────────────────────────────────────────────────
+   리사이즈
+────────────────────────────────────────────────────────────── */
+window.addEventListener("resize", _.throttle(() => {
+  try {
+    initSidebarWidth();
+    window.viewer?.resize?.();
+    window.viewer?.impl?.invalidate?.(true, true, true);
+  } catch (e) { console.warn("[resize] redraw failed", e); }
+}, 120));
+
+/* ──────────────────────────────────────────────────────────────
+   main
+────────────────────────────────────────────────────────────── */
+(async function () {
+  try {
+    // 1) 로그인
+    const resp = await fetch("/api/auth/profile", { credentials: "include" });
+    if (!resp.ok) { window.location.replace("/api/auth/login"); return; }
+    const user = await resp.json();
+    const login = document.getElementById("login");
+    login.innerText = `Logout (${user.name})`;
+    login.onclick = () => {
+      const iframe = document.createElement("iframe");
+      iframe.style.visibility = "hidden";
+      iframe.src = "https://accounts.autodesk.com/Authentication/LogOut";
+      document.body.appendChild(iframe);
+      iframe.onload = () => { window.location.replace("/api/auth/logout"); document.body.removeChild(iframe); };
+    };
+
+    // 2) 레이아웃
+    const Sidebar = document.getElementById("sidebar");
+    const Header  = document.getElementById("header");
+    const Preview = document.getElementById("preview");
+    const sidebarResizer = document.getElementById("sidebar-resizer");
+    const Loading = document.getElementById("loading");
+    Sidebar.style.display = "";
+    sidebarResizer.style.display = "";
+    Preview.style.display = "";
+    Header.style.display = "";
+    Loading.style.display = "none";
+    login.style.visibility = "visible";
+    Sidebar.style.removeProperty("width");
+    Preview.style.removeProperty("left");
+    sidebarResizer.style.removeProperty("left");
+    initSidebarWidth();
+
+    // 3) 탭/뷰어
+    initTabs("#sidebar");
+    const viewerHost = document.getElementById("viewer-host");
+    const viewer = await initViewer(viewerHost);
+    window.viewer = viewer;
+    disableViewerEscReset(viewer);
+
+    viewer.resize();
+    viewer.impl?.invalidate?.(true, true, true);
+    requestAnimationFrame(() => { try { viewer.resize(); viewer.impl?.invalidate?.(true, true, true); } catch {} });
+    resetViewerInputAndCamera(viewer);
+
+    requestAnimationFrame(() => {
+      const sb = document.getElementById("sidebar");
+      if (sb && sb.offsetWidth === 0) {
+        document.documentElement.style.setProperty("--sidebar-width", SIDEBAR_DEFAULT + "px");
+        viewer.resize();
+        viewer.impl?.invalidate?.(true, true, true);
+      }
+    });
+
+    // 4) 모델 선택
+    initTree("#tree", async (versionId) => {
+      const urn = window.btoa(versionId).replace(/=/g, "");
+      window.CURRENT_MODEL_URN = urn;
+      window.CURRENT_MODEL_SAFE_URN = safeUrn(urn);
+
+      // 기존 WBS 파괴
+      try { $.ui.fancytree.getTree("#wbs-tree")?.destroy(); } catch {}
+      $("#wbs-group-content").empty();
+
+      // (A) 모델 로드 & 안정화
+      await loadModel(viewer, urn);
+      await waitViewerReady(viewer);
+      await focusCameraAndWait(viewer);
+      viewer.resize();
+
+      // (B) WBS Provider 생성
+      let provider = null;
+      try {
+        const PRIMARY = ["HEC.WBS","HEC.Level","HEC.Zone"];
+        const { provider: p } = await buildWbsProviderLazy(viewer, {
+          primaryOrder: PRIMARY, source: "all", bucketThreshold: 400, bucketSize: 200,
+        });
+        provider = p;
+        window.WBS_PROVIDER = provider;
+        const roots = await provider.roots();
+        console.log("[WBS] roots:", Array.isArray(roots) ? roots.length : roots);
+      } catch (e) {
+        console.warn("[WBS] provider failed:", e);
+        provider = { __provider:true, roots:async()=>[], childrenByPath:async()=>[] };
+        window.WBS_PROVIDER = provider;
+      }
+
+      // (C) 태스크 로드/정규화/영속
+      const tasks = await fetchTaskDataForCurrentModel();
+      tasks.forEach((t) => fillUrnRecursive(t, urn));
+      persistTasksSnapshot(tasks);
+
+      // (D) provider 맵 워밍업 → 매트릭스 초기화 → 태스크 데이터 UI로 공유
+      await seedDbIdMappings(provider, { maxDepth: 3, cap: 6000 });
+      await initMatrix({ primaryOrder:["HEC.WBS","HEC.Level","HEC.Zone"], provider });
+      setSavedTaskData(tasks);
+
+      // (E) 폴백맵 준비 & getCounts 브릿지
+      await buildFallbackMap(provider, { maxDepth:3, cap:6000 });
+      patchGetCountsToUseFallback();
+
+      // (F) 선계산(루트~깊이3)
+      const preKeys = await collectKeysForRoots(provider, { maxDepth: 3, cap: 6000 });
+      await bulkEnsureForVisible(preKeys);
+      preKeys.forEach(computePathState);
+
+      // (G) 트리 init → 핸들 확보 → 데코레이터 설치 → 첫 칠하기 재시도
+      await initWbsPanelWithFancytree(provider, { primaryOrder: ["HEC.WBS","HEC.Level","HEC.Zone"] });
+      console.log("[STEP 5] WBS fancytree init OK");
+
+      const tree = $.ui.fancytree.getTree("#wbs-tree");
+      installWbsDecorators(tree); // ★ 셀 색칠 전용(배지 없음)
+
+      // (H) 나머지
+      try { bindPanel2Resizer(viewer); console.log("[STEP 6] panel2 resizer bound"); } catch {}
+      try { initTaskPanel(tasks); initTaskListButtons(); console.log("[STEP 1] Task panel OK"); } catch {}
+      try { window.dispatchEvent(new Event("panel2-ready")); console.log("[STEP 2] panel2-ready dispatched"); } catch {}
+    });
+
+  } catch (err) {
+    alert("Could not initialize the application. See console for more details.");
+    console.error(err);
+  }
+})();
+
+
+
+// /wwwroot/js/sidebar/index.js
+// 퍼사드: 외부에서는 이 파일만 import 하세요.
+
+// Task / WBS 패널
+export { initTaskPanel } from "./task-wbs/task-tree.js";
+export { initTaskListButtons, setSavedTaskData } from "./task-wbs/task-buttons.js";
+
+// ✅ 새 WBS(Fancytree + 매트릭스)
+export { initWbsPanelWithFancytree } from "./task-wbs/wbs-panel-init.js";
+
+// (구 하이라이트 모듈 호출 제거: Fancytree 전환 중에는 불필요)
+
+// ── 하이라이트 게이트(트래픽 조절) ──
+
+// 날짜/리드타임 유틸(필요 시 외부 사용)
+export * as DateHelpers from "./task-wbs/core/date-helpers.js";
+
+// ESC: 뷰어 상태 초기화 차단 + ESC로 Task/WBS 선택만 해제
+export { disableViewerEscReset } from "./task-wbs/helpers/viewer-esc.js";
+
+// (선택) WBS 로더(지연 프로바이더)도 퍼사드로 노출
+// ※ 당신의 실제 파일 위치에 맞춰 경로 유지하세요.
+export { buildWbsProviderLazy } from "./task-wbs/wbs/loader.js";
+
+// Box Selection (있으면 유지)
+export { BoxSelectionTool, enableBoxSelectionMode } from "/js/viewer/selection-tool.js";
+

@@ -1,41 +1,87 @@
+/* 패널2 좌/우 스플릿 기본 레이아웃 */
+#vertical-split-container {
+  display: flex;
+  min-height: 0;            /* flex 자식이 높이/스크롤 제대로 */
+}
+
+/* 좌/우 패널은 수축 가능해야 함(min-width:0 중요) */
+#task-list-panel,
+#wbs-group-list-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 각 패널의 스크롤 영역 */
+#task-list-content,
+#wbs-group-list-panel .panel-content {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+/* 내부 좌우 스플리터 */
+#resizer {
+  flex: 0 0 6px;            /* 클릭 가능한 두께 */
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+  position: relative;
+  z-index: 2;
+}
+#resizer::after {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0; bottom: 0;
+  width: 2px;
+  background: #e5e7eb;     /* 얇은 가이드 라인 */
+}
+
+/* Task 테이블이 컨테이너 폭에 맞게 수축되도록 */
+#treegrid {
+  width: 100%;
+  table-layout: fixed;
+}
+#treegrid th, #treegrid td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* (선택) colgroup 강제 폭을 누그러뜨리고 싶으면: */
+/* #treegrid col { width: auto !important; } */
+
+
 // /wwwroot/js/sidebar/task-wbs/layout/panel-resizer.js
-// 패널2(Tasks) 내부 좌/우 스플리터(#resizer) 전용 바인딩
-// 왼쪽: #task-list-panel  |  스플리터: #resizer  |  오른쪽: #wbs-group-list-panel
+// 패널2(Tasks) 내부 좌/우 스플리터(#resizer) 전용
 
 export function bindPanel2Resizer(viewer) {
   const container = document.getElementById('vertical-split-container');
-  const splitter  = document.getElementById('resizer'); // ★ 내부 스플리터
+  const splitter  = document.getElementById('resizer');
   const leftPane  = document.getElementById('task-list-panel');
   const rightPane = document.getElementById('wbs-group-list-panel');
-
   if (!container || !splitter || !leftPane || !rightPane) return;
 
-  // flex 레이아웃에서 left width 픽셀 고정 + right는 남은 공간
   leftPane.style.flex  = '0 0 auto';
   rightPane.style.flex = '1 1 auto';
 
-  const MIN_LEFT   = 320;  // 작업 리스트 최소폭
-  const MIN_RIGHT  = 360;  // WBS 최소폭
-  const LS_KEY     = 'panel2LeftPx';
+  const MIN_LEFT  = 320;
+  const MIN_RIGHT = 360;
+  const LS_KEY    = 'panel2LeftPx';
 
-  const getContainerWidth = () => container.clientWidth || container.getBoundingClientRect().width || 0;
-
+  const getW = () => container.clientWidth || container.getBoundingClientRect().width || 0;
   const clamp = (px) => {
-    const total = getContainerWidth();
+    const total = getW();
     const maxLeft = Math.max(MIN_LEFT, total - MIN_RIGHT);
     return Math.min(maxLeft, Math.max(MIN_LEFT, Math.round(px)));
   };
-
   const getLeft = () => {
     const n = parseInt((leftPane.style.width || '').replace('px','') || '0', 10);
-    return Number.isFinite(n) && n > 0 ? n : Math.round(getContainerWidth() * 0.5);
+    return Number.isFinite(n) && n > 0 ? n : Math.round(getW() * 0.48);
   };
-
   const apply = (px) => {
     const w = clamp(px);
     leftPane.style.width = w + 'px';
     try { localStorage.setItem(LS_KEY, String(w)); } catch {}
-    // 뷰어 좌표 어긋남 방지: 즉시 + 다음 프레임 두 번 갱신
     try {
       viewer?.resize?.();
       viewer?.impl?.invalidate?.(true, true, true);
@@ -46,14 +92,13 @@ export function bindPanel2Resizer(viewer) {
     } catch {}
   };
 
-  let dragging = false;
-  let startX = 0, startW = 0;
-
-  const getClientX = (e) => (e.touches?.[0]?.clientX ?? e.clientX ?? 0);
+  // Drag support
+  let dragging = false, startX = 0, startW = 0;
+  const cx = (e) => (e.touches?.[0]?.clientX ?? e.clientX ?? 0);
 
   const onDown = (e) => {
     dragging = true;
-    startX = getClientX(e);
+    startX = cx(e);
     startW = getLeft();
     document.body.classList.add('resizing-x');
     document.body.style.userSelect = 'none';
@@ -63,39 +108,84 @@ export function bindPanel2Resizer(viewer) {
     window.addEventListener('touchend', onUp, { once: true });
     e.preventDefault?.();
   };
-
   const onMove = (e) => {
     if (!dragging) return;
-    const dx = getClientX(e) - startX;
+    const dx = cx(e) - startX;
     apply(startW + dx);
     e.preventDefault?.();
   };
-
   const onUp = () => {
     dragging = false;
     document.body.classList.remove('resizing-x');
     document.body.style.userSelect = '';
     window.removeEventListener('mousemove', onMove);
     window.removeEventListener('touchmove', onMove);
-    // 최종 보정
-    apply(getLeft());
+    apply(getLeft()); // final clamp
   };
 
-  // 이벤트 연결 (중복 방지 위해 기존 리스너 제거 후 재연결하고 싶으면 splitter 교체 패턴 사용)
   splitter.addEventListener('mousedown', onDown);
   splitter.addEventListener('touchstart', onDown, { passive: true });
-  splitter.addEventListener('dblclick', () => {
-    const half = Math.round(getContainerWidth() * 0.5);
-    apply(half);
-  });
+  splitter.addEventListener('dblclick', () => apply(Math.round(getW() * 0.5)));
 
-  // 창 리사이즈 시 현재 폭 유지 범위 내 보정
-  window.addEventListener('resize', () => {
-    apply(getLeft());
-  });
+  // 창 또는 컨테이너 크기 변화에 반응(사이드바 드래그 포함)
+  const ro = new ResizeObserver(() => apply(getLeft()));
+  try { ro.observe(container); } catch {}
 
-  // 초기 상태: 저장값 복원 또는 컨테이너의 48%
+  // 좌측 사이드바 모듈이 커스텀 이벤트를 쏘면 즉시 반응
+  window.addEventListener('sidebar-width-changed', () => apply(getLeft()));
+
+  // 초기 복원
   const stored = parseInt(localStorage.getItem(LS_KEY) || '0', 10);
-  const initial = clamp(Number.isFinite(stored) && stored > 0 ? stored : Math.round(getContainerWidth() * 0.48));
+  const initial = clamp(Number.isFinite(stored) && stored > 0 ? stored : Math.round(getW() * 0.48));
   apply(initial);
 }
+
+
+
+// wwwroot/js/sidebar/sidebar-resizer.js
+const sidebar = document.getElementById("sidebar");
+const resizer = document.getElementById("sidebar-resizer");
+const preview = document.getElementById("preview");
+const minWidth = 220;
+const maxWidth = 750;
+
+function setSidebarWidth(px) {
+  sidebar.style.width = px + "px";
+  resizer.style.left = px + "px";
+  if (preview) preview.style.left = px + "px";
+
+  // ★ 변경: 사이드바 폭 변경 이벤트 브로드캐스트
+  try {
+    window.dispatchEvent(new CustomEvent('sidebar-width-changed', { detail: { width: px } }));
+  } catch {}
+}
+
+resizer.addEventListener("mousedown", function (e) {
+  e.preventDefault();
+  document.body.style.cursor = "ew-resize";
+
+  function onMouseMove(e2) {
+    let newWidth = e2.clientX;
+    if (newWidth < minWidth) newWidth = minWidth;
+    if (newWidth > maxWidth) newWidth = maxWidth;
+    setSidebarWidth(newWidth);
+  }
+
+  function onMouseUp() {
+    document.body.style.cursor = "";
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+  }
+
+  document.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mouseup", onMouseUp);
+});
+
+window.addEventListener("DOMContentLoaded", () => {
+  const sidebarRect = sidebar.getBoundingClientRect();
+  setSidebarWidth(sidebarRect.width);
+  // 초기 진입에서도 한 번 알려주기
+  try {
+    window.dispatchEvent(new CustomEvent('sidebar-width-changed', { detail: { width: sidebarRect.width } }));
+  } catch {}
+});

@@ -1,6 +1,4 @@
 highlight.js:4 [hec] wbs/highlight.js loaded
-endpoints.js:236  getCdnRedirectUrl is deprecated and will be removed soon
-endp.getCdnRedirectUrl @ endpoints.js:236
 WebGLRenderer.js:29 THREE.WebGLRenderer 71
 WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
 WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
@@ -15,31 +13,48 @@ GeometryList.js:344 Total geometry size: 22.579627990722656 MB
 GeometryList.js:345 Number of meshes: 6614
 GeometryList.js:346 Num Meshes on GPU: 6647
 GeometryList.js:347 Net GPU geom memory used: 75519924
-main.js:548 [WBS] roots: 5
+main.js:580 [WBS] roots: 5
 main.js:148 [persistTasksSnapshot] saved. count = 2
 main.js:276 [FA] fallback map ready (keys = 2391 )
 main.js:310 [FA] getCounts bridged
-main.js:576 [STEP 5] WBS fancytree init OK
-main.js:582 [STEP 6] panel2 resizer bound
-main.js:583 [STEP 1] Task panel OK
-main.js:584 [STEP 2] panel2-ready dispatched
-gantt-view.js:171 [gantt-view] google loaded
-main.js:348  Uncaught TypeError: Cannot read properties of undefined (reading 'total')
-    at countsForPath (main.js:348:20)
-    at repaintNode (main.js:367:18)
+main.js:608 [STEP 5] WBS fancytree init OK
+main.js:614 [STEP 6] panel2 resizer bound
+main.js:615 [STEP 1] Task panel OK
+main.js:616 [STEP 2] panel2-ready dispatched
+wbs-store.js:267  Uncaught ReferenceError: rebuildIndexFromVisibleTree is not defined
+    at Module.countAt (wbs-store.js:267:26)
+    at countsForPath (main.js:369:34)
+    at repaintNode (main.js:399:18)
     at j.visit (jquery.fancytree-all-deps.js:3931:11)
     at j.visit (jquery.fancytree-all-deps.js:3938:24)
-    at j.visit (jquery.fancytree-all-deps.js:3938:24)
-    at j.visit (jquery.fancytree-all-deps.js:3938:24)
-    at j.visit (jquery.fancytree-all-deps.js:3938:24)
-    at j.visit (jquery.fancytree-all-deps.js:3938:24)
-    at j.visit (jquery.fancytree-all-deps.js:3938:24)
     at I.visit (jquery.fancytree-all-deps.js:5320:25)
-window.__WBS_STORE__?.refreshWbsStore()
-  .then(()=>console.log('store ready?', window.__WBS_STORE__?.WbsStore?.isReady));
-VM1228:2 store ready? true
-Promise {<fulfilled>: undefined}
-window.__WBS_STORE__?.getOrderedDbIdsFromSelection({ includePartsel: true })
-  .then(r => console.log('dbIds:', r.orderedDbIds.length, r.orderedDbIds.slice(0,30)));
-VM1232:2 dbIds: 197 (30) [35486, 35487, 35488, 35489, 35490, 35491, 35493, 35494, 35495, 35496, 35498, 35500, 35502, 35504, 35505, 35506, 35507, 35508, 35460, 35461, 35462, 35463, 35464, 35465, 35467, 35469, 35471, 35473, 35474, 35475]
-Promise {<fulfilled>: undefined}
+    at repaintTree (main.js:408:8)
+    at step (main.js:417:5)
+countAt @ wbs-store.js:267
+countsForPath @ main.js:369
+repaintNode @ main.js:399
+visit @ jquery.fancytree-all-deps.js:3931
+visit @ jquery.fancytree-all-deps.js:3938
+visit @ jquery.fancytree-all-deps.js:5320
+repaintTree @ main.js:408
+step @ main.js:417
+gantt-view.js:171 [gantt-view] google loaded
+CustomViewerExtension.js:40 MyCustomViewerExtension이 언로드되었습니다.
+CustomViewerExtension.js:14 MyCustomViewerExtension이 로드되었습니다.
+CustomViewerExtension.js:53 툴바가 생성되었습니다. 사용자 정의를 시작합니다.
+CustomViewerExtension.js:207 툴바 커스터마이징 완료.
+WebGLRenderer.js:29 THREE.WebGLRenderer 71
+WebGLRenderer.js:229 WebGL Renderer: ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER (0x00002702) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGLRenderer.js:230 WebGL Vendor: Google Inc. (NVIDIA)
+GeometryList.js:344 Total geometry size: 22.579627990722656 MB
+GeometryList.js:345 Number of meshes: 6614
+GeometryList.js:346 Num Meshes on GPU: 6647
+GeometryList.js:347 Net GPU geom memory used: 75519924
+main.js:580 [WBS] roots: 5
+main.js:148 [persistTasksSnapshot] saved. count = 2
+main.js:276 [FA] fallback map ready (keys = 2391 )
+main.js:310 [FA] getCounts bridged
+main.js:608 [STEP 5] WBS fancytree init OK
+main.js:614 [STEP 6] panel2 resizer bound
+main.js:615 [STEP 1] Task panel OK
+main.js:616 [STEP 2] panel2-ready dispatched

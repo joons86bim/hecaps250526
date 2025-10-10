@@ -1,135 +1,52 @@
--export function countAt(pathArr){
--  if (!Array.isArray(pathArr)) return 0;
--  if (!WbsStore.isReady) rebuildIndexFromVisibleTree();
--  const SEP = "\u0001";
--  const key = pathArr.join(SEP);
--  const ids = WbsStore.pathKeyToDbIds.get(key);
--  return Array.isArray(ids) ? ids.length : 0;
--}
-+export function countAt(pathArr){
-+  if (!Array.isArray(pathArr)) return 0;
-+  // 아직 인덱스가 준비되지 않았으면 안전하게 0을 반환(참조 에러 방지)
-+  if (!WbsStore.isReady) return 0;
-+  const key = pathArr.join(SEP);
-+  const ids = WbsStore.pathKeyToDbIds.get(key);
-+  return Array.isArray(ids) ? ids.length : 0;
-+}
-
-
-// 외부 호환용(과거 코드에서 호출해도 에러 안 나게)
-export function rebuildIndexFromVisibleTree() {
-  // 이 스토어는 초기화 시 전체 인덱싱을 수행하므로 여기선 아무 것도 안 함
-  // 필요하면 initWbsStore({eager:'tree'|'provider'})를 다시 호출하세요.
-  return true;
-}
+-    click: function(event, data){
+-      const t = data.targetType; // expander | title | icon | checkbox
+-      if (t === "expander" || t === "checkbox") return; // 기본 동작 허용
+-      event.preventDefault();
+-      return false;
+-    },
++    click: function(event, data){
++      const t = data.targetType; // expander | title | icon | checkbox
++      // 눈알(eye-toggle)은 FancyTree 클릭차단 대상에서 제외 (위임 핸들러가 처리)
++      const isEye = event?.originalEvent?.target?.closest?.(".eye-toggle");
++      if (isEye) return;
++      if (t === "expander" || t === "checkbox") return; // 기본 동작 허용
++      event.preventDefault();
++      return false;
++    },
 
 
 
--async function ensureCountsForSubtree(provider, node){
-+async function ensureCountsForSubtree(provider, node, { noRender = false } = {}){
-  const key  = node?.data?.pathKey;
-  const path = node?.data?.__path || buildPathFromNode(node);
-  if (!key || !path) return;
+-  tree.$div.fancytree("option", "expand", function(_ev, data) {
+-    if (data.node?.expanded) setTimeout(() => { try { repaintTree(tree); } catch {} }, 0);
+-  });
++  const prevExpand = tree.options.expand;
++  tree.$div.fancytree("option", "expand", function(ev, data) {
++    // 기존 expand 핸들러 먼저 수행 (ensureCountsForSubtree 등 원래 로직 보존)
++    try { if (typeof prevExpand === "function") prevExpand.call(this, ev, data); } catch {}
++    // 셀 색칠은 추가로 보강
++    if (data.node?.expanded) {
++      setTimeout(() => { try { repaintTree(tree); } catch {} }, 0);
++    }
++  });
 
-  if (_subtreeBusy.has(key)) return; // 중복 실행 방지
-  _subtreeBusy.add(key);
 
-  try {
-    const keys = await collectAllPathKeys(provider, path);
-    const uniq = Array.from(new Set(keys.length ? keys : [key]));
 
-    if (uniq.length) {
-      await bulkEnsureForVisible(uniq);
-      uniq.forEach(k => computePathState(k));
-
-      const levels = new Map();
-      for (const k of uniq){
-        const c = getCounts(k);
-        if (c && sum3(c) > 0){
-          const d = keyDepth(k);
-          if (!levels.has(d)) levels.set(d, []);
-          levels.get(d).push(c);
-        }
-      }
-
-      let totals = { c: 0, t: 0, d: 0 };
-      if (levels.size){
-        const depths = Array.from(levels.keys()).sort((a,b)=>a-b);
-        const deepest = depths[depths.length - 1];
-        for (const raw of (levels.get(deepest) || [])) {
-          const disp = toDisplayCounts(raw);
-          addCounts(totals, disp);
-        }
-      }
-      node.data.__aggCounts = totals;
-    }
-
--    try { node.render(true); } catch {}
-+    // 여기서는 렌더하지 않음(noRender 옵션으로 제어)
-+    if (!noRender) {
-+      const tree = node.tree;
-+      // 콜스택을 벗어난 뒤 테이블 전체 1회 배치 렌더
+-    select: function(event, data){
+-      //선택 토글 후, 현재 노드 + 상위 경로만 재렌더해서 상태 클래스(wbs-*)를 즉시 복구
+-      setTimeout(() => {
+-        try { data.node.render(true);} catch {}
+-        try {
+-          const parents = data.node.getParentList(false, true) || [];
+-          parents.forEach(p => { try { p.render(true);} catch {}})
+-        } catch {}
+-      }, 0);
+-    }
++    select: function(event, data){
++      // 선택 변경 후 전체 테이블을 안전하게 한 번만 렌더
++      const tree = data.tree;
 +      setTimeout(() => { try { tree.render(true); } catch {} }, 0);
 +    }
-  } finally {
-    setTimeout(() => _subtreeBusy.delete(key), 50);
-  }
-}
 
-
--    loadChildren: async function(event, data){
--      try {
--        await ensureCountsForSubtree(provider, data.node);
--      } catch (e) {
--        console.warn("[WBS] loadChildren compute failed:", e);
--      }
--    },
-+    loadChildren: async function(event, data){
-+      try {
-+        // 계산만 하고(렌더 금지)
-+        await ensureCountsForSubtree(provider, data.node, { noRender: true });
-+      } catch (e) {
-+        console.warn("[WBS] loadChildren compute failed:", e);
-+      } finally {
-+        // 콜스택을 벗어난 뒤에 테이블 전체 렌더 1회
-+        const tree = data.tree;
-+        setTimeout(() => { try { tree.render(true); } catch {} }, 0);
-+      }
-+    },
-
-
--    expand: async function(event, data) {
--      try {
--        await ensureCountsForSubtree(provider, data.node);
--      } catch(e) {
--        console.warn("[WBS] expand compute failed:", e);
--      }
--    },
-+    expand: async function(event, data) {
-+      try {
-+        await ensureCountsForSubtree(provider, data.node, { noRender: true });
-+      } catch(e) {
-+        console.warn("[WBS] expand compute failed:", e);
-+      } finally {
-+        const tree = data.tree;
-+        setTimeout(() => { try { tree.render(true); } catch {} }, 0);
-+      }
-+    },
-
-
--          if (!node.data.__countsRequested && key) {
-+          if (!node.data.__countsRequested && key) {
-             node.data.__countsRequested = true;
--            ensureCountsForNode(node)
--              .then(() => { try { node.render(true); } catch {} })
--              .finally(() => { node.data.__countsRequested = false; });
-+            ensureCountsForNode(node)
-+              .then(() => {
-+                const tree = $.ui.fancytree.getTree("#wbs-tree");
-+                setTimeout(() => { try { tree.render(true); } catch {} }, 0);
-+              })
-+              .finally(() => { node.data.__countsRequested = false; });
-           }
 
 
 
